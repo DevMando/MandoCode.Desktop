@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/MandoCode/" />
+  <Folder Name="/MandoCode/src/">
+    <Project Path="MandoCode/src/MandoCode/MandoCode.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/MandoCode.Desktop/MandoCode.Desktop.csproj" />
+  </Folder>
+</Solution>
