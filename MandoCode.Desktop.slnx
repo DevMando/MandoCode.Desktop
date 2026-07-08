@@ -1,9 +1,18 @@
 <Solution>
+  <Configurations>
+    <BuildType Name="Debug" />
+    <BuildType Name="Release" />
+    <Platform Name="x64" />
+  </Configurations>
   <Folder Name="/MandoCode/" />
   <Folder Name="/MandoCode/src/">
-    <Project Path="MandoCode/src/MandoCode/MandoCode.csproj" />
+    <Project Path="MandoCode/src/MandoCode/MandoCode.csproj">
+      <Platform Solution="*|x64" Project="AnyCPU" />
+    </Project>
   </Folder>
   <Folder Name="/src/">
-    <Project Path="src/MandoCode.Desktop/MandoCode.Desktop.csproj" />
+    <Project Path="src/MandoCode.Desktop/MandoCode.Desktop.csproj">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
   </Folder>
 </Solution>
