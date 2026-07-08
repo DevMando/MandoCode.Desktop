@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <RootNamespace>MandoCode.Desktop</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Platforms>x64</Platforms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <UseWinUI>true</UseWinUI>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Version>0.1.0</Version>
+    <Authors>Armando Fernandez (DevMando)</Authors>
+    <Description>MandoCode Desktop — the MandoCode AI coding agent with a native WinUI 3 interface.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Manifest Include="$(ApplicationManifest)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.2.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The entire MandoCode harness — AI service, planner, plugins, MCP, skills,
+         config, approvals, token tracking — reused verbatim from the CLI project,
+         pulled in as a git submodule pinned at the repo root (/MandoCode).
+         Only the user interface is replaced (WinUI 3 instead of RazorConsole).
+         Clone recursively, or run "git submodule update" with the init flag. -->
+    <ProjectReference Include="..\..\MandoCode\src\MandoCode\MandoCode.csproj" />
+  </ItemGroup>
+
+</Project>

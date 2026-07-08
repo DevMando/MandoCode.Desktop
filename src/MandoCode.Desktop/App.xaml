@@ -1,0 +1,25 @@
+<Application
+    x:Class="MandoCode.Desktop.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <!-- MandoCode palette (mirrors the terminal theme: purple spinner,
+                 gold prompt echo, sky-blue accents, green success) -->
+            <Color x:Key="MandoAccentColor">#C864FF</Color>
+            <Color x:Key="MandoGoldColor">#FFC850</Color>
+            <Color x:Key="MandoSkyColor">#38B6FF</Color>
+            <Color x:Key="MandoGreenColor">#4EC94E</Color>
+            <Color x:Key="MandoRedColor">#E05252</Color>
+            <SolidColorBrush x:Key="MandoAccentBrush" Color="{StaticResource MandoAccentColor}" />
+            <SolidColorBrush x:Key="MandoGoldBrush" Color="{StaticResource MandoGoldColor}" />
+            <SolidColorBrush x:Key="MandoSkyBrush" Color="{StaticResource MandoSkyColor}" />
+            <SolidColorBrush x:Key="MandoGreenBrush" Color="{StaticResource MandoGreenColor}" />
+            <SolidColorBrush x:Key="MandoRedBrush" Color="{StaticResource MandoRedColor}" />
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

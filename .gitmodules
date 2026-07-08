@@ -1,0 +1,3 @@
+[submodule "MandoCode"]
+	path = MandoCode
+	url = https://github.com/DevMando/MandoCode.git

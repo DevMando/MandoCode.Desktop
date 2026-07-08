@@ -1,0 +1,501 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="MandoCode.Desktop.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:MandoCode.Desktop">
+
+    <Grid x:Name="Root" KeyDown="Root_KeyDown">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="48"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- ======= Sidebar rail ======= -->
+        <StackPanel Grid.Column="0" Background="{ThemeResource LayerFillColorDefaultBrush}"
+                    Padding="4,12" Spacing="6">
+            <Button x:Name="NavChat" Click="NavChat_Click" Padding="10,8" Background="Transparent"
+                    BorderThickness="0" HorizontalAlignment="Stretch"
+                    ToolTipService.ToolTip="Chat">
+                <FontIcon x:Name="NavChatIcon" Glyph="&#xE8BD;" FontSize="16"/>
+            </Button>
+            <Button x:Name="NavSettings" Click="NavSettings_Click" Padding="10,8" Background="Transparent"
+                    BorderThickness="0" HorizontalAlignment="Stretch"
+                    ToolTipService.ToolTip="Settings">
+                <FontIcon x:Name="NavSettingsIcon" Glyph="&#xE713;" FontSize="16"/>
+            </Button>
+            <Button x:Name="NavMcp" Click="NavMcp_Click" Padding="10,8" Background="Transparent"
+                    BorderThickness="0" HorizontalAlignment="Stretch"
+                    ToolTipService.ToolTip="MCP servers">
+                <FontIcon x:Name="NavMcpIcon" Glyph="&#xE71B;" FontSize="16"/>
+            </Button>
+        </StackPanel>
+
+        <!-- ======= Content column ======= -->
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <!-- Shared header / status bar -->
+            <Grid Grid.Row="0" Padding="16,10,16,10" Background="{ThemeResource LayerFillColorDefaultBrush}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                    <TextBlock Text="MandoCode" FontSize="18" FontWeight="Bold"
+                               Foreground="{StaticResource MandoAccentBrush}"/>
+                    <Ellipse x:Name="ConnectionDot" Width="10" Height="10" Fill="Gray" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="ModelText" Text="" VerticalAlignment="Center"
+                               Foreground="{StaticResource MandoSkyBrush}" FontSize="13"/>
+                    <TextBlock x:Name="TokenText" Text="" VerticalAlignment="Center"
+                               Opacity="0.6" FontSize="12"/>
+                </StackPanel>
+
+                <TextBlock x:Name="ProjectRootText" Grid.Column="1" Text="" VerticalAlignment="Center"
+                           HorizontalAlignment="Center" Opacity="0.6" FontSize="12"
+                           TextTrimming="CharacterEllipsis" Margin="16,0"/>
+
+                <Button x:Name="OpenFolderButton" Grid.Column="2" Click="OpenFolderButton_Click" Padding="8,5"
+                        ToolTipService.ToolTip="Open project folder">
+                    <FontIcon Glyph="&#xE8B7;" FontSize="15"/>
+                </Button>
+            </Grid>
+
+            <!-- ======= Page host ======= -->
+            <Grid Grid.Row="1">
+
+                <!-- ============ CHAT PAGE ============ -->
+                <Grid x:Name="ChatPage">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <WebView2 x:Name="TranscriptView" Grid.Row="0" DefaultBackgroundColor="#16121F"/>
+
+                    <StackPanel x:Name="PlanProgressPanel" Grid.Row="1" Visibility="Collapsed" Padding="16,6,16,0">
+                        <TextBlock x:Name="PlanProgressText" FontSize="12" Opacity="0.7" Margin="0,0,0,2"/>
+                        <ProgressBar x:Name="PlanProgressBar" Minimum="0" Maximum="100" Height="4"
+                                     Foreground="{StaticResource MandoAccentBrush}"/>
+                    </StackPanel>
+
+                    <StackPanel x:Name="BusyPanel" Grid.Row="2" Orientation="Horizontal" Spacing="10"
+                                Padding="16,8,16,0" Visibility="Collapsed">
+                        <ProgressRing x:Name="BusyRing" IsActive="False" Width="18" Height="18"
+                                      Foreground="{StaticResource MandoAccentBrush}"/>
+                        <TextBlock x:Name="BusyText" Text="Thinking..." VerticalAlignment="Center"
+                                   Opacity="0.75" FontSize="13"/>
+                        <TextBlock Text="(Esc to cancel)" VerticalAlignment="Center" Opacity="0.4" FontSize="12"/>
+                    </StackPanel>
+
+                    <Grid Grid.Row="3" Padding="16,10,16,14" ColumnSpacing="8">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <Border x:Name="SuggestionsPanel" Grid.Row="0" Grid.ColumnSpan="2" Visibility="Collapsed"
+                                Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
+                                BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}" BorderThickness="1"
+                                CornerRadius="8" Margin="0,0,0,8" MaxHeight="220">
+                            <ListView x:Name="SuggestionsList" SelectionMode="Single"
+                                      IsItemClickEnabled="True" ItemClick="SuggestionsList_ItemClick">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="local:CommandSuggestion">
+                                        <StackPanel Orientation="Horizontal" Spacing="12" Padding="0,2">
+                                            <TextBlock Text="{x:Bind Command}" FontFamily="Cascadia Code,Consolas"
+                                                       Foreground="{StaticResource MandoSkyBrush}" MinWidth="140"/>
+                                            <TextBlock Text="{x:Bind Description}" Opacity="0.6" FontSize="12"
+                                                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </Border>
+
+                        <TextBox x:Name="InputBox" Grid.Row="1" Grid.Column="0"
+                                 PlaceholderText="Ask MandoCode anything… (/ for commands, @file to attach, !cmd for shell)"
+                                 AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="140"
+                                 PreviewKeyDown="InputBox_PreviewKeyDown" TextChanged="InputBox_TextChanged"/>
+
+                        <Button x:Name="SendButton" Grid.Row="1" Grid.Column="1" Click="SendButton_Click"
+                                VerticalAlignment="Stretch" MinWidth="88"
+                                Style="{StaticResource AccentButtonStyle}">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon x:Name="SendIcon" Glyph="&#xE724;" FontSize="14"/>
+                                <TextBlock x:Name="SendLabel" Text="Send"/>
+                            </StackPanel>
+                        </Button>
+                    </Grid>
+                </Grid>
+
+                <!-- ============ SETTINGS PAGE ============ -->
+                <ScrollViewer x:Name="SettingsPage" Visibility="Collapsed" Padding="24,16,24,24">
+                    <StackPanel Spacing="14" MaxWidth="680" HorizontalAlignment="Left">
+                        <TextBlock Text="Settings" FontSize="22" FontWeight="SemiBold"
+                                   Foreground="{StaticResource MandoAccentBrush}"/>
+                        <TextBlock Text="Every change is validated and applied by the same engine as the CLI's /config set — shared config file, zero drift."
+                                   Opacity="0.6" FontSize="12" TextWrapping="Wrap"/>
+
+                        <!-- Connection -->
+                        <TextBlock Text="Connection" FontSize="16" FontWeight="SemiBold"
+                                   Foreground="{StaticResource MandoSkyBrush}" Margin="0,10,0,0"/>
+                        <TextBlock Text="Ollama endpoint" FontSize="13" Opacity="0.8"/>
+                        <TextBox x:Name="EndpointBox" PlaceholderText="http://localhost:11434"/>
+                        <TextBlock Text="Model" FontSize="13" Opacity="0.8"/>
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <ComboBox x:Name="ModelCombo" IsEditable="True" HorizontalAlignment="Stretch"
+                                      PlaceholderText="e.g. qwen2.5-coder:14b"/>
+                            <Button Grid.Column="1" Click="RefreshModels_Click"
+                                    ToolTipService.ToolTip="Fetch pulled models">
+                                <FontIcon Glyph="&#xE72C;" FontSize="14"/>
+                            </Button>
+                        </Grid>
+                        <Button Content="Save &amp; Reconnect" Click="SettingsSave_Click"
+                                Style="{StaticResource AccentButtonStyle}"/>
+                        <NumberBox x:Name="S_ContextLength" Header="Context window (tokens, 0 = Ollama default; applied when MandoCode starts the daemon)"
+                                   Tag="contextLength" SpinButtonPlacementMode="Compact" SmallChange="2048"
+                                   ValueChanged="Setting_NumberChanged" HorizontalAlignment="Stretch"/>
+
+                        <!-- Generation -->
+                        <TextBlock Text="Generation" FontSize="16" FontWeight="SemiBold"
+                                   Foreground="{StaticResource MandoSkyBrush}" Margin="0,10,0,0"/>
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Slider x:Name="S_Temperature" Header="Temperature" Minimum="0" Maximum="1"
+                                    StepFrequency="0.05" ValueChanged="Temperature_Changed"/>
+                            <TextBlock x:Name="S_TemperatureLabel" Grid.Column="1" VerticalAlignment="Bottom"
+                                       Margin="0,0,0,8" Opacity="0.7" FontSize="13" MinWidth="36"/>
+                        </Grid>
+                        <NumberBox x:Name="S_MaxTokens" Header="Max response tokens" Tag="maxTokens"
+                                   SpinButtonPlacementMode="Compact" SmallChange="1024"
+                                   ValueChanged="Setting_NumberChanged" HorizontalAlignment="Stretch"/>
+                        <ComboBox x:Name="S_Streaming" Header="Response streaming" SelectionChanged="Streaming_Changed"
+                                  HorizontalAlignment="Stretch">
+                            <x:String>all</x:String>
+                            <x:String>cloud</x:String>
+                            <x:String>off</x:String>
+                        </ComboBox>
+
+                        <!-- Behavior -->
+                        <TextBlock Text="Behavior" FontSize="16" FontWeight="SemiBold"
+                                   Foreground="{StaticResource MandoSkyBrush}" Margin="0,10,0,0"/>
+                        <ToggleSwitch x:Name="S_TaskPlanning" Header="Task planning (propose_plan for multi-step requests)"
+                                      Tag="taskPlanning" Toggled="Setting_Toggled"/>
+                        <ToggleSwitch x:Name="S_DiffApprovals" Header="Diff approvals (review writes, deletes, and commands)"
+                                      Tag="diffApprovals" Toggled="Setting_Toggled"/>
+                        <ToggleSwitch x:Name="S_AutoContinue" Header="Auto-continue past tool budget limits"
+                                      Tag="autoContinue" Toggled="Setting_Toggled"/>
+                        <NumberBox x:Name="S_MaxContinuations" Header="Max auto-continuations per request" Tag="maxContinuations"
+                                   SpinButtonPlacementMode="Compact" SmallChange="1"
+                                   ValueChanged="Setting_NumberChanged" HorizontalAlignment="Stretch"/>
+
+                        <!-- Limits -->
+                        <TextBlock Text="Limits" FontSize="16" FontWeight="SemiBold"
+                                   Foreground="{StaticResource MandoSkyBrush}" Margin="0,10,0,0"/>
+                        <NumberBox x:Name="S_RequestTimeout" Header="Per-request timeout (minutes)" Tag="timeout"
+                                   SpinButtonPlacementMode="Compact" SmallChange="1"
+                                   ValueChanged="Setting_NumberChanged" HorizontalAlignment="Stretch"/>
+                        <NumberBox x:Name="S_StallTimeout" Header="Stall watchdog per model call (seconds)" Tag="modelResponseTimeout"
+                                   SpinButtonPlacementMode="Compact" SmallChange="30"
+                                   ValueChanged="Setting_NumberChanged" HorizontalAlignment="Stretch"/>
+                        <NumberBox x:Name="S_ToolBudget" Header="Tool-result character budget per request" Tag="toolBudget"
+                                   SpinButtonPlacementMode="Compact" SmallChange="50000"
+                                   ValueChanged="Setting_NumberChanged" HorizontalAlignment="Stretch"/>
+                        <NumberBox x:Name="S_RenderTimeout" Header="Markdown render timeout (seconds)" Tag="renderTimeout"
+                                   SpinButtonPlacementMode="Compact" SmallChange="10"
+                                   ValueChanged="Setting_NumberChanged" HorizontalAlignment="Stretch"/>
+
+                        <!-- Integrations -->
+                        <TextBlock Text="Integrations" FontSize="16" FontWeight="SemiBold"
+                                   Foreground="{StaticResource MandoSkyBrush}" Margin="0,10,0,0"/>
+                        <ToggleSwitch x:Name="S_WebSearch" Header="Web search" Tag="webSearch" Toggled="Setting_Toggled"/>
+                        <TextBlock Text="Tavily API key (optional — more reliable web search; free at app.tavily.com)"
+                                   FontSize="13" Opacity="0.8" TextWrapping="Wrap"/>
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <PasswordBox x:Name="S_TavilyKey" PlaceholderText="tvly-…"/>
+                            <Button Grid.Column="1" Content="Save key" Click="TavilySave_Click"/>
+                        </Grid>
+                        <ToggleSwitch x:Name="S_Mcp" Header="MCP server integration" Tag="mcp" Toggled="Setting_Toggled"/>
+
+                        <TextBlock x:Name="SettingsStatus" FontSize="12" Opacity="0.75" TextWrapping="Wrap"
+                                   Margin="0,10,0,0" Foreground="{StaticResource MandoGoldBrush}"/>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- ============ MCP PAGE ============ -->
+                <Grid x:Name="McpPage" Visibility="Collapsed" Padding="24,16,24,24" RowSpacing="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Text="MCP Servers" FontSize="22" FontWeight="SemiBold"
+                               Foreground="{StaticResource MandoAccentBrush}"/>
+                    <TextBlock Grid.Row="1" x:Name="McpPageStatus"
+                               Text="Model Context Protocol servers give the AI extra tools. Add and manage them here — same config as the CLI."
+                               Opacity="0.6" FontSize="12" TextWrapping="Wrap"/>
+
+                    <ListView Grid.Row="2" x:Name="McpList" SelectionMode="Single"
+                              SelectionChanged="McpList_SelectionChanged" DoubleTapped="McpList_DoubleTapped"
+                              BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}" BorderThickness="1"
+                              CornerRadius="8">
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="local:McpRow">
+                                <Grid Padding="4,8" ColumnSpacing="14">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="200"/>
+                                        <ColumnDefinition Width="60"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{x:Bind Name}" FontWeight="SemiBold"
+                                               FontFamily="Cascadia Code,Consolas" FontSize="13"/>
+                                    <TextBlock Grid.Column="1" Text="{x:Bind Transport}" Opacity="0.6" FontSize="12"
+                                               VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="2" Text="{x:Bind Status}" Foreground="{x:Bind StatusBrush}"
+                                               FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+
+                    <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="8">
+                        <Button Click="McpAdd_Click" Style="{StaticResource AccentButtonStyle}"
+                                ToolTipService.ToolTip="Add a new MCP server">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE710;" FontSize="13"/>
+                                <TextBlock Text="Add MCP Server"/>
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="McpEditButton" Click="McpEdit_Click" IsEnabled="False"
+                                ToolTipService.ToolTip="Edit the selected server (or double-click a row)">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE70F;" FontSize="13"/>
+                                <TextBlock Text="Edit"/>
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="McpRemoveButton" Click="McpRemove_Click" IsEnabled="False"
+                                ToolTipService.ToolTip="Remove the selected server from config">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE74D;" FontSize="13"/>
+                                <TextBlock Text="Remove"/>
+                            </StackPanel>
+                        </Button>
+                        <Button Click="McpReload_Click"
+                                ToolTipService.ToolTip="Stop and restart every MCP server process/connection, then re-register their tools with the model. Use when a server is stuck or its tools changed.">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE895;" FontSize="13"/>
+                                <TextBlock Text="Restart Servers"/>
+                            </StackPanel>
+                        </Button>
+                        <Button Click="McpRefresh_Click"
+                                ToolTipService.ToolTip="Refresh this status list only — doesn't touch the servers">
+                            <FontIcon Glyph="&#xE72C;" FontSize="14"/>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+            </Grid>
+        </Grid>
+
+        <!-- ======= MCP server editor modal ======= -->
+        <Grid x:Name="McpEditorOverlay" Grid.ColumnSpan="2" Visibility="Collapsed"
+              Background="#B0000000">
+            <Border Width="560" MaxHeight="700" Padding="24"
+                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                    BorderBrush="{StaticResource MandoAccentBrush}" BorderThickness="1"
+                    CornerRadius="12">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Spacing="12">
+                        <TextBlock x:Name="McpEditorTitle" Text="Add MCP server" FontSize="18"
+                                   FontWeight="SemiBold" Foreground="{StaticResource MandoAccentBrush}"/>
+
+                        <TextBlock Text="Name" FontSize="13" Opacity="0.8"/>
+                        <TextBox x:Name="M_Name" PlaceholderText="short identifier, no spaces (e.g. solana)"/>
+
+                        <TextBlock Text="Transport" FontSize="13" Opacity="0.8"/>
+                        <ComboBox x:Name="M_Transport" HorizontalAlignment="Stretch"
+                                  SelectionChanged="M_Transport_SelectionChanged">
+                            <x:String>stdio (local process)</x:String>
+                            <x:String>http (remote server)</x:String>
+                        </ComboBox>
+
+                        <StackPanel x:Name="M_StdioPanel" Spacing="12">
+                            <TextBlock Text="Command" FontSize="13" Opacity="0.8"/>
+                            <TextBox x:Name="M_Command" PlaceholderText="npx, uvx, or a binary path"/>
+                            <TextBlock Text="Arguments (space-separated; quote paths with spaces)" FontSize="13" Opacity="0.8"/>
+                            <TextBox x:Name="M_Args" PlaceholderText="-y @scope/server-foo"
+                                     FontFamily="Cascadia Code,Consolas"/>
+                            <TextBlock Text="Environment variables (one KEY=value per line)" FontSize="13" Opacity="0.8"/>
+                            <TextBox x:Name="M_Env" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="64" MaxHeight="120"
+                                     PlaceholderText="API_KEY=abc123" FontFamily="Cascadia Code,Consolas"/>
+                        </StackPanel>
+
+                        <StackPanel x:Name="M_HttpPanel" Spacing="12" Visibility="Collapsed">
+                            <TextBlock Text="URL" FontSize="13" Opacity="0.8"/>
+                            <TextBox x:Name="M_Url" PlaceholderText="https://mcp.example.com/mcp"/>
+                            <TextBlock Text="Headers (one KEY=value per line, e.g. Authorization)" FontSize="13" Opacity="0.8"/>
+                            <TextBox x:Name="M_Headers" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="64" MaxHeight="120"
+                                     PlaceholderText="Authorization=Bearer …" FontFamily="Cascadia Code,Consolas"/>
+                        </StackPanel>
+
+                        <ToggleSwitch x:Name="M_Disabled" Header="Disabled (keep configured, don't connect)"/>
+
+                        <!-- One status surface for the whole modal: validation errors (red),
+                             test-in-progress (blue + spinner), test results (green + tool chips). -->
+                        <InfoBar x:Name="M_StatusBar" IsOpen="False" IsClosable="True">
+                            <InfoBar.Content>
+                                <StackPanel Spacing="8" Margin="0,0,0,10">
+                                    <ProgressRing x:Name="M_TestSpin" IsActive="False" Width="16" Height="16"
+                                                  Visibility="Collapsed" HorizontalAlignment="Left"/>
+                                    <!-- Read-only data grid: header row + fixed-column ListView
+                                         (WinUI 3 has no built-in DataGrid; this is the native pattern). -->
+                                    <Border x:Name="M_TestToolsTable" Visibility="Collapsed"
+                                            BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
+                                            BorderThickness="1" CornerRadius="8" Margin="0,2,0,0">
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="*"/>
+                                            </Grid.RowDefinitions>
+                                            <Grid Padding="16,8,12,8" ColumnSpacing="14"
+                                                  Background="{ThemeResource LayerFillColorAltBrush}">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="210"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="Tool" FontWeight="SemiBold" FontSize="12" Opacity="0.8"/>
+                                                <TextBlock Grid.Column="1" Text="Description" FontWeight="SemiBold"
+                                                           FontSize="12" Opacity="0.8"/>
+                                            </Grid>
+                                            <ListView Grid.Row="1" x:Name="M_TestTools" SelectionMode="None"
+                                                      MaxHeight="220" ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                                <ListView.ItemTemplate>
+                                                    <DataTemplate x:DataType="local:ToolChip">
+                                                        <Grid Padding="0,6" ColumnSpacing="14">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="210"/>
+                                                                <ColumnDefinition Width="*"/>
+                                                            </Grid.ColumnDefinitions>
+                                                            <TextBlock Text="{x:Bind Name}" FontSize="12"
+                                                                       FontFamily="Cascadia Code,Consolas"
+                                                                       Foreground="{StaticResource MandoSkyBrush}"
+                                                                       TextWrapping="Wrap"/>
+                                                            <TextBlock Grid.Column="1" Text="{x:Bind Description}"
+                                                                       FontSize="12" Opacity="0.7" TextWrapping="Wrap"/>
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ListView.ItemTemplate>
+                                            </ListView>
+                                        </Grid>
+                                    </Border>
+                                </StackPanel>
+                            </InfoBar.Content>
+                        </InfoBar>
+
+                        <Grid>
+                            <Button x:Name="McpEditorTestButton" Click="McpEditorTest_Click"
+                                    HorizontalAlignment="Left"
+                                    ToolTipService.ToolTip="Try connecting with these values — nothing is saved, running servers aren't touched">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon Glyph="&#xE768;" FontSize="13"/>
+                                    <TextBlock Text="Test"/>
+                                </StackPanel>
+                            </Button>
+                            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                                <Button Content="Cancel" Click="McpEditorCancel_Click"/>
+                                <Button x:Name="McpEditorSaveButton" Content="Save &amp; Connect"
+                                        Click="McpEditorSave_Click" Style="{StaticResource AccentButtonStyle}"/>
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+        </Grid>
+
+        <!-- ======= Approval overlay (spans rail + content) ======= -->
+        <Grid x:Name="ApprovalOverlay" Grid.ColumnSpan="2" Visibility="Collapsed"
+              Background="#B0000000">
+            <Border MaxWidth="860" MaxHeight="640" Margin="24" Padding="20"
+                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                    BorderBrush="{StaticResource MandoAccentBrush}" BorderThickness="1"
+                    CornerRadius="12">
+                <Grid RowSpacing="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock x:Name="ApprovalTitle" Grid.Row="0" FontSize="16" FontWeight="SemiBold"
+                               Foreground="{StaticResource MandoSkyBrush}" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="ApprovalSubtitle" Grid.Row="1" FontSize="13"
+                               FontFamily="Cascadia Code,Consolas" Opacity="0.8"
+                               TextWrapping="Wrap" Visibility="Collapsed"/>
+                    <TextBlock x:Name="ApprovalDetail" Grid.Row="2" FontSize="13" Opacity="0.7"
+                               TextWrapping="Wrap" Visibility="Collapsed"/>
+
+                    <ScrollViewer x:Name="ApprovalBodyScroll" Grid.Row="3" Visibility="Collapsed"
+                                  HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
+                                  Background="#201A2E" CornerRadius="8" Padding="10" MaxHeight="320">
+                        <ItemsControl x:Name="ApprovalDiffList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="local:DiffLineVm">
+                                    <TextBlock Text="{x:Bind Text}" Foreground="{x:Bind Brush}"
+                                               FontFamily="Cascadia Code,Cascadia Mono,Consolas"
+                                               FontSize="13"/>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+
+                    <StackPanel Grid.Row="4" Spacing="8">
+                        <ScrollViewer MaxHeight="300" VerticalScrollBarVisibility="Auto">
+                            <StackPanel x:Name="ApprovalButtons" Spacing="6"/>
+                        </ScrollViewer>
+                        <StackPanel x:Name="InstructionPanel" Visibility="Collapsed" Spacing="8">
+                            <TextBlock x:Name="InstructionPrompt" FontSize="13" Opacity="0.8"
+                                       TextWrapping="Wrap"/>
+                            <TextBox x:Name="InstructionBox" AcceptsReturn="False"
+                                     KeyDown="InstructionBox_KeyDown"
+                                     PlaceholderText="Type your answer and press Enter"/>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="Submit" Click="InstructionSubmit_Click"
+                                        Style="{StaticResource AccentButtonStyle}"/>
+                                <Button x:Name="InstructionCancelButton" Content="Cancel"
+                                        Click="InstructionCancel_Click" Visibility="Collapsed"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>

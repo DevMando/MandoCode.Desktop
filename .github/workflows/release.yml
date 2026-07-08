@@ -1,0 +1,39 @@
+# Release pipeline: push a tag like v0.2.0 and this publishes a self-contained
+# win-x64 zip to a GitHub Release. That release is what the app's built-in
+# update checker (UiUpdateCheckService) discovers — older installs start
+# showing the "new version available" notice within 24 hours.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout (with harness submodule)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Publish (self-contained win-x64)
+        run: dotnet publish src/MandoCode.Desktop/MandoCode.Desktop.csproj -c Release -r win-x64 --self-contained -o publish
+
+      - name: Zip
+        shell: pwsh
+        run: Compress-Archive -Path publish\* -DestinationPath "MandoCode.Desktop-${{ github.ref_name }}-win-x64.zip"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: MandoCode.Desktop-${{ github.ref_name }}-win-x64.zip
+          generate_release_notes: true

@@ -1,0 +1,1096 @@
+using System.Collections.ObjectModel;
+using System.Text.Json;
+using MandoCode.Models;
+using MandoCode.Desktop.Services;
+using MandoCode.Desktop.ViewModels;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.UI;
+using Microsoft.UI.Dispatching;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
+using Windows.ApplicationModel.DataTransfer;
+using Windows.System;
+
+namespace MandoCode.Desktop;
+
+/// <summary>Row model for the slash-command suggestions list.</summary>
+public sealed class CommandSuggestion
+{
+    public string Command { get; init; } = "";
+    public string Description { get; init; } = "";
+}
+
+/// <summary>Row model for diff lines shown in the approval overlay.</summary>
+public sealed class DiffLineVm
+{
+    public string Text { get; init; } = "";
+    public SolidColorBrush Brush { get; init; } = new(Colors.Gray);
+}
+
+/// <summary>Row model for the MCP servers page.</summary>
+public sealed class McpRow
+{
+    public string Name { get; init; } = "";
+    public string Transport { get; init; } = "";
+    public string Status { get; init; } = "";
+    public SolidColorBrush StatusBrush { get; init; } = new(Colors.Gray);
+}
+
+/// <summary>Chip model for the MCP editor's tool preview (test results).</summary>
+public sealed class ToolChip
+{
+    public string Name { get; init; } = "";
+    public string Description { get; init; } = "";
+}
+
+public sealed partial class MainWindow : Window, IApprovalUi
+{
+    private readonly ChatController _controller;
+    private readonly TranscriptWriter _transcript;
+    private readonly TranscriptHtmlBuilder _html;
+    private readonly BusyStateService _busy;
+    private readonly WinUiApprovalService _approvals;
+    private readonly MandoCode.Services.ProjectRootAccessor _projectRoot;
+    private readonly Microsoft.UI.Dispatching.DispatcherQueue _dispatcher;
+
+    private readonly Queue<string> _pendingHtml = new();
+    private bool _webViewReady;
+
+    private TaskCompletionSource<string>? _approvalTcs;
+    private TaskCompletionSource<string>? _instructionTcs;
+
+    private readonly ObservableCollection<CommandSuggestion> _suggestions = new();
+    private readonly MandoCode.Services.FileAutocompleteProvider _fileProvider;
+
+    private enum SuggestMode { None, Command, File }
+    private SuggestMode _suggestMode = SuggestMode.None;
+    private int _tokenStart;   // index of the '@' (File mode) — replaced on accept
+    private int _tokenEnd;     // caret position when suggestions were computed
+
+    public MainWindow()
+    {
+        InitializeComponent();
+        Title = "MandoCode Desktop";
+
+        _dispatcher = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+
+        var services = App.Services;
+        _controller = services.GetRequiredService<ChatController>();
+        _transcript = services.GetRequiredService<TranscriptWriter>();
+        _html = services.GetRequiredService<TranscriptHtmlBuilder>();
+        _busy = services.GetRequiredService<BusyStateService>();
+        _approvals = services.GetRequiredService<WinUiApprovalService>();
+        _projectRoot = services.GetRequiredService<MandoCode.Services.ProjectRootAccessor>();
+        _fileProvider = services.GetRequiredService<MandoCode.Services.FileAutocompleteProvider>();
+
+        _approvals.Ui = this;
+        SuggestionsList.ItemsSource = _suggestions;
+
+        // Harness events → UI thread
+        _transcript.BlockAdded += html => OnUi(() => AppendHtml(html));
+        _transcript.Cleared += () => OnUi(ClearTranscript);
+        _busy.Changed += (busy, activity) => OnUi(() => UpdateBusy(busy, activity));
+        _controller.StateChanged += () => OnUi(UpdateStatusBar);
+        _controller.PlanProgressChanged += (done, total, active) => OnUi(() => UpdatePlanProgress(done, total, active));
+        _controller.SetupNeeded += () => OnUi(() => SwitchPage("settings"));
+        _controller.McpEditorRequested += serverName => OnUi(() =>
+        {
+            SwitchPage("mcp");
+            OpenMcpEditor(serverName);
+        });
+        _controller.ClipboardCopyRequested += text => OnUi(() => CopyToClipboard(text));
+        _controller.ExitRequested += () => OnUi(Close);
+
+        UpdateStatusBar();
+        SwitchPage("chat");
+
+        // Size the window; defer WebView2 + harness init until the tree is loaded.
+        AppWindow.Resize(new Windows.Graphics.SizeInt32(1180, 840));
+        Root.Loaded += Root_Loaded;
+    }
+
+    private bool _initialized;
+
+    private void Root_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (_initialized) return;
+        _initialized = true;
+        RootLoadedAsync();
+    }
+
+    private void OnUi(Action action)
+    {
+        if (_dispatcher.HasThreadAccess) action();
+        else _dispatcher.TryEnqueue(() => action());
+    }
+
+    private async void RootLoadedAsync()
+    {
+        try
+        {
+            await TranscriptView.EnsureCoreWebView2Async();
+            TranscriptView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = true;
+            TranscriptView.CoreWebView2.Settings.AreDevToolsEnabled = false;
+            TranscriptView.CoreWebView2.NavigationCompleted += (_, _) =>
+            {
+                _webViewReady = true;
+                while (_pendingHtml.Count > 0) AppendHtml(_pendingHtml.Dequeue());
+            };
+
+            // The WebView hosts only the transcript document. Any link click (update
+            // notice, markdown links in responses) opens in the default browser instead
+            // of navigating the transcript away.
+            TranscriptView.CoreWebView2.NavigationStarting += (_, e) =>
+            {
+                if (e.Uri.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                    e.Uri.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                {
+                    e.Cancel = true;
+                    OpenInBrowser(e.Uri);
+                }
+            };
+            TranscriptView.CoreWebView2.NewWindowRequested += (_, e) =>
+            {
+                e.Handled = true;
+                OpenInBrowser(e.Uri);
+            };
+            TranscriptView.CoreWebView2.NavigateToString(TranscriptHtmlBuilder.BaseDocument());
+        }
+        catch (Exception ex)
+        {
+            // WebView2 runtime missing — extremely rare on Win11, but fail visibly.
+            ModelText.Text = $"WebView2 init failed: {ex.Message}";
+        }
+
+        InputBox.Focus(FocusState.Programmatic);
+        await Task.Run(_controller.InitializeAsync);
+    }
+
+    // ============================================================
+    // Transcript
+    // ============================================================
+
+    private async void AppendHtml(string html)
+    {
+        if (!_webViewReady)
+        {
+            _pendingHtml.Enqueue(html);
+            return;
+        }
+
+        try
+        {
+            await TranscriptView.CoreWebView2.ExecuteScriptAsync(
+                $"window.__append({JsonSerializer.Serialize(html)})");
+        }
+        catch
+        {
+            // A fragment failing to render must never take the app down.
+        }
+    }
+
+    private async void ClearTranscript()
+    {
+        if (!_webViewReady) return;
+        try { await TranscriptView.CoreWebView2.ExecuteScriptAsync("window.__clear()"); }
+        catch { }
+    }
+
+    // ============================================================
+    // Status / busy / plan progress
+    // ============================================================
+
+    private void UpdateStatusBar()
+    {
+        ModelText.Text = _controller.ModelName;
+        ProjectRootText.Text = _controller.ProjectRootPath;
+        ConnectionDot.Fill = new SolidColorBrush(
+            _controller.ModelError ? Colors.Orange
+            : _controller.IsConnected ? Colors.LimeGreen
+            : Colors.Gray);
+
+        var tracker = App.Services.GetRequiredService<MandoCode.Services.TokenTrackingService>();
+        TokenText.Text = tracker.TotalSessionTokens > 0
+            ? $"{MandoCode.Services.TokenTrackingService.FormatTokenCount(tracker.TotalSessionTokens)} tokens"
+            : "";
+
+        var processing = _controller.IsProcessing;
+        SendIcon.Glyph = processing ? "" : "";   // stop vs send
+        SendLabel.Text = processing ? "Stop" : "Send";
+    }
+
+    private void UpdateBusy(bool busy, string? activity)
+    {
+        BusyPanel.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+        BusyRing.IsActive = busy;
+        if (busy) BusyText.Text = string.IsNullOrWhiteSpace(activity) ? "Working..." : activity;
+    }
+
+    private void UpdatePlanProgress(int done, int total, bool active)
+    {
+        PlanProgressPanel.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
+        if (total > 0)
+        {
+            PlanProgressBar.Value = done * 100.0 / total;
+            PlanProgressText.Text = $"Plan: step {Math.Min(done + 1, total)} of {total}";
+        }
+    }
+
+    // ============================================================
+    // Input handling
+    // ============================================================
+
+    private void SendButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_controller.IsProcessing)
+        {
+            _controller.CancelActiveRequest();
+            return;
+        }
+        SubmitCurrentInput();
+    }
+
+    private void SubmitCurrentInput()
+    {
+        var text = InputBox.Text;
+        if (string.IsNullOrWhiteSpace(text) || _controller.IsProcessing) return;
+
+        InputBox.Text = "";
+        HideSuggestions();
+        UpdateStatusBar();
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _controller.SubmitAsync(text);
+            }
+            catch (Exception ex)
+            {
+                _transcript.Append(_html.Error($"Unexpected error: {ex.Message}"));
+            }
+        });
+    }
+
+    // PreviewKeyDown, NOT KeyDown: the TextBox's own class handler runs before instance
+    // KeyDown handlers, so with AcceptsReturn=true an Enter had already inserted a newline
+    // — which made TextChanged hide the suggestions popup, and the handler then fell
+    // through to submit. Preview (tunneling) fires first, so Handled=true genuinely
+    // suppresses the newline and Enter-to-accept behaves exactly like a mouse click.
+    private void InputBox_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == VirtualKey.Enter)
+        {
+            var shift = Microsoft.UI.Input.InputKeyboardSource
+                .GetKeyStateForCurrentThread(VirtualKey.Shift)
+                .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+            if (!shift)
+            {
+                e.Handled = true;
+
+                // If suggestions are open, Enter accepts (falling back to the first row —
+                // never submit the half-typed token as a message).
+                if (SuggestionsPanel.Visibility == Visibility.Visible)
+                {
+                    var pick = SuggestionsList.SelectedItem as CommandSuggestion ?? _suggestions.FirstOrDefault();
+                    if (pick != null)
+                    {
+                        AcceptSuggestion(pick);
+                        return;
+                    }
+                }
+                SubmitCurrentInput();
+            }
+        }
+        else if (e.Key == VirtualKey.Tab && SuggestionsPanel.Visibility == Visibility.Visible)
+        {
+            var pick = (SuggestionsList.SelectedItem ?? _suggestions.FirstOrDefault()) as CommandSuggestion;
+            if (pick != null)
+            {
+                e.Handled = true;
+                AcceptSuggestion(pick);
+            }
+        }
+        else if (e.Key == VirtualKey.Down && SuggestionsPanel.Visibility == Visibility.Visible)
+        {
+            e.Handled = true;
+            SuggestionsList.SelectedIndex = Math.Min(SuggestionsList.SelectedIndex + 1, _suggestions.Count - 1);
+            SuggestionsList.ScrollIntoView(SuggestionsList.SelectedItem);
+        }
+        else if (e.Key == VirtualKey.Up && SuggestionsPanel.Visibility == Visibility.Visible)
+        {
+            e.Handled = true;
+            SuggestionsList.SelectedIndex = Math.Max(SuggestionsList.SelectedIndex - 1, 0);
+            SuggestionsList.ScrollIntoView(SuggestionsList.SelectedItem);
+        }
+        else if (e.Key == VirtualKey.Escape)
+        {
+            if (SuggestionsPanel.Visibility == Visibility.Visible) HideSuggestions();
+            else _controller.CancelActiveRequest();
+        }
+    }
+
+    private void Root_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == VirtualKey.Escape && ApprovalOverlay.Visibility != Visibility.Visible)
+            _controller.CancelActiveRequest();
+    }
+
+    private void InputBox_TextChanged(object sender, TextChangedEventArgs e) => UpdateSuggestions();
+
+    private void UpdateSuggestions()
+    {
+        var text = InputBox.Text;
+        var caret = InputBox.SelectionStart;
+
+        // Slash commands: input starts with '/' and is still a single token.
+        if (text.StartsWith('/') && !text.Contains(' '))
+        {
+            var matches = _controller.GetCommandSuggestions(text);
+            if (ShowSuggestions(SuggestMode.Command, 0, caret,
+                    matches.Select(m => new CommandSuggestion { Command = m.Command, Description = m.Description })))
+                return;
+        }
+
+        // @file references: find the token containing the caret; if it starts with '@',
+        // filter project files/directories through the same provider the CLI uses
+        // (directories come back with a trailing '/' — selecting one drills into it).
+        var tokenStart = caret;
+        while (tokenStart > 0 && !char.IsWhiteSpace(text[tokenStart - 1]))
+            tokenStart--;
+
+        if (tokenStart < caret && tokenStart < text.Length && text[tokenStart] == '@')
+        {
+            var fragment = text[(tokenStart + 1)..caret];
+            List<string> matches;
+            try { matches = _fileProvider.FilterFiles(fragment); }
+            catch { matches = new List<string>(); }
+
+            if (ShowSuggestions(SuggestMode.File, tokenStart, caret,
+                    matches.Select(m => new CommandSuggestion
+                    {
+                        Command = m,
+                        Description = m.EndsWith('/') ? "folder — select to drill in" : "file"
+                    })))
+                return;
+        }
+
+        HideSuggestions();
+    }
+
+    private bool ShowSuggestions(SuggestMode mode, int tokenStart, int tokenEnd, IEnumerable<CommandSuggestion> items)
+    {
+        _suggestions.Clear();
+        foreach (var item in items) _suggestions.Add(item);
+        if (_suggestions.Count == 0) return false;
+
+        _suggestMode = mode;
+        _tokenStart = tokenStart;
+        _tokenEnd = tokenEnd;
+        SuggestionsPanel.Visibility = Visibility.Visible;
+        SuggestionsList.SelectedIndex = 0;
+        SuggestionsList.ScrollIntoView(SuggestionsList.SelectedItem);
+        return true;
+    }
+
+    private void SuggestionsList_ItemClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is CommandSuggestion s) AcceptSuggestion(s);
+    }
+
+    private void AcceptSuggestion(CommandSuggestion s)
+    {
+        if (_suggestMode == SuggestMode.File)
+        {
+            var text = InputBox.Text;
+            var start = Math.Min(_tokenStart, text.Length);
+            var end = Math.Min(_tokenEnd, text.Length);
+
+            // Replace the @token with the picked path. Directories keep the caret hot
+            // (no trailing space) so the reopened popup shows their contents; files
+            // close the token with a space.
+            var isFolder = s.Command.EndsWith('/');
+            var replacement = "@" + s.Command + (isFolder ? "" : " ");
+            InputBox.Text = text[..start] + replacement + text[end..];
+            InputBox.SelectionStart = start + replacement.Length;
+
+            // Setting .Text resets the caret to 0 BEFORE the line above restores it, and
+            // TextChanged runs in that window — it sees no token at caret 0 and hides the
+            // popup. Recompute now that the caret is where the user expects it:
+            // folder → drilled listing reopens; file → token ended with a space, stays hidden.
+            UpdateSuggestions();
+        }
+        else
+        {
+            InputBox.Text = s.Command + " ";
+            InputBox.SelectionStart = InputBox.Text.Length;
+            HideSuggestions();
+        }
+        InputBox.Focus(FocusState.Programmatic);
+    }
+
+    private void HideSuggestions()
+    {
+        _suggestMode = SuggestMode.None;
+        SuggestionsPanel.Visibility = Visibility.Collapsed;
+        _suggestions.Clear();
+    }
+
+    // ============================================================
+    // IApprovalUi — approval overlay (completes the harness's awaited TCS)
+    // ============================================================
+
+    public Task<string> ShowApprovalAsync(ApprovalRequest request, CancellationToken ct = default)
+    {
+        var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _approvalTcs = tcs;
+
+        var reg = ct.CanBeCanceled
+            ? ct.Register(() =>
+            {
+                tcs.TrySetCanceled(ct);
+                OnUi(HideApprovalOverlay);
+            })
+            : default(CancellationTokenRegistration);
+
+        OnUi(() =>
+        {
+            ApprovalTitle.Text = request.Title;
+
+            ApprovalSubtitle.Text = request.Subtitle ?? "";
+            ApprovalSubtitle.Visibility = string.IsNullOrEmpty(request.Subtitle) ? Visibility.Collapsed : Visibility.Visible;
+
+            ApprovalDetail.Text = request.Detail ?? "";
+            ApprovalDetail.Visibility = string.IsNullOrEmpty(request.Detail) ? Visibility.Collapsed : Visibility.Visible;
+
+            var rows = new List<DiffLineVm>();
+            if (request.CommandText != null)
+            {
+                rows.Add(new DiffLineVm
+                {
+                    Text = $"$ {request.CommandText}",
+                    Brush = new SolidColorBrush(Colors.LightSkyBlue)
+                });
+            }
+            if (request.DiffLines != null)
+            {
+                foreach (var line in request.DiffLines)
+                {
+                    var (prefix, color) = line.LineType switch
+                    {
+                        DiffLineType.Added => ("+ ", Colors.LightSkyBlue),
+                        DiffLineType.Removed => ("- ", Windows.UI.Color.FromArgb(255, 224, 82, 82)),
+                        _ => ("  ", Colors.Gray)
+                    };
+                    var num = (line.LineType == DiffLineType.Added ? line.NewLineNumber : line.OldLineNumber);
+                    rows.Add(new DiffLineVm
+                    {
+                        Text = $"{(num.HasValue ? num.Value.ToString().PadLeft(4) : "    ")} {prefix}{line.Content}",
+                        Brush = new SolidColorBrush(color)
+                    });
+                }
+                if (request.DiffSummary != null)
+                    rows.Add(new DiffLineVm { Text = "", Brush = new SolidColorBrush(Colors.Gray) });
+            }
+            ApprovalDiffList.ItemsSource = rows;
+            ApprovalBodyScroll.Visibility = rows.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+            if (!string.IsNullOrEmpty(request.DiffSummary))
+            {
+                ApprovalDetail.Text = request.DiffSummary;
+                ApprovalDetail.Visibility = Visibility.Visible;
+            }
+
+            ApprovalButtons.Children.Clear();
+            foreach (var option in request.Options)
+            {
+                var button = new Button
+                {
+                    Content = option.Label,
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    HorizontalContentAlignment = HorizontalAlignment.Left,
+                    Tag = option.Label
+                };
+                button.Foreground = option.Kind switch
+                {
+                    ApprovalOptionKind.Proceed => (SolidColorBrush)Application.Current.Resources["MandoGreenBrush"],
+                    ApprovalOptionKind.Destructive => (SolidColorBrush)Application.Current.Resources["MandoRedBrush"],
+                    _ => (SolidColorBrush)Application.Current.Resources["MandoGoldBrush"]
+                };
+                button.Click += (_, _) =>
+                {
+                    var choice = (string)button.Tag;
+                    HideApprovalOverlay();
+                    reg.Dispose();
+                    _approvalTcs?.TrySetResult(choice);
+                    _approvalTcs = null;
+                };
+                ApprovalButtons.Children.Add(button);
+            }
+
+            InstructionPanel.Visibility = Visibility.Collapsed;
+            ApprovalButtons.Visibility = Visibility.Visible;
+            ApprovalOverlay.Visibility = Visibility.Visible;
+        });
+
+        return tcs.Task;
+    }
+
+    public Task<string> ShowInstructionInputAsync(string prompt, string placeholder = "", bool allowCancel = false, CancellationToken ct = default)
+    {
+        var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _instructionTcs = tcs;
+
+        OnUi(() =>
+        {
+            // First line is the question; any extra lines (e.g. a validation error on
+            // re-prompt) render below it in the smaller prompt text.
+            var newline = prompt.IndexOf('\n');
+            ApprovalTitle.Text = newline < 0 ? prompt : prompt[..newline];
+            InstructionPrompt.Text = newline < 0 ? "" : prompt[(newline + 1)..].Trim();
+            InstructionPrompt.Visibility = InstructionPrompt.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+
+            ApprovalSubtitle.Visibility = Visibility.Collapsed;
+            ApprovalDetail.Visibility = Visibility.Collapsed;
+            ApprovalBodyScroll.Visibility = Visibility.Collapsed;
+            ApprovalButtons.Visibility = Visibility.Collapsed;
+
+            InstructionBox.Text = "";
+            InstructionBox.PlaceholderText = string.IsNullOrEmpty(placeholder)
+                ? "Type your answer and press Enter"
+                : placeholder;
+            InstructionCancelButton.Visibility = allowCancel ? Visibility.Visible : Visibility.Collapsed;
+            InstructionPanel.Visibility = Visibility.Visible;
+            ApprovalOverlay.Visibility = Visibility.Visible;
+            InstructionBox.Focus(FocusState.Programmatic);
+        });
+
+        return tcs.Task;
+    }
+
+    private void InstructionBox_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == VirtualKey.Enter)
+        {
+            e.Handled = true;
+            SubmitInstruction();
+        }
+        else if (e.Key == VirtualKey.Escape && InstructionCancelButton.Visibility == Visibility.Visible)
+        {
+            e.Handled = true;
+            CancelInstruction();
+        }
+    }
+
+    private void InstructionSubmit_Click(object sender, RoutedEventArgs e) => SubmitInstruction();
+
+    private void InstructionCancel_Click(object sender, RoutedEventArgs e) => CancelInstruction();
+
+    private void SubmitInstruction()
+    {
+        var text = InstructionBox.Text;
+        HideApprovalOverlay();
+        _instructionTcs?.TrySetResult(text);
+        _instructionTcs = null;
+    }
+
+    private void CancelInstruction()
+    {
+        HideApprovalOverlay();
+        _instructionTcs?.TrySetResult(ApprovalSignals.Cancelled);
+        _instructionTcs = null;
+    }
+
+    private void HideApprovalOverlay()
+    {
+        ApprovalOverlay.Visibility = Visibility.Collapsed;
+        ApprovalDiffList.ItemsSource = null;
+        InputBox.Focus(FocusState.Programmatic);
+    }
+
+    // ============================================================
+    // Sidebar navigation
+    // ============================================================
+
+    private string _currentPage = "chat";
+
+    private void NavChat_Click(object sender, RoutedEventArgs e) => SwitchPage("chat");
+    private void NavSettings_Click(object sender, RoutedEventArgs e) => SwitchPage("settings");
+    private void NavMcp_Click(object sender, RoutedEventArgs e) => SwitchPage("mcp");
+
+    private void SwitchPage(string page)
+    {
+        _currentPage = page;
+        ChatPage.Visibility = page == "chat" ? Visibility.Visible : Visibility.Collapsed;
+        SettingsPage.Visibility = page == "settings" ? Visibility.Visible : Visibility.Collapsed;
+        McpPage.Visibility = page == "mcp" ? Visibility.Visible : Visibility.Collapsed;
+
+        var accent = (SolidColorBrush)Application.Current.Resources["MandoAccentBrush"];
+        var normal = new SolidColorBrush(Colors.Gray);
+        NavChatIcon.Foreground = page == "chat" ? accent : normal;
+        NavSettingsIcon.Foreground = page == "settings" ? accent : normal;
+        NavMcpIcon.Foreground = page == "mcp" ? accent : normal;
+
+        if (page == "settings")
+        {
+            LoadSettings();
+            _ = RefreshModelListAsync();
+        }
+        else if (page == "mcp")
+        {
+            _ = RefreshMcpListAsync();
+        }
+        else
+        {
+            InputBox.Focus(FocusState.Programmatic);
+        }
+    }
+
+    // ============================================================
+    // Settings page
+    // ============================================================
+
+    private bool _loadingSettings;
+
+    /// <summary>Populates every control from the live config. Guarded so control-change
+    /// events fired during population don't write back.</summary>
+    private void LoadSettings()
+    {
+        _loadingSettings = true;
+        try
+        {
+            var cfg = _controller.Config;
+            EndpointBox.Text = cfg.OllamaEndpoint;
+            ModelCombo.Text = cfg.GetEffectiveModelName();
+            S_ContextLength.Value = cfg.ContextLength;
+            S_Temperature.Value = cfg.Temperature;
+            S_TemperatureLabel.Text = cfg.Temperature.ToString("0.##");
+            S_MaxTokens.Value = cfg.MaxTokens;
+            S_Streaming.SelectedItem = cfg.ResponseStreaming;
+            S_TaskPlanning.IsOn = cfg.EnableTaskPlanning;
+            S_DiffApprovals.IsOn = cfg.EnableDiffApprovals;
+            S_AutoContinue.IsOn = cfg.EnableAutoContinuation;
+            S_MaxContinuations.Value = cfg.MaxAutoContinuations;
+            S_RequestTimeout.Value = cfg.RequestTimeoutMinutes;
+            S_StallTimeout.Value = cfg.ModelResponseTimeoutSeconds;
+            S_ToolBudget.Value = cfg.ToolResultCharBudget;
+            S_RenderTimeout.Value = cfg.MarkdownRenderTimeoutSeconds;
+            S_WebSearch.IsOn = cfg.EnableWebSearch;
+            S_TavilyKey.Password = "";
+            S_TavilyKey.PlaceholderText = string.IsNullOrEmpty(cfg.TavilyApiKey)
+                ? "tvly-…" : "(key saved — enter a new one to replace, or type 'clear')";
+            S_Mcp.IsOn = cfg.EnableMcp;
+            SettingsStatus.Text = "";
+        }
+        finally
+        {
+            _loadingSettings = false;
+        }
+    }
+
+    /// <summary>One write path for the whole page: ConfigKeySetter via the controller.</summary>
+    private async Task ApplySettingAsync(string key, string value)
+    {
+        var (ok, message) = await _controller.ApplyConfigKeyAsync(key, value);
+        SettingsStatus.Text = message;
+        if (!ok) LoadSettings();   // revert the control to the real value
+    }
+
+    private async void Setting_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_loadingSettings) return;
+        var toggle = (ToggleSwitch)sender;
+        await ApplySettingAsync((string)toggle.Tag, toggle.IsOn ? "true" : "false");
+    }
+
+    private async void Setting_NumberChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
+    {
+        if (_loadingSettings || double.IsNaN(args.NewValue)) return;
+        await ApplySettingAsync((string)sender.Tag, ((long)args.NewValue).ToString());
+    }
+
+    private async void Temperature_Changed(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+    {
+        if (_loadingSettings) return;
+        S_TemperatureLabel.Text = e.NewValue.ToString("0.##");
+        await ApplySettingAsync("temperature", e.NewValue.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    private async void Streaming_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loadingSettings || S_Streaming.SelectedItem is not string mode) return;
+        await ApplySettingAsync("streaming", mode);
+    }
+
+    private async void TavilySave_Click(object sender, RoutedEventArgs e)
+    {
+        var key = S_TavilyKey.Password;
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            SettingsStatus.Text = "Enter a key first (or type 'clear' to remove the saved one).";
+            return;
+        }
+        await ApplySettingAsync("tavilyKey", key.Trim());
+        LoadSettings();
+    }
+
+    private async void RefreshModels_Click(object sender, RoutedEventArgs e) =>
+        await RefreshModelListAsync();
+
+    private async Task RefreshModelListAsync()
+    {
+        SettingsStatus.Text = "Fetching models…";
+        var models = await Task.Run(_controller.ListModelsAsync);
+        var current = ModelCombo.Text;
+        ModelCombo.ItemsSource = models;
+        ModelCombo.Text = current;
+        SettingsStatus.Text = models.Count == 0
+            ? "No models found — is Ollama running? (ollama serve, then ollama pull <model>)"
+            : $"{models.Count} model(s) available.";
+    }
+
+    private async void SettingsSave_Click(object sender, RoutedEventArgs e)
+    {
+        var endpoint = EndpointBox.Text;
+        var model = ModelCombo.Text;
+        SettingsStatus.Text = "Connecting… (details land in the chat transcript)";
+        await Task.Run(() => _controller.ApplyConnectionSettingsAsync(endpoint, model));
+        SettingsStatus.Text = _controller.IsConnected
+            ? $"✓ Connected — {_controller.ModelName}"
+            : "Couldn't connect — see the chat transcript for details.";
+        LoadSettings();
+    }
+
+    // ============================================================
+    // MCP page
+    // ============================================================
+
+    private async void McpRefresh_Click(object sender, RoutedEventArgs e) => await RefreshMcpListAsync();
+
+    private async Task RefreshMcpListAsync()
+    {
+        McpPageStatus.Text = "Checking server status…";
+        var rows = await Task.Run(_controller.GetMcpStatusRowsAsync);
+
+        var green = (SolidColorBrush)Application.Current.Resources["MandoGreenBrush"];
+        var gold = (SolidColorBrush)Application.Current.Resources["MandoGoldBrush"];
+        McpList.ItemsSource = rows.Select(r => new McpRow
+        {
+            Name = r.Name,
+            Transport = r.Transport,
+            Status = r.Status,
+            StatusBrush = r.Connected ? green : gold
+        }).ToList();
+
+        McpPageStatus.Text = rows.Count == 0
+            ? "No MCP servers configured yet — add one below. Same config file as the CLI."
+            : $"{rows.Count} server(s) configured.";
+    }
+
+    /// <summary>Runs a slash command through the normal pipeline (transcript echo, wizard
+    /// overlays, busy state all included), then refreshes the server list.</summary>
+    private async Task RunMcpCommandAsync(string command)
+    {
+        if (_controller.IsProcessing)
+        {
+            McpPageStatus.Text = "Busy — wait for the current request to finish.";
+            return;
+        }
+        await Task.Run(() => _controller.SubmitAsync(command));
+        await RefreshMcpListAsync();
+    }
+
+    private void McpAdd_Click(object sender, RoutedEventArgs e) => OpenMcpEditor(null);
+
+    private void McpEdit_Click(object sender, RoutedEventArgs e)
+    {
+        if (McpList.SelectedItem is not McpRow row)
+        {
+            McpPageStatus.Text = "Select a server to edit first.";
+            return;
+        }
+        OpenMcpEditor(row.Name);
+    }
+
+    private void McpList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        var hasSelection = McpList.SelectedItem is McpRow;
+        McpEditButton.IsEnabled = hasSelection;
+        McpRemoveButton.IsEnabled = hasSelection;
+    }
+
+    private void McpList_DoubleTapped(object sender, Microsoft.UI.Xaml.Input.DoubleTappedRoutedEventArgs e)
+    {
+        if (McpList.SelectedItem is McpRow row) OpenMcpEditor(row.Name);
+    }
+
+    private async void McpRemove_Click(object sender, RoutedEventArgs e)
+    {
+        if (McpList.SelectedItem is not McpRow row)
+        {
+            McpPageStatus.Text = "Select a server to remove first.";
+            return;
+        }
+        await RunMcpCommandAsync($"/mcp remove {row.Name}");
+    }
+
+    private async void McpReload_Click(object sender, RoutedEventArgs e) =>
+        await RunMcpCommandAsync("/mcp-reload");
+
+    // ============================================================
+    // MCP server editor modal (add + edit)
+    // ============================================================
+
+    private string? _mcpEditOriginalName;
+
+    private void OpenMcpEditor(string? serverName)
+    {
+        _mcpEditOriginalName = serverName;
+        M_StatusBar.IsOpen = false;
+        M_TestToolsTable.Visibility = Visibility.Collapsed;
+        M_TestSpin.Visibility = Visibility.Collapsed;
+        McpEditorTestButton.IsEnabled = true;
+        McpEditorSaveButton.IsEnabled = true;
+
+        if (serverName != null && _controller.Config.McpServers.TryGetValue(serverName, out var cfg))
+        {
+            McpEditorTitle.Text = $"Edit MCP server — {serverName}";
+            McpEditorSaveButton.Content = "Save & Reconnect";
+            M_Name.Text = serverName;
+            M_Transport.SelectedIndex = cfg.IsHttp ? 1 : 0;
+            M_Command.Text = cfg.Command ?? "";
+            M_Args.Text = string.Join(" ", cfg.Args.Select(a => a.Contains(' ') ? $"\"{a}\"" : a));
+            M_Env.Text = string.Join("\n", cfg.Env.Select(kv => $"{kv.Key}={kv.Value}"));
+            M_Url.Text = cfg.Url ?? "";
+            M_Headers.Text = string.Join("\n", cfg.Headers.Select(kv => $"{kv.Key}={kv.Value}"));
+            M_Disabled.IsOn = cfg.Disabled;
+        }
+        else
+        {
+            McpEditorTitle.Text = "Add MCP server";
+            McpEditorSaveButton.Content = "Save & Connect";
+            M_Name.Text = "";
+            M_Transport.SelectedIndex = 0;
+            M_Command.Text = "";
+            M_Args.Text = "";
+            M_Env.Text = "";
+            M_Url.Text = "";
+            M_Headers.Text = "";
+            M_Disabled.IsOn = false;
+        }
+
+        UpdateMcpTransportPanels();
+        McpEditorOverlay.Visibility = Visibility.Visible;
+        M_Name.Focus(FocusState.Programmatic);
+    }
+
+    private void M_Transport_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        UpdateMcpTransportPanels();
+
+    private void UpdateMcpTransportPanels()
+    {
+        // Guard: fires during InitializeComponent before panels exist.
+        if (M_StdioPanel == null || M_HttpPanel == null) return;
+        var isHttp = M_Transport.SelectedIndex == 1;
+        M_HttpPanel.Visibility = isHttp ? Visibility.Visible : Visibility.Collapsed;
+        M_StdioPanel.Visibility = isHttp ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void McpEditorCancel_Click(object sender, RoutedEventArgs e) =>
+        McpEditorOverlay.Visibility = Visibility.Collapsed;
+
+    private void ShowMcpEditorError(string message)
+    {
+        M_TestSpin.IsActive = false;
+        M_TestSpin.Visibility = Visibility.Collapsed;
+        M_TestToolsTable.Visibility = Visibility.Collapsed;
+        M_StatusBar.Severity = InfoBarSeverity.Error;
+        M_StatusBar.Title = "Check the form";
+        M_StatusBar.Message = message;
+        M_StatusBar.IsOpen = true;
+    }
+
+    /// <summary>Parses "KEY=value" lines. Returns null (with an error shown) on a bad line.</summary>
+    private Dictionary<string, string>? ParseKeyValueLines(string text, string label)
+    {
+        var dict = new Dictionary<string, string>();
+        foreach (var rawLine in text.Split('\n'))
+        {
+            var line = rawLine.Trim();
+            if (line.Length == 0) continue;
+            var eq = line.IndexOf('=');
+            if (eq <= 0)
+            {
+                ShowMcpEditorError($"{label}: '{line}' isn't KEY=value.");
+                return null;
+            }
+            dict[line[..eq].Trim()] = line[(eq + 1)..].Trim();
+        }
+        return dict;
+    }
+
+    /// <summary>Shared validate-and-build for Test and Save. Shows the error inline and
+    /// returns false when the form isn't valid.</summary>
+    private bool TryBuildServerFromForm(bool checkNameCollision, out string name, out MandoCode.Models.McpServerConfig server)
+    {
+        M_StatusBar.IsOpen = false;
+        server = new MandoCode.Models.McpServerConfig { Disabled = M_Disabled.IsOn };
+
+        // Lowercased — servers are referenced by name in tool prefixes (mcp_<server>).
+        name = M_Name.Text.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(name)) { ShowMcpEditorError("Name cannot be empty."); return false; }
+        if (name.Contains(' ')) { ShowMcpEditorError("Name cannot contain spaces."); return false; }
+        if (checkNameCollision && _mcpEditOriginalName == null && _controller.Config.McpServers.ContainsKey(name))
+        {
+            ShowMcpEditorError($"A server named '{name}' already exists — edit it instead, or pick another name.");
+            return false;
+        }
+
+        if (M_Transport.SelectedIndex == 1)   // http
+        {
+            var url = M_Url.Text.Trim();
+            if (!Uri.TryCreate(url, UriKind.Absolute, out _))
+            {
+                ShowMcpEditorError("URL must be absolute (e.g. https://mcp.example.com/mcp).");
+                return false;
+            }
+            server.Url = url;
+            server.Transport = "http";
+
+            var headers = ParseKeyValueLines(M_Headers.Text, "Headers");
+            if (headers == null) return false;
+            server.Headers = headers;
+        }
+        else                                   // stdio
+        {
+            var command = M_Command.Text.Trim();
+            if (string.IsNullOrWhiteSpace(command)) { ShowMcpEditorError("Command cannot be empty."); return false; }
+            server.Command = command;
+            server.Args = ChatController.ParseShellLikeArgs(M_Args.Text.Trim());
+
+            var env = ParseKeyValueLines(M_Env.Text, "Environment variables");
+            if (env == null) return false;
+            server.Env = env;
+        }
+
+        return true;
+    }
+
+    private async void McpEditorTest_Click(object sender, RoutedEventArgs e)
+    {
+        // No collision check — testing an existing name is fine, nothing is written.
+        if (!TryBuildServerFromForm(checkNameCollision: false, out var name, out var server)) return;
+
+        M_StatusBar.Severity = InfoBarSeverity.Informational;
+        M_StatusBar.Title = "Testing connection…";
+        M_StatusBar.Message = "Connecting with these values — nothing is saved, running servers aren't touched.";
+        M_StatusBar.IsOpen = true;
+        M_TestToolsTable.Visibility = Visibility.Collapsed;
+        M_TestSpin.Visibility = Visibility.Visible;
+        M_TestSpin.IsActive = true;
+        McpEditorTestButton.IsEnabled = false;
+        McpEditorSaveButton.IsEnabled = false;
+
+        try
+        {
+            var result = await Task.Run(() => _controller.TestMcpServerAsync(name, server));
+
+            M_TestSpin.IsActive = false;
+            M_TestSpin.Visibility = Visibility.Collapsed;
+
+            if (result.Ok)
+            {
+                M_StatusBar.Severity = InfoBarSeverity.Success;
+                M_StatusBar.Title = $"Connected — {result.Tools.Count} tool(s)";
+                M_StatusBar.Message = result.Message;
+                if (result.Tools.Count > 0)
+                {
+                    M_TestTools.ItemsSource = result.Tools
+                        .Select(t => new ToolChip { Name = t.Name, Description = t.Description ?? "(no description)" })
+                        .ToList();
+                    M_TestToolsTable.Visibility = Visibility.Visible;
+                }
+            }
+            else
+            {
+                M_StatusBar.Severity = InfoBarSeverity.Error;
+                M_StatusBar.Title = "Connection failed";
+                M_StatusBar.Message = result.Message;
+            }
+        }
+        finally
+        {
+            M_TestSpin.IsActive = false;
+            McpEditorTestButton.IsEnabled = true;
+            McpEditorSaveButton.IsEnabled = true;
+        }
+    }
+
+    private async void McpEditorSave_Click(object sender, RoutedEventArgs e)
+    {
+        if (!TryBuildServerFromForm(checkNameCollision: true, out var name, out var server)) return;
+
+        McpEditorOverlay.Visibility = Visibility.Collapsed;
+        SwitchPage("mcp");
+        McpPageStatus.Text = $"Saving '{name}' and connecting…";
+
+        var originalName = _mcpEditOriginalName;
+        var (_, message) = await Task.Run(() => _controller.SaveMcpServerAsync(originalName, name, server));
+        McpPageStatus.Text = message;
+        await RefreshMcpListAsync();
+        McpPageStatus.Text = message;
+    }
+
+    // ============================================================
+    // Project folder + clipboard
+    // ============================================================
+
+    private async void OpenFolderButton_Click(object sender, RoutedEventArgs e)
+    {
+        var picker = new Windows.Storage.Pickers.FolderPicker();
+        picker.FileTypeFilter.Add("*");
+
+        // Unpackaged apps must initialize pickers with the window handle.
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+
+        var folder = await picker.PickSingleFolderAsync();
+        if (folder == null) return;
+
+        _projectRoot.ProjectRoot = folder.Path;
+        var fileProvider = App.Services.GetRequiredService<MandoCode.Services.FileAutocompleteProvider>();
+        fileProvider.RefreshCache();
+
+        _transcript.Append(_html.Info($"Project root changed to: {folder.Path}"));
+        _transcript.Append(_html.Dim("Rebuilding the AI session for the new project…"));
+
+        await Task.Run(async () =>
+        {
+            var ai = App.Services.GetRequiredService<MandoCode.Services.AIService>();
+            await ai.ReinitializeAsync(_controller.Config);
+            _transcript.Append(_html.Success("✓ Ready."));
+        });
+        UpdateStatusBar();
+    }
+
+    private static void OpenInBrowser(string url)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url)
+            {
+                UseShellExecute = true
+            });
+        }
+        catch { /* a dead link must not crash the app */ }
+    }
+
+    private void CopyToClipboard(string text)
+    {
+        var package = new DataPackage();
+        package.SetText(text);
+        Clipboard.SetContent(package);
+    }
+}
