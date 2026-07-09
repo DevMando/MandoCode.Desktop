@@ -68,6 +68,14 @@ public sealed class TranscriptHtmlBuilder
     public string Link(string text, string url) =>
         $"<div class=\"line\"><a href=\"{E(url)}\">{E(text)}</a></div>";
 
+    /// <summary>
+    /// A clickable file path — the desktop counterpart of the CLI's FileLinkHelper
+    /// terminal hyperlinks. Clicking posts an "open-file:" web message that MainWindow
+    /// resolves against the project root and opens with the default app.
+    /// </summary>
+    private static string FileLink(string path) =>
+        $"<a class=\"file-link\" href=\"#\" data-file=\"{E(path)}\" title=\"Open in default app\">{E(path)}</a>";
+
     public string CommandCard(string command) =>
         $"<div class=\"panel\"><div class=\"panel-header sky\">Command</div><pre class=\"cmd\">$ {E(command)}</pre></div>";
 
@@ -77,7 +85,7 @@ public sealed class TranscriptHtmlBuilder
     public string DiffCard(string relativePath, IReadOnlyList<DiffLine> lines, string summary)
     {
         var sb = new StringBuilder();
-        sb.Append($"<div class=\"panel\"><div class=\"panel-header sky\">Diff: {E(relativePath)}</div><pre class=\"diff\">");
+        sb.Append($"<div class=\"panel\"><div class=\"panel-header sky\">Diff: {FileLink(relativePath)}</div><pre class=\"diff\">");
         AppendDiffLines(sb, lines);
         sb.Append("</pre>");
         sb.Append($"<div class=\"panel-footer\">{E(summary)}</div></div>");
@@ -85,7 +93,7 @@ public sealed class TranscriptHtmlBuilder
     }
 
     public string FolderDeleteCard(string relativePath, string listing) =>
-        $"<div class=\"panel red-border\"><div class=\"panel-header red\">Delete Folder: {E(relativePath)}/</div><pre class=\"cmd-out\">{E(listing)}</pre></div>";
+        $"<div class=\"panel red-border\"><div class=\"panel-header red\">Delete Folder: {FileLink(relativePath)}/</div><pre class=\"cmd-out\">{E(listing)}</pre></div>";
 
     private static void AppendDiffLines(StringBuilder sb, IReadOnlyList<DiffLine> lines)
     {
@@ -129,10 +137,16 @@ public sealed class TranscriptHtmlBuilder
             _ => ("•", "dim")
         };
 
+        // Paths open on click; op types whose "path" is really a query/command/URL don't.
+        var pathIsOpenable = !string.IsNullOrEmpty(op.FilePath)
+            && op.OperationType is "Write" or "Update" or "Read" or "Delete" or "CreateFolder" or "List";
+
         var sb = new StringBuilder();
         sb.Append("<div class=\"op\">");
         sb.Append($"<span class=\"op-head {cls}\">{icon} {E(op.OperationType)}</span> ");
-        sb.Append($"<span class=\"op-path\">{E(op.FilePath)}</span>");
+        sb.Append(pathIsOpenable
+            ? $"<span class=\"op-path\">{FileLink(op.FilePath!)}</span>"
+            : $"<span class=\"op-path\">{E(op.FilePath)}</span>");
 
         var meta = new List<string>();
         if (op.LineCount > 0) meta.Add($"{op.LineCount} lines");
@@ -191,24 +205,28 @@ public sealed class TranscriptHtmlBuilder
         return sb.ToString();
     }
 
-    /// <summary>The transcript host page: styles + the append/clear JS the window calls.</summary>
-    public static string BaseDocument() => """
+    /// <summary>The transcript host page: styles + the append/clear JS the window calls.
+    /// Colors come from the active UiTheme; ThemeManager.BuildTranscriptScript re-points
+    /// the same CSS variables when the theme changes at runtime.</summary>
+    public static string BaseDocument(UiTheme theme) => $$"""
 <!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
+<script src="https://mandocode.assets/highlight.min.js"></script>
 <style>
   :root {
-    --bg: #16121f;
-    --fg: #e6e1f0;
-    --dim: #8f87a3;
-    --accent: #c864ff;
-    --gold: #ffc850;
-    --sky: #38b6ff;
-    --green: #4ec94e;
-    --red: #e05252;
-    --panel: #201a2e;
-    --border: #362c4d;
+    --bg: {{theme.Background}};
+    --fg: {{theme.Text}};
+    --dim: {{theme.Dim}};
+    --accent: {{theme.Accent}};
+    --gold: {{theme.Gold}};
+    --sky: {{theme.Sky}};
+    --green: {{theme.Green}};
+    --red: {{theme.Red}};
+    --panel: {{theme.Panel}};
+    --border: {{theme.Border}};
+    --diffadd: {{theme.DiffAdd}};
   }
   * { box-sizing: border-box; }
   body {
@@ -216,14 +234,18 @@ public sealed class TranscriptHtmlBuilder
     font-family: "Segoe UI", sans-serif; font-size: 14px;
     margin: 0; padding: 14px 18px 24px 18px; line-height: 1.5;
   }
-  #log > * { margin-bottom: 8px; }
+  #log > * { margin-bottom: 8px; animation: rise 0.18s ease-out; }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: none; }
+  }
   .user-echo { color: var(--gold); font-weight: 600; white-space: pre-wrap; margin-top: 14px; }
-  .assistant { margin-top: 4px; }
+  .assistant { margin-top: 4px; position: relative; }
   .assistant-label { color: var(--green); font-weight: 700; margin-bottom: 2px; }
   .md p { margin: 6px 0; }
   .md pre {
     background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
-    padding: 10px 12px; overflow-x: auto;
+    padding: 10px 12px; overflow-x: auto; position: relative;
     font-family: "Cascadia Code", "Cascadia Mono", Consolas, monospace; font-size: 13px;
   }
   .md code { font-family: "Cascadia Code", Consolas, monospace; background: var(--panel);
@@ -256,9 +278,12 @@ public sealed class TranscriptHtmlBuilder
   }
   pre.mono-block, pre.raw { background: var(--panel); border: 1px solid var(--border);
     border-radius: 8px; white-space: pre-wrap; }
-  .d-add { color: #87cefa; display: block; }
+  .d-add { color: var(--diffadd); display: block; }
   .d-rem { color: var(--red); display: block; }
   .d-ctx { color: var(--dim); display: block; }
+  a.file-link { color: var(--sky); text-decoration: none;
+    border-bottom: 1px dotted color-mix(in srgb, var(--sky) 55%, transparent); cursor: pointer; }
+  a.file-link:hover { color: var(--accent); border-bottom-color: var(--accent); }
   .op { margin: 2px 0; }
   .op-head { font-weight: 600; }
   .op-path { font-family: "Cascadia Code", Consolas, monospace; font-size: 13px; }
@@ -270,20 +295,270 @@ public sealed class TranscriptHtmlBuilder
     text-align: left; vertical-align: top; }
   table.plan th { color: var(--dim); font-weight: 600; }
   .nowrap { white-space: nowrap; }
+
+  /* Syntax highlighting: highlight.js token classes mapped onto the theme's CSS
+     variables, so code colors follow every theme (and survive live retheming). */
+  .hljs { background: transparent; color: var(--fg); }
+  .hljs-comment, .hljs-quote { color: var(--dim); font-style: italic; }
+  .hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-doctag { color: var(--accent); }
+  .hljs-string, .hljs-regexp, .hljs-addition { color: var(--green); }
+  .hljs-number, .hljs-symbol, .hljs-bullet, .hljs-meta, .hljs-built_in { color: var(--gold); }
+  .hljs-title, .hljs-section, .hljs-name, .hljs-title.function_, .hljs-title.class_ { color: var(--sky); }
+  .hljs-attr, .hljs-attribute, .hljs-variable, .hljs-template-variable, .hljs-type { color: var(--sky); }
+  .hljs-deletion { color: var(--red); }
+  .hljs-emphasis { font-style: italic; }
+  .hljs-strong { font-weight: bold; }
+
+  /* Copy chips — appear on hover over code blocks and assistant messages. Label is
+     CSS generated content so it never pollutes the copied innerText. */
+  .copy-chip { position: absolute; top: 6px; right: 6px; z-index: 1; opacity: 0;
+    transition: opacity 0.12s; background: var(--bg); color: var(--dim);
+    border: 1px solid var(--border); border-radius: 6px; padding: 2px 9px;
+    font-size: 11px; font-family: "Segoe UI", sans-serif; cursor: pointer; }
+  .copy-chip::before { content: "Copy"; }
+  .copy-chip.copied::before { content: "Copied ✓"; }
+  .copy-chip.copied { color: var(--green); border-color: var(--green); }
+  .md pre:hover .copy-chip, .assistant:hover > .copy-chip { opacity: 1; }
+  .copy-chip:hover { color: var(--fg); border-color: var(--accent); }
+
+  /* Consecutive operation cards group into a collapsible run; it stays open while
+     the run is active and collapses once a non-operation block lands after it. */
+  details.op-group { margin: 2px 0; }
+  details.op-group summary { color: var(--dim); font-size: 12px; cursor: pointer; user-select: none; }
+  details.op-group summary:hover { color: var(--fg); }
+  details.op-group > .op { margin-left: 16px; }
+
+  /* Jump-to-bottom pill — shows when scrolled away from the live end of the chat. */
+  #jump-pill { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
+    display: none; z-index: 40; background: var(--panel); color: var(--fg);
+    border: 1px solid var(--accent); border-radius: 999px; padding: 6px 14px;
+    font-size: 12px; cursor: pointer; box-shadow: 0 4px 16px rgba(0,0,0,0.4); }
+
+  /* In-chat find bar (Ctrl+F while the transcript has focus). */
+  #findbar { position: fixed; top: 10px; right: 16px; z-index: 60; display: none;
+    align-items: center; gap: 6px; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4); }
+  #findbar input { background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 3px 8px; font-size: 12px; width: 180px; outline: none; }
+  #findbar .find-count { color: var(--dim); font-size: 11px; min-width: 44px; text-align: center; }
+  #findbar button { background: none; border: none; color: var(--dim); cursor: pointer;
+    font-size: 12px; padding: 2px 6px; }
+  #findbar button:hover { color: var(--fg); }
+  mark.find-hit { background: var(--gold); color: #000; border-radius: 2px; }
+  mark.find-hit.find-current { background: var(--accent); color: #fff; }
 </style>
 </head>
 <body>
 <div id="log"></div>
 <script>
   const log = document.getElementById('log');
+  if (window.hljs) hljs.configure({ ignoreUnescapedHTML: true });
+
+  // --- append pipeline: group consecutive op cards, stamp timestamps ---
+  function groupSummary(d) {
+    const n = d.querySelectorAll(':scope > .op').length;
+    d.querySelector('summary').textContent = '⚙ ' + n + ' operation' + (n === 1 ? '' : 's');
+  }
+  function placeChild(c) {
+    if (c.nodeType !== 1) { log.appendChild(c); return; }
+    if (c.classList.contains('op')) {
+      const prev = log.lastElementChild;
+      if (prev && prev.tagName === 'DETAILS' && prev.classList.contains('op-group') && prev.hasAttribute('open')) {
+        prev.appendChild(c);
+        groupSummary(prev);
+        return;
+      }
+      if (prev && prev.classList.contains('op')) {
+        const d = document.createElement('details');
+        d.className = 'op-group';
+        d.setAttribute('open', '');
+        d.appendChild(document.createElement('summary'));
+        log.insertBefore(d, prev);
+        d.appendChild(prev);
+        d.appendChild(c);
+        groupSummary(d);
+        return;
+      }
+      log.appendChild(c);
+      return;
+    }
+    const last = log.lastElementChild;
+    if (last && last.tagName === 'DETAILS' && last.classList.contains('op-group'))
+      last.removeAttribute('open');   // run over — collapse the group
+    if (c.classList.contains('assistant') || c.classList.contains('user-echo'))
+      c.title = new Date().toLocaleTimeString();
+    log.appendChild(c);
+  }
+
+  // --- syntax highlighting + copy chips, applied to new nodes only ---
+  function highlightNew() {
+    if (!window.hljs) return;
+    log.querySelectorAll('.md pre code:not([data-hl])').forEach(function (c) {
+      c.setAttribute('data-hl', '1');
+      try { hljs.highlightElement(c); } catch (err) { }
+    });
+  }
+  function doCopy(text, chip) {
+    window.chrome.webview.postMessage('copy:' + text);
+    chip.classList.add('copied');
+    setTimeout(function () { chip.classList.remove('copied'); }, 1400);
+  }
+  function addCopyChips() {
+    log.querySelectorAll('.md pre:not([data-copy])').forEach(function (pre) {
+      pre.setAttribute('data-copy', '1');
+      const chip = document.createElement('button');
+      chip.className = 'copy-chip';
+      chip.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        const code = pre.querySelector('code');
+        doCopy(code ? code.innerText : pre.innerText, chip);
+      });
+      pre.appendChild(chip);
+    });
+    log.querySelectorAll('.assistant:not([data-copy])').forEach(function (card) {
+      card.setAttribute('data-copy', '1');
+      const md = card.querySelector('.md');
+      if (!md) return;
+      const chip = document.createElement('button');
+      chip.className = 'copy-chip';
+      chip.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        doCopy(md.innerText, chip);
+      });
+      card.appendChild(chip);
+    });
+  }
+
   window.__append = function (html) {
     const nearBottom = (window.innerHeight + window.scrollY) >= (document.body.scrollHeight - 60);
     const wrap = document.createElement('div');
     wrap.innerHTML = html;
-    while (wrap.firstChild) log.appendChild(wrap.firstChild);
+    while (wrap.firstChild) placeChild(wrap.firstChild);
+    highlightNew();
+    addCopyChips();
     if (nearBottom) window.scrollTo(0, document.body.scrollHeight);
+    updatePill();
   };
-  window.__clear = function () { log.innerHTML = ''; };
+  window.__clear = function () { log.innerHTML = ''; updatePill(); };
+
+  document.addEventListener('click', function (e) {
+    const link = e.target.closest('a[data-file]');
+    if (!link) return;
+    e.preventDefault();
+    window.chrome.webview.postMessage('open-file:' + link.getAttribute('data-file'));
+  });
+
+  // --- jump-to-bottom pill ---
+  const pill = document.createElement('div');
+  pill.id = 'jump-pill';
+  pill.textContent = '↓ Latest';
+  document.body.appendChild(pill);
+  pill.addEventListener('click', function () {
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+  });
+  function updatePill() {
+    const nb = (window.innerHeight + window.scrollY) >= (document.body.scrollHeight - 80);
+    pill.style.display = nb ? 'none' : 'block';
+  }
+  window.addEventListener('scroll', updatePill);
+
+  // --- in-chat find (Ctrl+F) ---
+  let findBar = null, findHits = [], findIdx = -1;
+  function ensureFindBar() {
+    if (findBar) return;
+    findBar = document.createElement('div');
+    findBar.id = 'findbar';
+    findBar.innerHTML = '<input type="text" placeholder="Find in chat"/><span class="find-count"></span>' +
+      '<button data-act="prev">▲</button><button data-act="next">▼</button><button data-act="close">✕</button>';
+    document.body.appendChild(findBar);
+    const input = findBar.querySelector('input');
+    let deb = null;
+    input.addEventListener('input', function () {
+      clearTimeout(deb);
+      deb = setTimeout(function () { runFind(input.value); }, 150);
+    });
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); stepFind(e.shiftKey ? -1 : 1); }
+    });
+    findBar.addEventListener('click', function (e) {
+      const b = e.target.closest('button');
+      if (!b) return;
+      if (b.dataset.act === 'prev') stepFind(-1);
+      else if (b.dataset.act === 'next') stepFind(1);
+      else closeFind();
+    });
+  }
+  function setCount() {
+    if (!findBar) return;
+    findBar.querySelector('.find-count').textContent = findHits.length ? (findIdx + 1) + '/' + findHits.length : '';
+  }
+  function clearFind() {
+    findHits.forEach(function (m) {
+      const p = m.parentNode;
+      if (!p) return;
+      p.replaceChild(document.createTextNode(m.textContent), m);
+      p.normalize();
+    });
+    findHits = [];
+    findIdx = -1;
+    setCount();
+  }
+  function runFind(q) {
+    clearFind();
+    if (!q || q.length < 2) return;
+    const needle = q.toLowerCase();
+    const walker = document.createTreeWalker(log, NodeFilter.SHOW_TEXT, null);
+    const nodes = [];
+    let n;
+    while ((n = walker.nextNode())) {
+      if (n.textContent.toLowerCase().includes(needle)) nodes.push(n);
+    }
+    nodes.forEach(function (node) {
+      let text = node, idx;
+      while ((idx = text.textContent.toLowerCase().indexOf(needle)) >= 0) {
+        const hit = text.splitText(idx);
+        const rest = hit.splitText(q.length);
+        const m = document.createElement('mark');
+        m.className = 'find-hit';
+        hit.parentNode.replaceChild(m, hit);
+        m.appendChild(hit);
+        findHits.push(m);
+        text = rest;
+      }
+    });
+    if (findHits.length) { findIdx = 0; focusHit(); }
+    setCount();
+  }
+  function stepFind(dir) {
+    if (!findHits.length) return;
+    findHits[findIdx].classList.remove('find-current');
+    findIdx = (findIdx + dir + findHits.length) % findHits.length;
+    focusHit();
+    setCount();
+  }
+  function focusHit() {
+    const m = findHits[findIdx];
+    m.classList.add('find-current');
+    m.scrollIntoView({ block: 'center' });
+  }
+  function closeFind() {
+    clearFind();
+    if (findBar) findBar.style.display = 'none';
+  }
+  document.addEventListener('keydown', function (e) {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
+      e.preventDefault();
+      ensureFindBar();
+      findBar.style.display = 'flex';
+      const input = findBar.querySelector('input');
+      input.focus();
+      input.select();
+    }
+    else if (e.key === 'Escape' && findBar && findBar.style.display !== 'none') {
+      closeFind();
+    }
+  });
 </script>
 </body>
 </html>

@@ -13,7 +13,8 @@ public enum ApprovalOptionKind
     Destructive
 }
 
-public sealed record ApprovalOption(string Label, ApprovalOptionKind Kind);
+/// <summary>Glyph is an optional Segoe Fluent icon rendered before the label.</summary>
+public sealed record ApprovalOption(string Label, ApprovalOptionKind Kind, string? Glyph = null);
 
 /// <summary>
 /// Everything the approval overlay needs to render one approval prompt.

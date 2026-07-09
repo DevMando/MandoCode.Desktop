@@ -45,6 +45,23 @@ public sealed class ToolChip
     public string Description { get; init; } = "";
 }
 
+/// <summary>Row model for the Appearance tab's theme picker — each card is drawn in
+/// its own theme's colors so the list doubles as a preview.</summary>
+public sealed class ThemeVm
+{
+    public required UiTheme Theme { get; init; }
+    public string Name => Theme.Name;
+    public string Description => Theme.Description;
+    public SolidColorBrush BgBrush => new(ThemeManager.C(Theme.Background));
+    public SolidColorBrush EdgeBrush => new(ThemeManager.C(Theme.Border));
+    public SolidColorBrush FgBrush => new(ThemeManager.C(Theme.Text));
+    public SolidColorBrush DimBrush => new(ThemeManager.C(Theme.Dim));
+    public SolidColorBrush AccentBrush => new(ThemeManager.C(Theme.Accent));
+    public SolidColorBrush GoldBrush => new(ThemeManager.C(Theme.Gold));
+    public SolidColorBrush SkyBrush => new(ThemeManager.C(Theme.Sky));
+    public SolidColorBrush GreenBrush => new(ThemeManager.C(Theme.Green));
+}
+
 public sealed partial class MainWindow : Window, IApprovalUi
 {
     private readonly ChatController _controller;
@@ -73,6 +90,15 @@ public sealed partial class MainWindow : Window, IApprovalUi
     {
         InitializeComponent();
         Title = "MandoCode Desktop";
+
+        ThemeManager.Initialize(Root);
+        ThemeManager.ThemeChanged += () => OnUi(ApplyThemeToTranscript);
+        TranscriptView.DefaultBackgroundColor = ThemeManager.C(ThemeManager.Current.Background);
+        SettingsTabs.SelectedItem = Tab_Appearance;
+        ThemeList.ItemsSource = UiTheme.All.Select(t => new ThemeVm { Theme = t }).ToList();
+        ModelCombo.Loaded += (_, _) => ApplyModelComboTarget();
+        S_WindowOpacity.Value = ThemeManager.WindowOpacity * 100;
+        ApplyWindowOpacity(ThemeManager.WindowOpacity);
 
         _dispatcher = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
 
@@ -132,7 +158,7 @@ public sealed partial class MainWindow : Window, IApprovalUi
         {
             await TranscriptView.EnsureCoreWebView2Async();
             TranscriptView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = true;
-            TranscriptView.CoreWebView2.Settings.AreDevToolsEnabled = false;
+            TranscriptView.CoreWebView2.Settings.AreDevToolsEnabled = true;   // F12 in the transcript — invaluable for debugging the HTML pipeline
             TranscriptView.CoreWebView2.NavigationCompleted += (_, _) =>
             {
                 _webViewReady = true;
@@ -156,7 +182,31 @@ public sealed partial class MainWindow : Window, IApprovalUi
                 e.Handled = true;
                 OpenInBrowser(e.Uri);
             };
-            TranscriptView.CoreWebView2.NavigateToString(TranscriptHtmlBuilder.BaseDocument());
+
+            // File-path links in transcript cards post "open-file:<path>" messages
+            // (see TranscriptHtmlBuilder.FileLink) — the desktop counterpart of the
+            // CLI's clickable terminal hyperlinks.
+            TranscriptView.CoreWebView2.WebMessageReceived += (_, e) =>
+            {
+                string? msg = null;
+                try { msg = e.TryGetWebMessageAsString(); } catch { /* non-string message — not ours */ }
+                if (msg != null && msg.StartsWith("open-file:", StringComparison.Ordinal))
+                    OpenTranscriptPath(msg["open-file:".Length..]);
+                else if (msg != null && msg.StartsWith("copy:", StringComparison.Ordinal))
+                    CopyToClipboard(msg["copy:".Length..]);
+            };
+            // Serve bundled web assets (highlight.js) to the transcript document.
+            // Missing folder just means syntax highlighting silently doesn't engage.
+            try
+            {
+                TranscriptView.CoreWebView2.SetVirtualHostNameToFolderMapping(
+                    "mandocode.assets",
+                    Path.Combine(AppContext.BaseDirectory, "Assets", "web"),
+                    Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Allow);
+            }
+            catch { }
+
+            TranscriptView.CoreWebView2.NavigateToString(TranscriptHtmlBuilder.BaseDocument(ThemeManager.Current));
         }
         catch (Exception ex)
         {
@@ -166,6 +216,54 @@ public sealed partial class MainWindow : Window, IApprovalUi
 
         InputBox.Focus(FocusState.Programmatic);
         await Task.Run(_controller.InitializeAsync);
+    }
+
+    /// <summary>Snapshots the transcript document to a standalone .html file. The
+    /// highlight classes and CSS are already baked into the DOM, so the saved page
+    /// keeps its colors with no script dependencies.</summary>
+    private async void SaveTranscript_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_webViewReady) return;
+        try
+        {
+            var json = await TranscriptView.CoreWebView2.ExecuteScriptAsync("document.documentElement.outerHTML");
+            var html = JsonSerializer.Deserialize<string>(json) ?? "";
+
+            var picker = new Windows.Storage.Pickers.FileSavePicker();
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+            picker.FileTypeChoices.Add("HTML page", new List<string> { ".html" });
+            picker.SuggestedFileName = $"mandocode-transcript-{DateTime.Now:yyyy-MM-dd-HHmm}";
+            var file = await picker.PickSaveFileAsync();
+            if (file == null) return;
+
+            await Windows.Storage.FileIO.WriteTextAsync(file, "<!DOCTYPE html>\n" + html);
+            _transcript.Append(_html.Success($"Transcript saved to {file.Path}"));
+        }
+        catch (Exception ex)
+        {
+            _transcript.Append(_html.Warn($"Couldn't save transcript: {ex.Message}"));
+        }
+    }
+
+    /// <summary>Opens a clicked transcript path with its default app (folders open in
+    /// Explorer). Relative paths — how operation cards display them — resolve against
+    /// the current project root.</summary>
+    private void OpenTranscriptPath(string raw)
+    {
+        try
+        {
+            var path = raw.Trim();
+            if (!Path.IsPathRooted(path)) path = Path.Combine(_projectRoot.ProjectRoot, path);
+            path = Path.GetFullPath(path);
+            if (File.Exists(path) || Directory.Exists(path))
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = path, UseShellExecute = true });
+            else
+                _transcript.Append(_html.Warn($"Can't open — no longer exists: {path}"));
+        }
+        catch (Exception ex)
+        {
+            _transcript.Append(_html.Warn($"Couldn't open file: {ex.Message}"));
+        }
     }
 
     // ============================================================
@@ -506,9 +604,13 @@ public sealed partial class MainWindow : Window, IApprovalUi
             ApprovalButtons.Children.Clear();
             foreach (var option in request.Options)
             {
+                var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+                if (!string.IsNullOrEmpty(option.Glyph))
+                    content.Children.Add(new FontIcon { Glyph = option.Glyph, FontSize = 13 });
+                content.Children.Add(new TextBlock { Text = option.Label });
                 var button = new Button
                 {
-                    Content = option.Label,
+                    Content = content,
                     HorizontalAlignment = HorizontalAlignment.Stretch,
                     HorizontalContentAlignment = HorizontalAlignment.Left,
                     Tag = option.Label
@@ -532,10 +634,33 @@ public sealed partial class MainWindow : Window, IApprovalUi
 
             InstructionPanel.Visibility = Visibility.Collapsed;
             ApprovalButtons.Visibility = Visibility.Visible;
+            SetApprovalCardSize(instructionMode: false);
             ApprovalOverlay.Visibility = Visibility.Visible;
+            _approvalToastDismissed = false;   // each new approval earns a fresh toast
+            RefreshNavIcons();
         });
 
         return tcs.Task;
+    }
+
+    /// <summary>Approval mode: compact centered card. Instruction mode: full width and
+    /// half the window height, centered — room to write real instructions.</summary>
+    private void SetApprovalCardSize(bool instructionMode)
+    {
+        if (instructionMode)
+        {
+            ApprovalCard.HorizontalAlignment = HorizontalAlignment.Stretch;
+            ApprovalCard.MaxWidth = double.PositiveInfinity;
+            ApprovalCard.MaxHeight = double.PositiveInfinity;
+            ApprovalCard.Height = Math.Max(320, Root.ActualHeight * 0.5);
+        }
+        else
+        {
+            ApprovalCard.HorizontalAlignment = HorizontalAlignment.Center;
+            ApprovalCard.MaxWidth = 860;
+            ApprovalCard.MaxHeight = 640;
+            ApprovalCard.Height = double.NaN;
+        }
     }
 
     public Task<string> ShowInstructionInputAsync(string prompt, string placeholder = "", bool allowCancel = false, CancellationToken ct = default)
@@ -563,7 +688,10 @@ public sealed partial class MainWindow : Window, IApprovalUi
                 : placeholder;
             InstructionCancelButton.Visibility = allowCancel ? Visibility.Visible : Visibility.Collapsed;
             InstructionPanel.Visibility = Visibility.Visible;
+            SetApprovalCardSize(instructionMode: true);
             ApprovalOverlay.Visibility = Visibility.Visible;
+            _approvalToastDismissed = false;
+            RefreshNavIcons();
             InstructionBox.Focus(FocusState.Programmatic);
         });
 
@@ -574,6 +702,13 @@ public sealed partial class MainWindow : Window, IApprovalUi
     {
         if (e.Key == VirtualKey.Enter)
         {
+            // Shift+Enter inserts a newline (the box is multi-line); plain Enter submits.
+            // PreviewKeyDown is required here — with AcceptsReturn, the class handler
+            // would insert the newline before a plain KeyDown handler ever ran.
+            var shift = Microsoft.UI.Input.InputKeyboardSource
+                .GetKeyStateForCurrentThread(VirtualKey.Shift)
+                .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+            if (shift) return;
             e.Handled = true;
             SubmitInstruction();
         }
@@ -607,6 +742,8 @@ public sealed partial class MainWindow : Window, IApprovalUi
     {
         ApprovalOverlay.Visibility = Visibility.Collapsed;
         ApprovalDiffList.ItemsSource = null;
+        _approvalToastDismissed = false;
+        RefreshNavIcons();
         InputBox.Focus(FocusState.Programmatic);
     }
 
@@ -615,6 +752,39 @@ public sealed partial class MainWindow : Window, IApprovalUi
     // ============================================================
 
     private string _currentPage = "chat";
+
+    /// <summary>The approval overlay lives inside the chat page, so an approval that
+    /// arrives while you're on Settings/MCP doesn't interrupt — the chat icon turns
+    /// gold instead, and the modal is waiting when you switch back.</summary>
+    private bool _approvalToastDismissed;
+
+    private void RefreshNavIcons()
+    {
+        var accent = (SolidColorBrush)Application.Current.Resources["MandoAccentBrush"];
+        var normal = (SolidColorBrush)Application.Current.Resources["MandoDimBrush"];
+        var gold = (SolidColorBrush)Application.Current.Resources["MandoGoldBrush"];
+        var approvalPending = ApprovalOverlay.Visibility == Visibility.Visible && _currentPage != "chat";
+
+        NavChatIcon.Foreground = _currentPage == "chat" ? accent : (approvalPending ? gold : normal);
+        NavSettingsIcon.Foreground = _currentPage == "settings" ? accent : normal;
+        NavMcpIcon.Foreground = _currentPage == "mcp" ? accent : normal;
+        ToolTipService.SetToolTip(NavChat, approvalPending ? "Chat — approval waiting" : "Chat");
+
+        // The toast mirrors the same pending state: it appears when an approval shows
+        // while you're on another page, and clears the moment you reach chat or the
+        // approval resolves. Dismissing it leaves the gold icon as the passive cue.
+        if (approvalPending) ApprovalToastText.Text = ApprovalTitle.Text;
+        ApprovalToast.Visibility = approvalPending && !_approvalToastDismissed
+            ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void ApprovalToast_Tapped(object sender, TappedRoutedEventArgs e) => SwitchPage("chat");
+
+    private void ApprovalToastDismiss_Click(object sender, RoutedEventArgs e)
+    {
+        _approvalToastDismissed = true;
+        ApprovalToast.Visibility = Visibility.Collapsed;
+    }
 
     private void NavChat_Click(object sender, RoutedEventArgs e) => SwitchPage("chat");
     private void NavSettings_Click(object sender, RoutedEventArgs e) => SwitchPage("settings");
@@ -627,11 +797,7 @@ public sealed partial class MainWindow : Window, IApprovalUi
         SettingsPage.Visibility = page == "settings" ? Visibility.Visible : Visibility.Collapsed;
         McpPage.Visibility = page == "mcp" ? Visibility.Visible : Visibility.Collapsed;
 
-        var accent = (SolidColorBrush)Application.Current.Resources["MandoAccentBrush"];
-        var normal = new SolidColorBrush(Colors.Gray);
-        NavChatIcon.Foreground = page == "chat" ? accent : normal;
-        NavSettingsIcon.Foreground = page == "settings" ? accent : normal;
-        NavMcpIcon.Foreground = page == "mcp" ? accent : normal;
+        RefreshNavIcons();
 
         if (page == "settings")
         {
@@ -663,7 +829,8 @@ public sealed partial class MainWindow : Window, IApprovalUi
         {
             var cfg = _controller.Config;
             EndpointBox.Text = cfg.OllamaEndpoint;
-            ModelCombo.Text = cfg.GetEffectiveModelName();
+            _modelComboTarget = cfg.GetEffectiveModelName();
+            ApplyModelComboTarget();
             S_ContextLength.Value = cfg.ContextLength;
             S_Temperature.Value = cfg.Temperature;
             S_TemperatureLabel.Text = cfg.Temperature.ToString("0.##");
@@ -678,16 +845,110 @@ public sealed partial class MainWindow : Window, IApprovalUi
             S_ToolBudget.Value = cfg.ToolResultCharBudget;
             S_RenderTimeout.Value = cfg.MarkdownRenderTimeoutSeconds;
             S_WebSearch.IsOn = cfg.EnableWebSearch;
-            S_TavilyKey.Password = "";
-            S_TavilyKey.PlaceholderText = string.IsNullOrEmpty(cfg.TavilyApiKey)
-                ? "tvly-…" : "(key saved — enter a new one to replace, or type 'clear')";
+            S_TavilyKey.Password = cfg.TavilyApiKey ?? "";
+            S_TavilyKey.PasswordRevealMode = PasswordRevealMode.Hidden;
+            TavilyViewButton.Content = "View";
+            TavilyViewButton.IsEnabled = !string.IsNullOrEmpty(cfg.TavilyApiKey);
             S_Mcp.IsOn = cfg.EnableMcp;
+            for (int i = 0; i < UiTheme.All.Count; i++)
+                if (UiTheme.All[i] == ThemeManager.Current) ThemeList.SelectedIndex = i;
             SettingsStatus.Text = "";
         }
         finally
         {
             _loadingSettings = false;
         }
+    }
+
+    private void SettingsTabs_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
+    {
+        var s = sender.SelectedItem;
+        TabPanel_Connection.Visibility = s == Tab_Connection ? Visibility.Visible : Visibility.Collapsed;
+        TabPanel_Generation.Visibility = s == Tab_Generation ? Visibility.Visible : Visibility.Collapsed;
+        TabPanel_Behavior.Visibility = s == Tab_Behavior ? Visibility.Visible : Visibility.Collapsed;
+        TabPanel_Limits.Visibility = s == Tab_Limits ? Visibility.Visible : Visibility.Collapsed;
+        TabPanel_Integrations.Visibility = s == Tab_Integrations ? Visibility.Visible : Visibility.Collapsed;
+        TabPanel_Appearance.Visibility = s == Tab_Appearance ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void WindowOpacity_Changed(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+    {
+        // The slider's XAML Value fires this during InitializeComponent, before the
+        // label (declared after it) exists — nothing to update yet, the constructor
+        // applies the persisted opacity right after the tree is built.
+        if (S_WindowOpacityLabel is null) return;
+        S_WindowOpacityLabel.Text = $"{(int)e.NewValue}%";
+        ThemeManager.SetWindowOpacity(e.NewValue / 100.0);
+        ApplyWindowOpacity(ThemeManager.WindowOpacity);
+    }
+
+    // WinUI has no Window.Opacity — whole-window translucency is a Win32 layered-window
+    // attribute on the HWND. At 100% the layered style is removed entirely so the
+    // compositor does no extra work for the default solid window.
+    private const int GWL_EXSTYLE = -20;
+    private const int WS_EX_LAYERED = 0x80000;
+    private const uint LWA_ALPHA = 0x2;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    private static extern nint GetWindowLongPtr(nint hWnd, int nIndex);
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
+    private static extern nint SetWindowLongPtr(nint hWnd, int nIndex, nint dwNewLong);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool SetLayeredWindowAttributes(nint hWnd, uint crKey, byte bAlpha, uint dwFlags);
+
+    private void ApplyWindowOpacity(double opacity)
+    {
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        var exStyle = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
+        if (opacity >= 0.995)
+        {
+            SetWindowLongPtr(hwnd, GWL_EXSTYLE, exStyle & ~(nint)WS_EX_LAYERED);
+        }
+        else
+        {
+            SetWindowLongPtr(hwnd, GWL_EXSTYLE, exStyle | (nint)WS_EX_LAYERED);
+            SetLayeredWindowAttributes(hwnd, 0, (byte)Math.Round(opacity * 255), LWA_ALPHA);
+        }
+    }
+
+    private void ThemeList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loadingSettings || ThemeList.SelectedItem is not ThemeVm vm) return;
+        ThemeManager.Apply(vm.Theme, Root);
+        SettingsStatus.Text = $"Theme set to {vm.Theme.Name}.";
+    }
+
+    /// <summary>Recolors the WebView2 transcript in place (CSS variables) when the theme changes.</summary>
+    private async void ApplyThemeToTranscript()
+    {
+        var theme = ThemeManager.Current;
+        TranscriptView.DefaultBackgroundColor = ThemeManager.C(theme.Background);
+        if (_webViewReady)
+        {
+            try { await TranscriptView.CoreWebView2.ExecuteScriptAsync(ThemeManager.BuildTranscriptScript(theme)); }
+            catch { /* WebView gone (window closing) — nothing to recolor */ }
+        }
+    }
+
+    private string _modelComboTarget = "";
+
+    /// <summary>An editable ComboBox drops programmatic Text while its template isn't
+    /// loaded (the Settings page starts collapsed) — so the intended model name is kept
+    /// here and re-applied on the combo's Loaded event. Selecting the matching pulled
+    /// model when one exists also marks it in the dropdown.</summary>
+    private void ApplyModelComboTarget()
+    {
+        if (_modelComboTarget.Length == 0) return;
+        if (ModelCombo.ItemsSource is IList<string> models)
+        {
+            var idx = models.IndexOf(_modelComboTarget);
+            if (idx >= 0)
+            {
+                ModelCombo.SelectedIndex = idx;
+                return;
+            }
+        }
+        ModelCombo.Text = _modelComboTarget;
     }
 
     /// <summary>One write path for the whole page: ConfigKeySetter via the controller.</summary>
@@ -724,6 +985,17 @@ public sealed partial class MainWindow : Window, IApprovalUi
         await ApplySettingAsync("streaming", mode);
     }
 
+    /// <summary>Enables View as soon as there's anything to reveal (saved key or fresh typing).</summary>
+    private void TavilyKey_Changed(object sender, RoutedEventArgs e) =>
+        TavilyViewButton.IsEnabled = S_TavilyKey.Password.Length > 0;
+
+    private void TavilyView_Click(object sender, RoutedEventArgs e)
+    {
+        var show = S_TavilyKey.PasswordRevealMode != PasswordRevealMode.Visible;
+        S_TavilyKey.PasswordRevealMode = show ? PasswordRevealMode.Visible : PasswordRevealMode.Hidden;
+        TavilyViewButton.Content = show ? "Hide" : "View";
+    }
+
     private async void TavilySave_Click(object sender, RoutedEventArgs e)
     {
         var key = S_TavilyKey.Password;
@@ -741,12 +1013,12 @@ public sealed partial class MainWindow : Window, IApprovalUi
 
     private async Task RefreshModelListAsync()
     {
-        SettingsStatus.Text = "Fetching models…";
+        ModelListStatus.Text = "Fetching models…";
         var models = await Task.Run(_controller.ListModelsAsync);
-        var current = ModelCombo.Text;
+        if (!string.IsNullOrEmpty(ModelCombo.Text)) _modelComboTarget = ModelCombo.Text;
         ModelCombo.ItemsSource = models;
-        ModelCombo.Text = current;
-        SettingsStatus.Text = models.Count == 0
+        ApplyModelComboTarget();
+        ModelListStatus.Text = models.Count == 0
             ? "No models found — is Ollama running? (ollama serve, then ollama pull <model>)"
             : $"{models.Count} model(s) available.";
     }

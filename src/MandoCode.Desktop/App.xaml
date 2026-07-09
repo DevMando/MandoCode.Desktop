@@ -1,7 +1,8 @@
 <Application
     x:Class="MandoCode.Desktop.App"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    RequestedTheme="Dark">
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
@@ -20,6 +21,31 @@
             <SolidColorBrush x:Key="MandoSkyBrush" Color="{StaticResource MandoSkyColor}" />
             <SolidColorBrush x:Key="MandoGreenBrush" Color="{StaticResource MandoGreenColor}" />
             <SolidColorBrush x:Key="MandoRedBrush" Color="{StaticResource MandoRedColor}" />
+
+            <!-- Surface colors, same values as the WebView2 transcript CSS variables
+                 in TranscriptHtmlBuilder (bg, panel, border, fg, dim), so native
+                 pages and the chat render on identical surfaces -->
+            <Color x:Key="MandoBackgroundColor">#16121F</Color>
+            <Color x:Key="MandoPanelColor">#201A2E</Color>
+            <Color x:Key="MandoBorderColor">#362C4D</Color>
+            <Color x:Key="MandoTextColor">#E6E1F0</Color>
+            <Color x:Key="MandoDimColor">#8F87A3</Color>
+            <SolidColorBrush x:Key="MandoBackgroundBrush" Color="{StaticResource MandoBackgroundColor}" />
+            <SolidColorBrush x:Key="MandoPanelBrush" Color="{StaticResource MandoPanelColor}" />
+            <SolidColorBrush x:Key="MandoBorderBrush" Color="{StaticResource MandoBorderColor}" />
+            <SolidColorBrush x:Key="MandoTextBrush" Color="{StaticResource MandoTextColor}" />
+            <SolidColorBrush x:Key="MandoDimBrush" Color="{StaticResource MandoDimColor}" />
+
+            <!-- Replace the user's Windows accent color with MandoCode purple so
+                 accent buttons, toggle switches, sliders, and selection highlights
+                 match the brand on every machine -->
+            <Color x:Key="SystemAccentColor">#C864FF</Color>
+            <Color x:Key="SystemAccentColorLight1">#D183FF</Color>
+            <Color x:Key="SystemAccentColorLight2">#C864FF</Color>
+            <Color x:Key="SystemAccentColorLight3">#E3ADFF</Color>
+            <Color x:Key="SystemAccentColorDark1">#A94FE0</Color>
+            <Color x:Key="SystemAccentColorDark2">#8C3BC2</Color>
+            <Color x:Key="SystemAccentColorDark3">#6F2AA3</Color>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

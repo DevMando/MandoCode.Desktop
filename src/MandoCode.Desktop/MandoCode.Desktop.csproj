@@ -24,6 +24,15 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Local web assets served to the transcript WebView2 via
+         SetVirtualHostNameToFolderMapping. Bundled, never fetched from a CDN,
+         so the transcript works fully offline (MandoCode is offline-first). -->
+    <Content Include="Assets\web\**">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.2.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.2" />
   </ItemGroup>
