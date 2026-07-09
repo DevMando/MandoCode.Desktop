@@ -1,4 +1,4 @@
-using MandoCode.Models;
+﻿using MandoCode.Models;
 using MandoCode.Services;
 
 namespace MandoCode.Desktop.Services;
@@ -24,6 +24,13 @@ public sealed class WinUiApprovalService
     /// <summary>Set by MainWindow once the window exists. Approvals auto-approve are
     /// impossible before that because no AI request can start without the window.</summary>
     public IApprovalUi? Ui { get; set; }
+
+    // Segoe Fluent icon glyphs for the approval option buttons.
+    private const string GlyphApprove = "";        // check mark
+    private const string GlyphApproveNoAsk = "";   // completed (check in circle)
+    private const string GlyphDeny = "";           // cancel (X)
+    private const string GlyphInstructions = "";   // edit (pencil)
+    private const string GlyphCancelPlan = "";     // stop
 
     // Same labels as the CLI so behavior (and muscle memory) match.
     private const string ApproveLabel = "Approve";
@@ -79,12 +86,12 @@ public sealed class WinUiApprovalService
 
         var options = new List<ApprovalOption>
         {
-            new(ApproveLabel, ApprovalOptionKind.Proceed),
-            new(noAskLabel, ApprovalOptionKind.Proceed),
-            new(DenyLabel, ApprovalOptionKind.Redirect),
-            new(ProvideInstructionsLabel, ApprovalOptionKind.Redirect)
+            new(ApproveLabel, ApprovalOptionKind.Proceed, GlyphApprove),
+            new(noAskLabel, ApprovalOptionKind.Proceed, GlyphApproveNoAsk),
+            new(DenyLabel, ApprovalOptionKind.Redirect, GlyphDeny),
+            new(ProvideInstructionsLabel, ApprovalOptionKind.Redirect, GlyphInstructions)
         };
-        if (_planHandoff.IsExecuting) options.Add(new(CancelPlanLabel, ApprovalOptionKind.Destructive));
+        if (_planHandoff.IsExecuting) options.Add(new(CancelPlanLabel, ApprovalOptionKind.Destructive, GlyphCancelPlan));
 
         var request = new ApprovalRequest
         {
@@ -95,7 +102,7 @@ public sealed class WinUiApprovalService
             Options = options
         };
 
-        var choice = await RequireUi().ShowApprovalAsync(request);
+        var (choice, instructions) = await PromptAllowingInstructionCancelAsync(request);
 
         DiffApprovalResult result;
         if (choice == ApproveLabel)
@@ -130,7 +137,6 @@ public sealed class WinUiApprovalService
         }
         else // Provide new instructions
         {
-            var instructions = await RequireUi().ShowInstructionInputAsync("Enter your instructions:");
             _transcript.Append(_html.Warn("Redirecting with new instructions..."));
             result = new DiffApprovalResult
             {
@@ -159,12 +165,12 @@ public sealed class WinUiApprovalService
 
         var options = new List<ApprovalOption>
         {
-            new(ApproveLabel, ApprovalOptionKind.Proceed),
-            new(ApproveNoAskRunLabel, ApprovalOptionKind.Proceed),
-            new(DenyLabel, ApprovalOptionKind.Redirect),
-            new(ProvideInstructionsLabel, ApprovalOptionKind.Redirect)
+            new(ApproveLabel, ApprovalOptionKind.Proceed, GlyphApprove),
+            new(ApproveNoAskRunLabel, ApprovalOptionKind.Proceed, GlyphApproveNoAsk),
+            new(DenyLabel, ApprovalOptionKind.Redirect, GlyphDeny),
+            new(ProvideInstructionsLabel, ApprovalOptionKind.Redirect, GlyphInstructions)
         };
-        if (_planHandoff.IsExecuting) options.Add(new(CancelPlanLabel, ApprovalOptionKind.Destructive));
+        if (_planHandoff.IsExecuting) options.Add(new(CancelPlanLabel, ApprovalOptionKind.Destructive, GlyphCancelPlan));
 
         var request = new ApprovalRequest
         {
@@ -173,7 +179,7 @@ public sealed class WinUiApprovalService
             Options = options
         };
 
-        var choice = await RequireUi().ShowApprovalAsync(request);
+        var (choice, instructions) = await PromptAllowingInstructionCancelAsync(request);
 
         DiffApprovalResult result;
         if (choice == ApproveLabel)
@@ -200,7 +206,6 @@ public sealed class WinUiApprovalService
         }
         else
         {
-            var instructions = await RequireUi().ShowInstructionInputAsync("Enter your instructions:");
             _transcript.Append(_html.Warn("Redirecting with new instructions..."));
             result = new DiffApprovalResult
             {
@@ -258,12 +263,12 @@ public sealed class WinUiApprovalService
 
         var options = new List<ApprovalOption>
         {
-            new(ApproveDeletionLabel, ApprovalOptionKind.Proceed),
-            new(ApproveNoAskDeleteLabel, ApprovalOptionKind.Proceed),
-            new(DenyLabel, ApprovalOptionKind.Redirect),
-            new(ProvideInstructionsLabel, ApprovalOptionKind.Redirect)
+            new(ApproveDeletionLabel, ApprovalOptionKind.Proceed, GlyphApprove),
+            new(ApproveNoAskDeleteLabel, ApprovalOptionKind.Proceed, GlyphApproveNoAsk),
+            new(DenyLabel, ApprovalOptionKind.Redirect, GlyphDeny),
+            new(ProvideInstructionsLabel, ApprovalOptionKind.Redirect, GlyphInstructions)
         };
-        if (_planHandoff.IsExecuting) options.Add(new(CancelPlanLabel, ApprovalOptionKind.Destructive));
+        if (_planHandoff.IsExecuting) options.Add(new(CancelPlanLabel, ApprovalOptionKind.Destructive, GlyphCancelPlan));
 
         var request = new ApprovalRequest
         {
@@ -274,7 +279,7 @@ public sealed class WinUiApprovalService
             Options = options
         };
 
-        var choice = await RequireUi().ShowApprovalAsync(request);
+        var (choice, instructions) = await PromptAllowingInstructionCancelAsync(request);
 
         DiffApprovalResult result;
         if (choice == ApproveDeletionLabel)
@@ -301,7 +306,6 @@ public sealed class WinUiApprovalService
         }
         else
         {
-            var instructions = await RequireUi().ShowInstructionInputAsync("Enter your instructions:");
             _transcript.Append(_html.Warn("Redirecting with new instructions..."));
             result = new DiffApprovalResult
             {
@@ -331,11 +335,11 @@ public sealed class WinUiApprovalService
         var noAskMcpLabel = $"Approve - don't ask again for {toolName} this session";
         var options = new List<ApprovalOption>
         {
-            new(ApproveLabel, ApprovalOptionKind.Proceed),
-            new(noAskMcpLabel, ApprovalOptionKind.Proceed),
-            new(DenyLabel, ApprovalOptionKind.Redirect)
+            new(ApproveLabel, ApprovalOptionKind.Proceed, GlyphApprove),
+            new(noAskMcpLabel, ApprovalOptionKind.Proceed, GlyphApproveNoAsk),
+            new(DenyLabel, ApprovalOptionKind.Redirect, GlyphDeny)
         };
-        if (_planHandoff.IsExecuting) options.Add(new(CancelPlanLabel, ApprovalOptionKind.Destructive));
+        if (_planHandoff.IsExecuting) options.Add(new(CancelPlanLabel, ApprovalOptionKind.Destructive, GlyphCancelPlan));
 
         var request = new ApprovalRequest
         {
@@ -370,6 +374,25 @@ public sealed class WinUiApprovalService
 
         _busy.Start();
         return result;
+    }
+
+    /// <summary>
+    /// Shows the approval prompt; when the user picks "Provide new instructions" the
+    /// text input opens with a Cancel button, and cancelling returns to the original
+    /// approval prompt (misclick recovery) instead of committing to the redirect.
+    /// Desktop-only affordance — the CLI's flow has no equivalent back-step.
+    /// </summary>
+    private async Task<(string Choice, string? Instructions)> PromptAllowingInstructionCancelAsync(ApprovalRequest request)
+    {
+        while (true)
+        {
+            var choice = await RequireUi().ShowApprovalAsync(request);
+            if (choice != ProvideInstructionsLabel) return (choice, null);
+
+            var instructions = await RequireUi().ShowInstructionInputAsync(
+                "Enter your instructions:", allowCancel: true);
+            if (instructions != ApprovalSignals.Cancelled) return (choice, instructions);
+        }
     }
 
     private IApprovalUi RequireUi() =>

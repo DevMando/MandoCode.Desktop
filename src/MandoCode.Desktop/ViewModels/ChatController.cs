@@ -336,25 +336,33 @@ public sealed partial class ChatController
                     return;
                 }
 
-                var responseBuffer = new StringBuilder();
-                responseBuffer.Append(enumerator.Current);
-
-                // Auto-continuation turns arrive as additional elements.
-                while (await enumerator.MoveNextAsync())
-                    responseBuffer.Append(enumerator.Current);
+                // Each element is one completed chat turn — auto-continuations and
+                // post-approval turns arrive as additional elements. Flush every turn
+                // to the transcript as it completes so its text lands next to the
+                // approval/diff cards it belongs with, instead of every turn coalescing
+                // into a single card after the final one.
+                var segments = new List<string>();
+                do
+                {
+                    var segment = enumerator.Current.Trim();
+                    if (segment.Length > 0)
+                    {
+                        segments.Add(segment);
+                        _transcript.Append(_html.AssistantCard(segment));
+                    }
+                } while (await enumerator.MoveNextAsync());
 
                 _busy.Stop();
 
-                var responseText = responseBuffer.ToString().Trim();
-                if (string.IsNullOrEmpty(responseText))
+                if (segments.Count == 0)
                 {
                     _transcript.Append(_html.Warn("Model returned an empty response. The context may be too large for this model."));
                     _transcript.Append(_html.Dim("Try a smaller request, or switch to a model with a larger context window."));
                 }
                 else
                 {
+                    var responseText = string.Join("\n\n", segments);
                     _lastAiResponse = responseText;
-                    _transcript.Append(_html.AssistantCard(responseText));
 
                     if (Looks401(responseText))
                     {
