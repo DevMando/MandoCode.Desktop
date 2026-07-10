@@ -46,4 +46,22 @@
     <ProjectReference Include="..\..\MandoCode\src\MandoCode\MandoCode.csproj" />
   </ItemGroup>
 
+  <!-- Every agent tab runs on its own clone of MandoCodeConfig so it can pin its own model.
+       A clone must never be persisted: MandoCodeConfig.Save() always writes the one shared
+       ~/.mandocode/config.json, so a stray _config.Save() in ChatController would silently
+       publish one tab's model as everybody's default.
+
+       ConfigCoordinator is the only place allowed to call Save(). That can't be enforced by
+       the type system — Save() is public and non-virtual on a type in the read-only harness
+       submodule — so it's enforced here instead, and it breaks the build rather than a test. -->
+  <Target Name="GuardAgainstDirectConfigSave" BeforeTargets="CoreCompile">
+    <PropertyGroup>
+      <_ChatControllerSource>$([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)\ViewModels\ChatController.cs'))</_ChatControllerSource>
+      <_WizardsSource>$([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)\ViewModels\ChatController.Wizards.cs'))</_WizardsSource>
+    </PropertyGroup>
+    <Error Condition="$(_ChatControllerSource.Contains('_config.Save')) Or $(_WizardsSource.Contains('_config.Save'))"
+           Code="MANDO001"
+           Text="ChatController must not call _config.Save() — it holds a per-tab config clone, and Save() writes the shared config file. Mutate ConfigCoordinator.Canonical and call SaveAndFanOutAsync() instead." />
+  </Target>
+
 </Project>

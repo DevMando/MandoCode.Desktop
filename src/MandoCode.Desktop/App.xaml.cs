@@ -51,74 +51,49 @@ public partial class App : Application
 
         services.AddSingleton(config);
 
-        // Project root: first command-line arg, else current directory. The UI also
-        // has an "Open Folder" action that mutates ProjectRootAccessor at runtime.
+        // Project root the FIRST tab opens on: first command-line arg, else current directory.
+        // Every tab owns its own ProjectRootAccessor thereafter (see AgentSession), so the
+        // folder button retargets one tab without disturbing the others.
         var cmdArgs = Environment.GetCommandLineArgs().Skip(1).ToArray();
         var projectRoot = cmdArgs.Length > 0 && System.IO.Directory.Exists(cmdArgs[0])
             ? System.IO.Path.GetFullPath(cmdArgs[0])
             : Environment.CurrentDirectory;
-        services.AddSingleton(new ProjectRootAccessor(projectRoot));
 
-        // ---- Harness services, reused verbatim ----
-        // SpinnerService writes ANSI to Console, which is a harmless no-op in a
-        // windowed app (no console attached). It's still registered because AIService
-        // takes it as a constructor dependency; the real busy UI is BusyStateService.
+        // ---- App-global singletons ----
+        // Everything that carries per-conversation state (AIService, ChatController, the three
+        // approval gates, TranscriptWriter, BusyStateService, TokenTrackingService, …) is built
+        // per tab by AgentSession and is deliberately NOT registered here.
+        //
+        // SpinnerService writes ANSI to Console, a harmless no-op in a windowed app (no console
+        // attached). It's still registered because AIService takes it; the real busy UI is the
+        // per-tab BusyStateService.
         services.AddSingleton<SpinnerService>();
-        services.AddSingleton<ApprovalPromptGate>();
-        services.AddSingleton<TokenTrackingService>();
-        services.AddSingleton<PlanHandoff>();
 
-        services.AddSingleton(provider =>
-        {
-            var cfg = provider.GetRequiredService<MandoCodeConfig>();
-            var root = provider.GetRequiredService<ProjectRootAccessor>();
-            return new SkillLoader(cfg, root);
-        });
+        // The single McpClientManager is created and owned by McpCoordinator, not registered here:
+        // it must run on a config that always has MCP enabled, because EnableMcp is a per-agent
+        // setting in this app. See the note on McpCoordinator._hostConfig.
 
-        services.AddSingleton(provider => new McpClientManager(provider.GetRequiredService<MandoCodeConfig>()));
-        services.AddSingleton(provider => new McpApprovalGate(provider.GetRequiredService<MandoCodeConfig>()));
-
-        services.AddSingleton(provider =>
-        {
-            var cfg = provider.GetRequiredService<MandoCodeConfig>();
-            var tokenTracker = provider.GetRequiredService<TokenTrackingService>();
-            var root = provider.GetRequiredService<ProjectRootAccessor>();
-            var planHandoff = provider.GetRequiredService<PlanHandoff>();
-            var skillLoader = provider.GetRequiredService<SkillLoader>();
-            var mcpManager = provider.GetRequiredService<McpClientManager>();
-            var mcpGate = provider.GetRequiredService<McpApprovalGate>();
-            var spinner = provider.GetRequiredService<SpinnerService>();
-            return new AIService(root, cfg, tokenTracker, planHandoff, skillLoader, mcpManager, mcpGate, spinner);
-        });
-
-        services.AddSingleton(provider =>
-        {
-            var ai = provider.GetRequiredService<AIService>();
-            var cfg = provider.GetRequiredService<MandoCodeConfig>();
-            return new TaskPlannerService(ai, cfg);
-        });
-
+        // One audio device.
         services.AddSingleton(provider => new MusicPlayerService(provider.GetRequiredService<MandoCodeConfig>()));
-
-        services.AddSingleton(provider =>
-        {
-            var cfg = provider.GetRequiredService<MandoCodeConfig>();
-            var ignoreDirs = new HashSet<string>(MandoCodeConfig.DefaultIgnoreDirectories);
-            foreach (var dir in cfg.IgnoreDirectories) ignoreDirs.Add(dir);
-            var root = provider.GetRequiredService<ProjectRootAccessor>();
-            return new FileAutocompleteProvider(root, ignoreDirs);
-        });
 
         // ---- WinUI-side services (replace the terminal rendering layer) ----
         // Update checks hit MandoCode.Desktop's own GitHub releases, not the CLI's NuGet
         // package — the CLI's UpdateCheckService is deliberately NOT registered.
         services.AddSingleton<UiUpdateCheckService>();
-        services.AddSingleton<TranscriptWriter>();
-        services.AddSingleton<BusyStateService>();
-        services.AddSingleton<TranscriptHtmlBuilder>();
-        services.AddSingleton<ShellRunner>();
-        services.AddSingleton<WinUiApprovalService>();
-        services.AddSingleton<ChatController>();
+        services.AddSingleton<TranscriptHtmlBuilder>();   // stateless formatter
+
+        // App-wide store of context snapshots taken when a tab switches its model, so any tab can
+        // re-import a conversation captured by another. Session-scoped, not persisted.
+        services.AddSingleton<SnapshotStore>();
+
+        // ---- Coordinators + session registry ----
+        services.AddSingleton(provider => new ConfigCoordinator(provider.GetRequiredService<MandoCodeConfig>()));
+        services.AddSingleton(provider => new McpCoordinator(provider.GetRequiredService<MandoCodeConfig>()));
+        services.AddSingleton(provider => new SessionManager(
+            provider,
+            provider.GetRequiredService<ConfigCoordinator>(),
+            provider.GetRequiredService<McpCoordinator>(),
+            projectRoot));
 
         return services.BuildServiceProvider();
     }

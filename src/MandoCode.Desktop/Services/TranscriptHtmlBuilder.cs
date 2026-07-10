@@ -60,6 +60,20 @@ public sealed class TranscriptHtmlBuilder
     public string Error(string text) => $"<div class=\"line error\">{E(text)}</div>";
     public string Dim(string text) => $"<div class=\"line dim\">{E(text)}</div>";
 
+    /// <summary>A compact status pill — a colored state dot, a bold primary value, and an
+    /// optional dim qualifier. The dot replaces status emoji: crisp and theme-aware.
+    /// <paramref name="state"/> is "ok", "warn", "err", or "" (neutral).</summary>
+    public string StatusChip(string primary, string? secondary = null, string state = "")
+    {
+        var sb = new StringBuilder();
+        sb.Append($"<div class=\"chip-row\"><span class=\"chip {state}\"><span class=\"dot\"></span>");
+        sb.Append($"<span class=\"chip-val\">{E(primary)}</span>");
+        if (!string.IsNullOrEmpty(secondary))
+            sb.Append($"<span class=\"chip-key\">{E(secondary)}</span>");
+        sb.Append("</span></div>");
+        return sb.ToString();
+    }
+
     /// <summary>Pre-formatted block (config listings, model lists) in monospace.</summary>
     public string Mono(string text) => $"<pre class=\"mono-block\">{E(text)}</pre>";
 
@@ -266,6 +280,23 @@ public sealed class TranscriptHtmlBuilder
   .sky { color: var(--sky); }
   .red { color: var(--red); }
   .token-summary { text-align: right; font-size: 12px; }
+
+  /* Status chips — compact pills for session/connection state. A CSS status dot
+     (crisp, theme-aware) replaces status emoji; state = ok | warn | err | neutral. */
+  .chip-row { margin: 2px 0; }
+  .chip { display: inline-flex; align-items: center; gap: 7px;
+    padding: 3px 12px; border-radius: 999px; font-size: 12.5px;
+    border: 1px solid var(--border); background: var(--panel); }
+  .chip .dot { width: 7px; height: 7px; border-radius: 50%; flex: none;
+    background: var(--dim); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dim) 20%, transparent); }
+  .chip.ok .dot { background: var(--green);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 24%, transparent); }
+  .chip.warn .dot { background: var(--gold);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--gold) 24%, transparent); }
+  .chip.err .dot { background: var(--red);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 24%, transparent); }
+  .chip-val { color: var(--fg); font-weight: 600; }
+  .chip-key { color: var(--dim); }
   .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
     overflow: hidden; }
   .panel.red-border { border-color: var(--red); }
