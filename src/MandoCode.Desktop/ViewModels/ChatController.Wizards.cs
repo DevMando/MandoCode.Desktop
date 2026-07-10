@@ -160,7 +160,8 @@ public sealed partial class ChatController
                 if (probe.WasHealed)
                 {
                     _config.OllamaEndpoint = probe.NormalizedUrl;
-                    _config.Save();
+                    _configs.Defaults.OllamaEndpoint = probe.NormalizedUrl;
+                    _configs.SaveDefaults();
                     _transcript.Append(_html.Dim($"Healed trailing slash — using {probe.NormalizedUrl}"));
                 }
                 IsConnected = true;
@@ -215,7 +216,6 @@ public sealed partial class ChatController
                     ? null : "Must be an absolute http(s) URL");
             if (url == null) { WizardCancelled(); StateChanged?.Invoke(); return; }
             _config.OllamaEndpoint = url.Trim();
-            _config.Save();
         }
 
         // ---- Step 2: have a model ----
@@ -266,10 +266,18 @@ public sealed partial class ChatController
 
         // ---- Step 5: apply ----
         await ApplyModelSwitchAsync(modelTag);
+
+        // /setup configures the app, not one agent: what you just picked becomes the default new
+        // agents start on, and marks onboarding done so the wizard never re-fires. Agents already
+        // open keep whatever they were on.
         _config.HasCompletedOnboarding = true;
-        _config.Save();
+        _configs.SaveDefaultsFrom(_config);
+
         if (!ModelError)
+        {
             _transcript.Append(_html.Success("Setup complete — you're ready to go."));
+            _transcript.Append(_html.Dim("Saved as the default for new agents."));
+        }
         StateChanged?.Invoke();
     }
 

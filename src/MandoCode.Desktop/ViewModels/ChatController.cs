@@ -34,6 +34,14 @@ public sealed partial class ChatController
     private readonly BusyStateService _busy;
     private readonly ShellRunner _shell;
     private readonly ApprovalPromptGate _promptGate;
+    private readonly ConfigCoordinator _configs;
+    private readonly McpCoordinator _mcp;
+    private readonly SnapshotStore _snapshots;
+
+    /// <summary>Recap armed by "Import" — prepended (invisibly) to this agent's next message.
+    /// There is no public harness API to inject a message into a fresh conversation, so we ride it
+    /// along on the next send instead.</summary>
+    private string? _armedContext;
 
     private CancellationTokenSource? _requestCts;
     private bool _isProcessing;
@@ -92,7 +100,10 @@ public sealed partial class ChatController
         TranscriptHtmlBuilder html,
         BusyStateService busy,
         ShellRunner shell,
-        ApprovalPromptGate promptGate)
+        ApprovalPromptGate promptGate,
+        ConfigCoordinator configs,
+        McpCoordinator mcp,
+        SnapshotStore snapshots)
     {
         _ai = ai;
         _config = config;
@@ -112,12 +123,31 @@ public sealed partial class ChatController
         _busy = busy;
         _shell = shell;
         _promptGate = promptGate;
+        _configs = configs;
+        _mcp = mcp;
+        _snapshots = snapshots;
 
         // ---- Same wiring as App.razor OnInitialized ----
+        // Every delegate below is SINGLE-ASSIGNMENT, not multicast. That's safe only because
+        // _ai, _planHandoff, and _mcpGate are this tab's own instances (see AgentSession) —
+        // on shared services the last tab constructed would silently steal every approval.
         _ai.OnFunctionInvoked += OnFunctionInvoked;
         _ai.OnFunctionCompleted += OnFunctionCompleted;
         _planHandoff.OnPlanRequested = HandleProposedPlanAsync;
 
+        WireApprovalHandlers();
+
+        _tokenTracker.OnTokensUpdated += _ => StateChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// Attaches or detaches this agent's approval handlers to match its own
+    /// <c>EnableDiffApprovals</c>. The CLI marks that key "restart required" because it wires
+    /// the delegates once at startup against a shared AIService; here every agent owns its own,
+    /// so the toggle can apply live and independently per tab.
+    /// </summary>
+    private void WireApprovalHandlers()
+    {
         if (_config.EnableDiffApprovals)
         {
             _ai.OnWriteApprovalRequested = _approvals.HandleWriteApprovalAsync;
@@ -125,9 +155,36 @@ public sealed partial class ChatController
             _ai.OnCommandApprovalRequested = _approvals.HandleCommandApprovalAsync;
             _mcpGate.OnApprovalRequested = _approvals.HandleMcpApprovalAsync;
         }
-
-        _tokenTracker.OnTokensUpdated += _ => StateChanged?.Invoke();
+        else
+        {
+            _ai.OnWriteApprovalRequested = null;
+            _ai.OnDeleteApprovalRequested = null;
+            _ai.OnCommandApprovalRequested = null;
+            _mcpGate.OnApprovalRequested = null;
+        }
     }
+
+    /// <summary>Applies a just-changed setting to THIS agent. Kernel-baked keys rebuild its
+    /// kernel; history survives. Nothing touches other agents or the disk.</summary>
+    private async Task ApplyAgentSettingScopeAsync(ConfigKeySetter.ApplyScope scope)
+    {
+        WireApprovalHandlers();
+
+        // Turning MCP on for this agent has to be able to start the shared servers. They're only
+        // started at connect time, and an agent that booted with MCP off never asked for them —
+        // without this, the toggle would flip and attach nothing. Idempotent once running.
+        if (_config.EnableMcp && _config.McpServers.Count > 0)
+            await _mcp.EnsureStartedAsync();
+
+        if (scope is ConfigKeySetter.ApplyScope.KernelRebuild or ConfigKeySetter.ApplyScope.AppRestart)
+            await _ai.RefreshSettingsAsync(_config);
+    }
+
+    /// <summary>
+    /// "Make Default for New Agents" — snapshots this agent's settings onto the saved defaults.
+    /// Agents already open keep their own; only the next one you open inherits these.
+    /// </summary>
+    public void SaveAsDefaults() => _configs.SaveDefaultsFrom(_config);
 
     // ============================================================
     // Startup (port of InitializeConnectionAsync)
@@ -135,13 +192,14 @@ public sealed partial class ChatController
 
     public async Task InitializeAsync()
     {
-        _transcript.Append(_html.Info($"MandoCode Desktop — project: {_projectRoot.ProjectRoot}"));
-
         var probe = await OllamaSetupHelper.ProbeAsync(_config.OllamaEndpoint);
         if (probe.WasHealed)
         {
+            // A trailing-slash heal is a correction, not a preference — fix this agent AND the
+            // saved defaults, so every future agent starts on the working URL.
             _config.OllamaEndpoint = probe.NormalizedUrl;
-            _config.Save();
+            _configs.Defaults.OllamaEndpoint = probe.NormalizedUrl;
+            _configs.SaveDefaults();
             _transcript.Append(_html.Dim($"Detected trailing slash on Ollama URL — using {probe.NormalizedUrl}"));
         }
 
@@ -160,7 +218,7 @@ public sealed partial class ChatController
             await ValidateCurrentModelAsync();
             await InitializeMcpAsync();
             if (!ModelError)
-                _transcript.Append(_html.Success($"✓ Connected — {ModelName} ready. Type a request, or /help for commands."));
+                _transcript.Append(_html.StatusChip(ModelName, "ready", "ok"));
         }
 
         StateChanged?.Invoke();
@@ -218,16 +276,19 @@ public sealed partial class ChatController
 
         try
         {
-            await _mcpManager.StartAllAsync();
+            // The servers are process-wide and start once for the app; only the tool
+            // registration is per-tab, so a newly opened tab attaches the already-running
+            // clients to its own kernel.
+            await _mcp.EnsureStartedAsync();
             await _ai.AttachMcpPluginsAsync();
 
             var active = _mcpManager.ActiveClients.Count;
             var failed = _mcpManager.StartupErrors.Count;
             if (active > 0 || failed > 0)
             {
-                _transcript.Append(_html.Dim(failed == 0
-                    ? $"MCP: {active} server(s) connected."
-                    : $"MCP: {active} connected, {failed} failed (type /mcp for details)."));
+                _transcript.Append(failed == 0
+                    ? _html.StatusChip("MCP", $"{active} server{(active == 1 ? "" : "s")} connected", "ok")
+                    : _html.StatusChip("MCP", $"{active} connected, {failed} failed — type /mcp for details", "warn"));
             }
         }
         catch (Exception ex)
@@ -280,6 +341,17 @@ public sealed partial class ChatController
             // Plan heuristic BEFORE @file expansion so attachments don't inflate it.
             var needsPlanning = _taskPlanner.RequiresPlanning(input);
             var processedInput = ProcessFileReferences(input);
+
+            // An imported snapshot (from "Import" in the Snapshots panel) rides along ONCE, as
+            // background the model already knows — the user's echoed message stays their own text.
+            if (_armedContext is { Length: > 0 })
+            {
+                processedInput =
+                    "[Imported context recap from a previous model. Treat it as background you " +
+                    "already have; do not reply to it directly.]\n" + _armedContext +
+                    "\n\n[Current request:]\n" + processedInput;
+                _armedContext = null;
+            }
 
             if (needsPlanning)
             {
@@ -734,7 +806,9 @@ public sealed partial class ChatController
         switch (command)
         {
             case "exit":
-                _music.Dispose();
+                // Closing the window disposes the shared music player and every agent's WebView2.
+                // Doing it here would tear down the audio device for agents still open if /exit
+                // ever came to mean "close this tab".
                 ExitRequested?.Invoke();
                 return;
 
@@ -867,6 +941,9 @@ public sealed partial class ChatController
                 return;
             }
 
+            // Settings are per-agent: this edits THIS agent's config for this session only.
+            // Nothing is written to disk — "Make Default for New Agents" on the Settings page
+            // is the one action that does that.
             var result = ConfigKeySetter.TrySet(_config, parts[0], parts[1]);
             _transcript.Append(result.Ok ? _html.Success(result.Message) : _html.Error(result.Message));
             if (!result.Ok)
@@ -875,7 +952,7 @@ public sealed partial class ChatController
                 return;
             }
 
-            _config.Save();
+            await ApplyAgentSettingScopeAsync(result.Scope);
 
             if (result.PostSetValidation != null)
                 _transcript.Append(_html.Dim(await result.PostSetValidation()));
@@ -883,16 +960,17 @@ public sealed partial class ChatController
             switch (result.Scope)
             {
                 case ConfigKeySetter.ApplyScope.KernelRebuild:
-                    await _ai.RefreshSettingsAsync(_config);
-                    _transcript.Append(_html.Dim("Applied — conversation history kept."));
+                case ConfigKeySetter.ApplyScope.AppRestart:
+                    _transcript.Append(_html.Dim("Applied to this agent — conversation history kept."));
                     break;
                 case ConfigKeySetter.ApplyScope.Immediate:
                     _transcript.Append(_html.Dim("Takes effect on your next message."));
                     break;
-                case ConfigKeySetter.ApplyScope.AppRestart:
-                    _transcript.Append(_html.Dim("Saved — takes effect the next time MandoCode starts."));
+                case ConfigKeySetter.ApplyScope.DaemonRestart:
+                    _transcript.Append(_html.Dim("Applies when MandoCode next starts the Ollama daemon (one daemon serves every agent)."));
                     break;
             }
+            _transcript.Append(_html.Dim("This agent only. Settings → \"Make Default for New Agents\" to keep it."));
             StateChanged?.Invoke();
             return;
         }
@@ -915,10 +993,12 @@ public sealed partial class ChatController
     /// </summary>
     public async Task<(bool Ok, string Message)> ApplyConfigKeyAsync(string key, string value)
     {
+        // Per-agent, this session only. ConfigKeySetter is the same validation engine the CLI's
+        // /config set uses, so the page can never accept a value the CLI would reject.
         var result = ConfigKeySetter.TrySet(_config, key, value);
         if (!result.Ok) return (false, result.Message);
 
-        _config.Save();
+        await ApplyAgentSettingScopeAsync(result.Scope);
 
         var message = result.Message;
         if (result.PostSetValidation != null)
@@ -927,19 +1007,61 @@ public sealed partial class ChatController
         switch (result.Scope)
         {
             case ConfigKeySetter.ApplyScope.KernelRebuild:
-                await _ai.RefreshSettingsAsync(_config);
+            case ConfigKeySetter.ApplyScope.AppRestart:
                 message += "  (applied — conversation history kept)";
                 break;
             case ConfigKeySetter.ApplyScope.Immediate:
                 message += "  (takes effect on your next message)";
                 break;
-            case ConfigKeySetter.ApplyScope.AppRestart:
-                message += "  (takes effect the next time MandoCode Desktop starts)";
+            case ConfigKeySetter.ApplyScope.DaemonRestart:
+                message += "  (app-wide — applies when MandoCode next starts the Ollama daemon)";
                 break;
         }
 
         StateChanged?.Invoke();
         return (true, message);
+    }
+
+    /// <summary>
+    /// Opens the model picker for THIS tab — the same overlay wizard as /model. The pick is
+    /// tab-local: it repins this agent's model without touching the saved default or any other
+    /// open tab. Driven by the model button in the tab header.
+    /// </summary>
+    public Task ShowModelPickerAsync() => HandleModelCommandAsync("");
+
+    /// <summary>Result of loading the pulled-model list for the header dropdown.</summary>
+    public sealed record ModelListResult(bool Ok, string? Error, IReadOnlyList<string> Models);
+
+    /// <summary>
+    /// Loads pulled models for the header's quick-switch dropdown — cloud first, then alphabetical.
+    /// Returns an inline error string (rather than writing to the transcript) so the dropdown can
+    /// render it in place. The typed <c>/model</c> command keeps using the overlay wizard.
+    /// </summary>
+    public async Task<ModelListResult> LoadAvailableModelsAsync()
+    {
+        var probe = await OllamaSetupHelper.ProbeAsync(_config.OllamaEndpoint);
+        if (!probe.Ok)
+            return new ModelListResult(false, $"Can't reach Ollama at {_config.OllamaEndpoint}.", Array.Empty<string>());
+
+        var fetched = await OllamaSetupHelper.ListModelsWithStatusAsync(probe.NormalizedUrl);
+        if (!fetched.Ok)
+            return new ModelListResult(false, fetched.Error ?? "Couldn't fetch your model list.", Array.Empty<string>());
+        if (fetched.Models.Count == 0)
+            return new ModelListResult(false, "No models pulled yet — try: ollama pull qwen2.5-coder:14b", Array.Empty<string>());
+
+        var ordered = fetched.Models
+            .OrderBy(m => MandoCodeConfig.IsCloudModel(m) ? 0 : 1)
+            .ThenBy(m => m, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return new ModelListResult(true, null, ordered);
+    }
+
+    /// <summary>Applies a model chosen from the header dropdown (tab-local, same effect as <c>/model</c>).</summary>
+    public async Task SelectModelAsync(string modelTag)
+    {
+        if (string.IsNullOrWhiteSpace(modelTag)) return;
+        if (string.Equals(modelTag, _config.ModelName, StringComparison.OrdinalIgnoreCase)) return;
+        await ApplyModelSwitchAsync(modelTag);
     }
 
     private async Task HandleModelCommandAsync(string rawArgs)
@@ -996,9 +1118,19 @@ public sealed partial class ChatController
         await ApplyModelSwitchAsync(modelTag);
     }
 
-    /// <summary>Sets the model, sizes the context window, saves, rebuilds the kernel, revalidates.</summary>
+    /// <summary>
+    /// Sets this agent's model, sizes its context window, rebuilds its kernel, revalidates.
+    /// Like every setting, it belongs to this agent for this session — two tabs can run different
+    /// models side by side. Nothing is persisted; "Make Default for New Agents" does that.
+    /// </summary>
     private async Task ApplyModelSwitchAsync(string modelTag)
     {
+        // Snapshot the outgoing conversation BEFORE anything clears it. ReinitializeAsync below
+        // wipes the live history (a different model mid-history is a different conversation), so
+        // this is the one chance to salvage it for a later re-import.
+        var previousModel = _config.GetEffectiveModelName();
+        var captured = await CaptureContextSnapshotAsync(previousModel, modelTag);
+
         _config.ModelName = modelTag;
         _config.ModelPath = null;
 
@@ -1009,10 +1141,11 @@ public sealed partial class ChatController
             _transcript.Append(_html.Dim($"Context window sized to {recommendedCtx / 1024}k tokens for this model tier (takes effect when MandoCode starts Ollama)."));
         }
 
-        _config.Save();
         _busy.Start("Switching model...");
         try
         {
+            // ReinitializeAsync, not RefreshSettingsAsync: a different model mid-history is a
+            // different conversation.
             await _ai.ReinitializeAsync(_config);
             await ValidateCurrentModelAsync();
         }
@@ -1021,8 +1154,56 @@ public sealed partial class ChatController
             _busy.Reset();
         }
 
-        _transcript.Append(_html.Success($"✓ Now using {modelTag}."));
+        _transcript.Append(_html.StatusChip(modelTag, "now active", "ok"));
+        _transcript.Append(captured
+            ? _html.StatusChip("Context cleared", "snapshot saved", "")
+            : _html.StatusChip("Context cleared", "new model starts fresh", ""));
         StateChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// Captures the outgoing conversation as a <see cref="ContextSnapshot"/> before a model switch
+    /// clears it. Returns false (and stores nothing) when there is nothing worth keeping. Never
+    /// throws — a failed snapshot must not block the switch.
+    /// </summary>
+    private async Task<bool> CaptureContextSnapshotAsync(string originModel, string switchedTo)
+    {
+        try
+        {
+            var history = await _ai.GetHistoryAsync();
+            if (!HistorySummarizer.HasContent(history)) return false;
+
+            _snapshots.Add(
+                originModel,
+                switchedTo,
+                HistorySummarizer.Light(history),
+                HistorySummarizer.Full(history),
+                history.Count - 1);   // exclude the system prompt at index 0
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Snapshots the current conversation on demand — without switching models or clearing it.
+    /// The "Take snapshot" tab action. Notes the outcome in the transcript.
+    /// </summary>
+    public async Task CaptureManualSnapshotAsync()
+    {
+        var captured = await CaptureContextSnapshotAsync(ModelName, ModelName);
+        _transcript.Append(captured
+            ? _html.StatusChip("Snapshot saved", "in Snapshots", "ok")
+            : _html.StatusChip("Nothing to snapshot", "start a conversation first", "warn"));
+    }
+
+    /// <summary>Arms a snapshot's recap so it rides along (invisibly) with this agent's next message.</summary>
+    public void ImportContext(ContextSnapshot snapshot)
+    {
+        _armedContext = snapshot.BestRecap;
+        _transcript.Append(_html.StatusChip("Context imported", $"from {snapshot.OriginModel}", ""));
     }
 
     private async Task HandleLearnCommandAsync()
@@ -1046,7 +1227,8 @@ public sealed partial class ChatController
         if (probe.WasHealed)
         {
             _config.OllamaEndpoint = probe.NormalizedUrl;
-            _config.Save();
+            _configs.Defaults.OllamaEndpoint = probe.NormalizedUrl;
+            _configs.SaveDefaults();   // a correction, not a preference
         }
 
         IsConnected = probe.Ok;
@@ -1063,23 +1245,26 @@ public sealed partial class ChatController
         StateChanged?.Invoke();
     }
 
-    /// <summary>Applies new connection settings from the settings pane, then reconnects.</summary>
+    /// <summary>
+    /// Applies new connection settings from the Settings page and reconnects — for THIS agent.
+    /// Another tab can stay pointed at a different endpoint or model.
+    /// </summary>
     public async Task ApplyConnectionSettingsAsync(string endpoint, string? modelName)
     {
         if (!string.IsNullOrWhiteSpace(endpoint)) _config.OllamaEndpoint = endpoint.Trim();
         if (!string.IsNullOrWhiteSpace(modelName)) _config.ModelName = modelName.Trim();
+
+        // Onboarding is an app-wide fact, not a preference: once the user has connected once,
+        // the first-run wizard must not fire again for the next agent or the next launch.
         _config.HasCompletedOnboarding = true;
-        _config.Save();
+        _configs.Defaults.HasCompletedOnboarding = true;
+        _configs.SaveDefaults();
 
         _busy.Start("Connecting...");
         try
         {
             var probe = await OllamaSetupHelper.ProbeAsync(_config.OllamaEndpoint);
-            if (probe.WasHealed)
-            {
-                _config.OllamaEndpoint = probe.NormalizedUrl;
-                _config.Save();
-            }
+            if (probe.WasHealed) _config.OllamaEndpoint = probe.NormalizedUrl;
             IsConnected = probe.Ok;
 
             if (IsConnected)
@@ -1088,7 +1273,7 @@ public sealed partial class ChatController
                 await ValidateCurrentModelAsync();
                 await InitializeMcpAsync();
                 if (!ModelError)
-                    _transcript.Append(_html.Success($"✓ Connected — {ModelName} ready."));
+                    _transcript.Append(_html.StatusChip(ModelName, "ready", "ok"));
             }
             else
             {
@@ -1234,28 +1419,33 @@ public sealed partial class ChatController
     /// </summary>
     public async Task<(bool Ok, string Message)> SaveMcpServerAsync(string? originalName, string name, McpServerConfig server)
     {
+        // MCP servers are app-wide — they're OS processes shared by every agent — so the edit
+        // lands on the saved defaults and is persisted immediately, unlike per-agent settings.
+        var servers = _configs.Defaults.McpServers;
+
         // Preserve fields the editor doesn't surface (e.g. autoApprove) across an edit.
-        if (originalName != null && _config.McpServers.TryGetValue(originalName, out var existing))
+        if (originalName != null && servers.TryGetValue(originalName, out var existing))
             server.AutoApprove = existing.AutoApprove;
 
         McpServerConfig? replaced = null;
-        if (_config.McpServers.TryGetValue(name, out var prior)) replaced = prior;
+        if (servers.TryGetValue(name, out var prior)) replaced = prior;
 
         if (originalName != null && originalName != name)
-            _config.McpServers.Remove(originalName);
-        _config.McpServers[name] = server;
+            servers.Remove(originalName);
+        servers[name] = server;
 
         try
         {
-            _config.Save();
+            _configs.SaveDefaults();
+            _configs.SyncMcpServersToAgents();
         }
         catch (Exception ex)
         {
             // Roll back the in-memory state so config and disk don't diverge.
-            _config.McpServers.Remove(name);
-            if (replaced != null) _config.McpServers[name] = replaced;
-            if (originalName != null && originalName != name && replaced == null && _config.McpServers.ContainsKey(originalName) == false)
-                _config.McpServers[originalName] = server;
+            servers.Remove(name);
+            if (replaced != null) servers[name] = replaced;
+            if (originalName != null && originalName != name && replaced == null && servers.ContainsKey(originalName) == false)
+                servers[originalName] = server;
             _transcript.Append(_html.Error($"Failed to save config: {ex.Message}"));
             return (false, $"Failed to save config: {ex.Message}");
         }
@@ -1267,11 +1457,9 @@ public sealed partial class ChatController
         _busy.Start($"Connecting to '{name}'...");
         try
         {
-            _mcpGate.ResetSession();
-            await _mcpManager.ReloadAsync();
-            // RefreshSettingsAsync (not ReinitializeAsync): same kernel rebuild + MCP tool
-            // re-attach, but the conversation history survives the server change.
-            await _ai.RefreshSettingsAsync(_config);
+            // Restarts the shared servers once and re-registers their tools on EVERY tab's
+            // kernel — history kept. Other tabs would otherwise hold stale tool handles.
+            await _mcp.ReloadAllAsync();
         }
         finally
         {
@@ -1487,8 +1675,12 @@ public sealed partial class ChatController
             }
         }
 
-        _config.McpServers.Remove(serverArg);
-        try { _config.Save(); }
+        _configs.Defaults.McpServers.Remove(serverArg);
+        try
+        {
+            _configs.SaveDefaults();
+            _configs.SyncMcpServersToAgents();
+        }
         catch (Exception ex)
         {
             _transcript.Append(_html.Error($"Failed to save config: {ex.Message}"));
@@ -1496,9 +1688,7 @@ public sealed partial class ChatController
         }
 
         _transcript.Append(_html.Dim($"Removed '{serverArg}'. Reloading..."));
-        _mcpGate.ResetSession();
-        await _mcpManager.ReloadAsync();
-        await _ai.RefreshSettingsAsync(_config);   // kernel rebuild, history kept
+        await _mcp.ReloadAllAsync();   // every tab's kernel re-registers, history kept
         _transcript.Append(_html.Success($"✓ '{serverArg}' removed."));
     }
 
@@ -1506,14 +1696,12 @@ public sealed partial class ChatController
     {
         _transcript.Append(_html.Dim("Restarting MCP servers..."));
 
-        _mcpGate.ResetSession();
-        await _mcpManager.ReloadAsync();
-        await _ai.RefreshSettingsAsync(_config);   // kernel rebuild, history kept
+        await _mcp.ReloadAllAsync();   // every tab's kernel re-registers, history kept
 
         var active = _mcpManager.ActiveClients.Count;
         var failed = _mcpManager.StartupErrors.Count;
         _transcript.Append(failed == 0
-            ? _html.Success($"MCP reloaded: {active} server(s) connected.")
+            ? _html.Success($"🔌 MCP reloaded: {active} server{(active == 1 ? "" : "s")} connected.")
             : _html.Warn($"MCP reloaded: {active} connected, {failed} failed."));
     }
 

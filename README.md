@@ -50,13 +50,17 @@ compile independently of the CLI's originals):
 | `Services/WinUiApprovalService.cs` | `Services/Approval/DiffApprovalHandler.cs` |
 | `Services/TranscriptHtmlBuilder.cs` | `MarkdownHtmlRenderer` / `OperationDisplayRenderer` |
 
+The harness is safe to instantiate once per agent — its statics are pure functions and readonly
+`Regex`, and `AIService` takes every collaborator by constructor. Rolling the pin forward, watch
+for that changing.
+
 ## Architecture
 
 | Layer | CLI (MandoCode) | Desktop (this app) |
 |---|---|---|
-| Orchestrator | `Components/App.razor` interactive loop | `ViewModels/ChatController.cs` (faithful port) |
-| Approvals | `DiffApprovalHandler` (Spectre panels) | `Services/WinUiApprovalService.cs` + XAML overlay (same labels, bypass state, `DiffApprovalResult` contract) |
-| Transcript | ANSI scrollback + Spectre renderables | WebView2 + `TranscriptHtmlBuilder` (Markdig HTML, dark theme) |
+| Orchestrator | `Components/App.razor` interactive loop | `ViewModels/ChatController.cs` (faithful port), one per agent |
+| Approvals | `DiffApprovalHandler` (Spectre panels) | `Services/WinUiApprovalService.cs` + each agent's own XAML overlay (same labels, bypass state, `DiffApprovalResult` contract) |
+| Transcript | ANSI scrollback + Spectre renderables | WebView2 + `TranscriptHtmlBuilder` (Markdig HTML, themed) |
 | Busy/spinner | `SpinnerService` (ANSI) | `BusyStateService` → ProgressRing |
 | Onboarding | `OnboardingFlow` terminal prompts | `/setup` wizard + Settings page |
 | Everything else | `Services/`, `Plugins/`, `Models/` | **reused verbatim via project reference** |
@@ -65,6 +69,73 @@ Key seams the harness already provided (unchanged): `AIService.ChatStreamAsync`,
 `OnWrite/Delete/CommandApprovalRequested` delegates, `PlanHandoff.OnPlanRequested`,
 `McpApprovalGate.OnApprovalRequested`, `TaskPlannerService.ExecutePlanAsync`
 progress events, `DiffService` diff models.
+
+## Agents
+
+Each tab is an independent agent. `Services/AgentSession.cs` hand-constructs one agent's object
+graph; `SessionManager` owns the set of them. The split matters:
+
+| Per agent | App-wide |
+|---|---|
+| `AIService` (its conversation, its model), `ChatController`, `TaskPlannerService` | The `MandoCodeConfig` on disk — the **defaults** a new agent starts on |
+| `MandoCodeConfig` clone, `ProjectRootAccessor`, `SkillLoader`, `FileAutocompleteProvider` | `McpClientManager` (one set of server processes) |
+| `TokenTrackingService`, `PlanHandoff`, `TranscriptWriter`, `BusyStateService`, `ShellRunner` | `MusicPlayerService`, `ThemeManager`, `TranscriptHtmlBuilder` |
+| `WinUiApprovalService`, `ApprovalPromptGate`, `McpApprovalGate` | `ConfigCoordinator`, `McpCoordinator`, `SessionManager`, `SnapshotStore` |
+
+Tabs default to `Agent 1`, `Agent 2`, … (the folder shows in the header); the number reuses the
+lowest free slot, and a rename or folder change never overwrites it. Each tab's `⋯` options menu
+carries Rename, Take snapshot, Export transcript, and Close — Close is greyed on the last remaining
+agent (Settings and MCP need one to act on). The model in each header opens a quick-switch dropdown
+(cloud first, `cloud`/`local` badges) rather than a full-screen picker.
+
+The three approval services are per-agent for **correctness**, not tidiness. Shared, they break
+in ways that are invisible until a second tab exists: `WinUiApprovalService` holds the
+"don't ask again" bypass set, so one agent's blanket approval would auto-approve writes in every
+other; `ApprovalPromptGate` is a `SemaphoreSlim(1,1)` built for one console, so an unanswered
+approval in one agent would stop another's from ever rendering; and `ChatController` **assigns**
+(not `+=`) five approval delegates, so on shared services the last agent constructed silently
+steals every approval.
+
+Two settings can't be per-agent and are labelled app-wide in the UI: **Appearance** is a property
+of the window (and lives outside the shared config), and **Context window** is applied as
+`OLLAMA_CONTEXT_LENGTH` when MandoCode starts the Ollama daemon — one daemon, one context window.
+
+### Settings and the config file
+
+`~/.mandocode/config.json` is not "the current settings". It is the **defaults a new agent starts
+on**. Editing Settings changes the selected agent, live, for that session; **Make Default for New
+Agents** is the only action that writes the file (plus corrections like a healed endpoint URL, the
+onboarding flag, and the app-wide MCP server list).
+
+`ConfigCoordinator` is the only code that calls `MandoCodeConfig.Save()`. The rule can't be
+enforced by the type system — `Save()` is public and non-virtual on a harness type — so the
+`MANDO001` build target fails the build if `ChatController` calls `_config.Save()` on its clone,
+which would publish one agent's model as everybody's default. Cloning is a JSON round-trip
+**followed by `ValidateAndClamp()`**: `System.Text.Json` rebuilds `McpServers` with a
+case-sensitive comparer, and without the clamp every MCP lookup in the clone silently misses on
+a casing difference.
+
+### Context snapshots
+
+Switching a model clears the conversation (a different model mid-history is a different
+conversation). The instant before it clears, the outgoing conversation is captured as a
+`ContextSnapshot` — origin model, timestamp, a deterministic recap, and the full history. The
+recap comes from `HistorySummarizer`, a port of the harness's own (private) compaction summary fed
+by the public `AIService.GetHistoryAsync()` — so no submodule change. The **Snapshots** rail icon
+opens a global panel (the `SnapshotStore` is app-wide, one list for every tab); **Import** arms a
+snapshot's recap to ride along, invisibly, with the active agent's next message — carrying context
+into any model. `Take snapshot` on a tab's `⋯` menu captures on demand without switching.
+
+The snapshot keeps the full history so a richer LLM summary can be generated later (the model
+reserves `AiRecap`, the `Tag` flips `Light`→`AI`); that "Enhance" action waits on a small no-tools
+completion seam added at the next harness pin roll. Snapshots are session-scoped and in memory only.
+
+### Why the tab strip isn't a `TabView`
+
+WinUI's `TabView` hosts only the selected item's content, which detaches the previous tab and
+closes its `CoreWebView2`. `TranscriptWriter` retains nothing — the WebView2 DOM is the only copy
+of a conversation — so that would destroy the transcript on every tab switch. The strip carries
+headers only; content lives in `Visibility`-toggled sibling panels and is never re-parented.
 
 ## Releasing
 
@@ -83,13 +154,23 @@ within 24 hours.
 - Slash commands with autocomplete: /help /clear /model /config /retry /learn
   /copy /copy-code /skills /force-skill /mcp /mcp tools /mcp remove /mcp-reload
   /music* /command /exit — plus `!cmd` shell escape and `@file` references
-- Token tracking in the status bar + per-response summaries
-- Sidebar navigation: Chat, Settings, and MCP pages
+- Token tracking + per-response summaries, per agent
+- Agent tabs — `+` opens another agent (`Agent 1`, `Agent 2`, …) with its own
+  conversation, project folder, model, and settings; an approval waiting in a
+  background agent badges its tab and the toast names it. Each tab's `⋯` menu:
+  Rename, Take snapshot, Export transcript, Close (greyed on the last agent). The
+  header model opens a quick-switch dropdown (cloud first, `cloud`/`local` badges)
+- Context snapshots — the conversation is captured the instant a model switch would
+  clear it (and on demand via `⋯` → Take snapshot); a global left-rail panel lists
+  every tab's snapshots and Import carries one into the active agent's next message
+- Sidebar: Settings and MCP as full-screen pages, acting on the selected agent
   - Settings — the whole config as a native form (toggles, sliders, number boxes,
-    grouped Connection/Generation/Behavior/Limits/Integrations); every change is
-    validated and applied through the shared ConfigKeySetter, same as the CLI
+    grouped Appearance/Connection/Generation/Behavior/Limits/Integrations); every
+    change is validated through the shared ConfigKeySetter, same as the CLI, and
+    applies to that agent alone. "Make Default for New Agents" saves it to disk
   - MCP — live server list with status/tool counts; add/edit servers in a single
-    form modal with a Test button (isolated connection check + tool table preview)
+    form modal with a Test button (isolated connection check + tool table preview).
+    Servers are one app-wide set; each agent chooses whether to attach their tools
 - Guided wizards, built on the approval-overlay select + text primitives:
   - `/setup` — probe/start Ollama, change endpoint, pull a starter model with live
     progress, model picker, cloud-auth check + sign-in walkthrough

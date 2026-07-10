@@ -10,6 +10,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Shapes;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.System;
 
@@ -62,29 +63,20 @@ public sealed class ThemeVm
     public SolidColorBrush GreenBrush => new(ThemeManager.C(Theme.Green));
 }
 
-public sealed partial class MainWindow : Window, IApprovalUi
+public sealed partial class MainWindow : Window
 {
-    private readonly ChatController _controller;
-    private readonly TranscriptWriter _transcript;
-    private readonly TranscriptHtmlBuilder _html;
-    private readonly BusyStateService _busy;
-    private readonly WinUiApprovalService _approvals;
-    private readonly MandoCode.Services.ProjectRootAccessor _projectRoot;
+    private readonly SessionManager _sessions;
+    private readonly SnapshotStore _snapshotStore;   // app-wide context snapshots
+    private readonly TranscriptHtmlBuilder _html;   // app-global, stateless formatter
     private readonly Microsoft.UI.Dispatching.DispatcherQueue _dispatcher;
+    private bool _snapshotsPanelOpen;
 
-    private readonly Queue<string> _pendingHtml = new();
-    private bool _webViewReady;
-
-    private TaskCompletionSource<string>? _approvalTcs;
-    private TaskCompletionSource<string>? _instructionTcs;
-
-    private readonly ObservableCollection<CommandSuggestion> _suggestions = new();
-    private readonly MandoCode.Services.FileAutocompleteProvider _fileProvider;
-
-    private enum SuggestMode { None, Command, File }
-    private SuggestMode _suggestMode = SuggestMode.None;
-    private int _tokenStart;   // index of the '@' (File mode) — replaced on accept
-    private int _tokenEnd;     // caret position when suggestions were computed
+    /// <summary>
+    /// Settings and MCP edit the app-global config, but they still need a controller to route
+    /// through — it owns ConfigKeySetter, the MCP coordinator, and a transcript to report into.
+    /// The active chat agent supplies one. There is always at least one chat tab.
+    /// </summary>
+    private ChatController _controller => _sessions.Active!.Controller;
 
     public MainWindow()
     {
@@ -92,8 +84,9 @@ public sealed partial class MainWindow : Window, IApprovalUi
         Title = "MandoCode Desktop";
 
         ThemeManager.Initialize(Root);
-        ThemeManager.ThemeChanged += () => OnUi(ApplyThemeToTranscript);
-        TranscriptView.DefaultBackgroundColor = ThemeManager.C(ThemeManager.Current.Background);
+        // ONE window-level subscription to the static ThemeChanged event. Chat tabs must not
+        // subscribe individually — the handler would outlive every closed tab and leak.
+        ThemeManager.ThemeChanged += () => OnUi(ApplyThemeToAllTabs);
         SettingsTabs.SelectedItem = Tab_Appearance;
         ThemeList.ItemsSource = UiTheme.All.Select(t => new ThemeVm { Theme = t }).ToList();
         ModelCombo.Loaded += (_, _) => ApplyModelComboTarget();
@@ -103,38 +96,33 @@ public sealed partial class MainWindow : Window, IApprovalUi
         _dispatcher = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
 
         var services = App.Services;
-        _controller = services.GetRequiredService<ChatController>();
-        _transcript = services.GetRequiredService<TranscriptWriter>();
         _html = services.GetRequiredService<TranscriptHtmlBuilder>();
-        _busy = services.GetRequiredService<BusyStateService>();
-        _approvals = services.GetRequiredService<WinUiApprovalService>();
-        _projectRoot = services.GetRequiredService<MandoCode.Services.ProjectRootAccessor>();
-        _fileProvider = services.GetRequiredService<MandoCode.Services.FileAutocompleteProvider>();
+        _sessions = services.GetRequiredService<SessionManager>();
+        _snapshotStore = services.GetRequiredService<SnapshotStore>();
+        // Changed can fire on a background thread (a capture during a model switch).
+        _snapshotStore.Changed += () => OnUi(OnSnapshotsChanged);
 
-        _approvals.Ui = this;
-        SuggestionsList.ItemsSource = _suggestions;
-
-        // Harness events → UI thread
-        _transcript.BlockAdded += html => OnUi(() => AppendHtml(html));
-        _transcript.Cleared += () => OnUi(ClearTranscript);
-        _busy.Changed += (busy, activity) => OnUi(() => UpdateBusy(busy, activity));
-        _controller.StateChanged += () => OnUi(UpdateStatusBar);
-        _controller.PlanProgressChanged += (done, total, active) => OnUi(() => UpdatePlanProgress(done, total, active));
-        _controller.SetupNeeded += () => OnUi(() => SwitchPage("settings"));
-        _controller.McpEditorRequested += serverName => OnUi(() =>
-        {
-            SwitchPage("mcp");
-            OpenMcpEditor(serverName);
-        });
-        _controller.ClipboardCopyRequested += text => OnUi(() => CopyToClipboard(text));
-        _controller.ExitRequested += () => OnUi(Close);
-
-        UpdateStatusBar();
-        SwitchPage("chat");
+        // The first agent. Its whole service graph — AIService, approvals, transcript, token
+        // tracking — belongs to it alone, so opening a second tab can't disturb it.
+        CreateChatTab();
 
         // Size the window; defer WebView2 + harness init until the tree is loaded.
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1180, 840));
         Root.Loaded += Root_Loaded;
+        Closed += MainWindow_Closed;
+    }
+
+    /// <summary>
+    /// Shared resources belong to the window, not to any one agent. Before this, only /exit
+    /// disposed the music player — closing with the X leaked the audio device, and no path at
+    /// all closed the agents' WebView2s.
+    /// </summary>
+    private void MainWindow_Closed(object sender, WindowEventArgs args)
+    {
+        foreach (var tab in _tabs) tab.View.Shutdown();
+
+        try { App.Services.GetRequiredService<MandoCode.Services.MusicPlayerService>().Dispose(); }
+        catch { /* nothing playing, or already disposed */ }
     }
 
     private bool _initialized;
@@ -143,7 +131,7 @@ public sealed partial class MainWindow : Window, IApprovalUi
     {
         if (_initialized) return;
         _initialized = true;
-        RootLoadedAsync();
+        _ = _tabs[0].View.InitializeAsync();
     }
 
     private void OnUi(Action action)
@@ -152,639 +140,91 @@ public sealed partial class MainWindow : Window, IApprovalUi
         else _dispatcher.TryEnqueue(() => action());
     }
 
-    private async void RootLoadedAsync()
-    {
-        try
-        {
-            await TranscriptView.EnsureCoreWebView2Async();
-            TranscriptView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = true;
-            TranscriptView.CoreWebView2.Settings.AreDevToolsEnabled = true;   // F12 in the transcript — invaluable for debugging the HTML pipeline
-            TranscriptView.CoreWebView2.NavigationCompleted += (_, _) =>
-            {
-                _webViewReady = true;
-                while (_pendingHtml.Count > 0) AppendHtml(_pendingHtml.Dequeue());
-            };
-
-            // The WebView hosts only the transcript document. Any link click (update
-            // notice, markdown links in responses) opens in the default browser instead
-            // of navigating the transcript away.
-            TranscriptView.CoreWebView2.NavigationStarting += (_, e) =>
-            {
-                if (e.Uri.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-                    e.Uri.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-                {
-                    e.Cancel = true;
-                    OpenInBrowser(e.Uri);
-                }
-            };
-            TranscriptView.CoreWebView2.NewWindowRequested += (_, e) =>
-            {
-                e.Handled = true;
-                OpenInBrowser(e.Uri);
-            };
-
-            // File-path links in transcript cards post "open-file:<path>" messages
-            // (see TranscriptHtmlBuilder.FileLink) — the desktop counterpart of the
-            // CLI's clickable terminal hyperlinks.
-            TranscriptView.CoreWebView2.WebMessageReceived += (_, e) =>
-            {
-                string? msg = null;
-                try { msg = e.TryGetWebMessageAsString(); } catch { /* non-string message — not ours */ }
-                if (msg != null && msg.StartsWith("open-file:", StringComparison.Ordinal))
-                    OpenTranscriptPath(msg["open-file:".Length..]);
-                else if (msg != null && msg.StartsWith("copy:", StringComparison.Ordinal))
-                    CopyToClipboard(msg["copy:".Length..]);
-            };
-            // Serve bundled web assets (highlight.js) to the transcript document.
-            // Missing folder just means syntax highlighting silently doesn't engage.
-            try
-            {
-                TranscriptView.CoreWebView2.SetVirtualHostNameToFolderMapping(
-                    "mandocode.assets",
-                    Path.Combine(AppContext.BaseDirectory, "Assets", "web"),
-                    Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Allow);
-            }
-            catch { }
-
-            TranscriptView.CoreWebView2.NavigateToString(TranscriptHtmlBuilder.BaseDocument(ThemeManager.Current));
-        }
-        catch (Exception ex)
-        {
-            // WebView2 runtime missing — extremely rare on Win11, but fail visibly.
-            ModelText.Text = $"WebView2 init failed: {ex.Message}";
-        }
-
-        InputBox.Focus(FocusState.Programmatic);
-        await Task.Run(_controller.InitializeAsync);
-    }
-
-    /// <summary>Snapshots the transcript document to a standalone .html file. The
-    /// highlight classes and CSS are already baked into the DOM, so the saved page
-    /// keeps its colors with no script dependencies.</summary>
-    private async void SaveTranscript_Click(object sender, RoutedEventArgs e)
-    {
-        if (!_webViewReady) return;
-        try
-        {
-            var json = await TranscriptView.CoreWebView2.ExecuteScriptAsync("document.documentElement.outerHTML");
-            var html = JsonSerializer.Deserialize<string>(json) ?? "";
-
-            var picker = new Windows.Storage.Pickers.FileSavePicker();
-            WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
-            picker.FileTypeChoices.Add("HTML page", new List<string> { ".html" });
-            picker.SuggestedFileName = $"mandocode-transcript-{DateTime.Now:yyyy-MM-dd-HHmm}";
-            var file = await picker.PickSaveFileAsync();
-            if (file == null) return;
-
-            await Windows.Storage.FileIO.WriteTextAsync(file, "<!DOCTYPE html>\n" + html);
-            _transcript.Append(_html.Success($"Transcript saved to {file.Path}"));
-        }
-        catch (Exception ex)
-        {
-            _transcript.Append(_html.Warn($"Couldn't save transcript: {ex.Message}"));
-        }
-    }
-
-    /// <summary>Opens a clicked transcript path with its default app (folders open in
-    /// Explorer). Relative paths — how operation cards display them — resolve against
-    /// the current project root.</summary>
-    private void OpenTranscriptPath(string raw)
-    {
-        try
-        {
-            var path = raw.Trim();
-            if (!Path.IsPathRooted(path)) path = Path.Combine(_projectRoot.ProjectRoot, path);
-            path = Path.GetFullPath(path);
-            if (File.Exists(path) || Directory.Exists(path))
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = path, UseShellExecute = true });
-            else
-                _transcript.Append(_html.Warn($"Can't open — no longer exists: {path}"));
-        }
-        catch (Exception ex)
-        {
-            _transcript.Append(_html.Warn($"Couldn't open file: {ex.Message}"));
-        }
-    }
-
-    // ============================================================
-    // Transcript
-    // ============================================================
-
-    private async void AppendHtml(string html)
-    {
-        if (!_webViewReady)
-        {
-            _pendingHtml.Enqueue(html);
-            return;
-        }
-
-        try
-        {
-            await TranscriptView.CoreWebView2.ExecuteScriptAsync(
-                $"window.__append({JsonSerializer.Serialize(html)})");
-        }
-        catch
-        {
-            // A fragment failing to render must never take the app down.
-        }
-    }
-
-    private async void ClearTranscript()
-    {
-        if (!_webViewReady) return;
-        try { await TranscriptView.CoreWebView2.ExecuteScriptAsync("window.__clear()"); }
-        catch { }
-    }
-
-    // ============================================================
-    // Status / busy / plan progress
-    // ============================================================
-
-    private void UpdateStatusBar()
-    {
-        ModelText.Text = _controller.ModelName;
-        ProjectRootText.Text = _controller.ProjectRootPath;
-        ConnectionDot.Fill = new SolidColorBrush(
-            _controller.ModelError ? Colors.Orange
-            : _controller.IsConnected ? Colors.LimeGreen
-            : Colors.Gray);
-
-        var tracker = App.Services.GetRequiredService<MandoCode.Services.TokenTrackingService>();
-        TokenText.Text = tracker.TotalSessionTokens > 0
-            ? $"{MandoCode.Services.TokenTrackingService.FormatTokenCount(tracker.TotalSessionTokens)} tokens"
-            : "";
-
-        var processing = _controller.IsProcessing;
-        SendIcon.Glyph = processing ? "" : "";   // stop vs send
-        SendLabel.Text = processing ? "Stop" : "Send";
-    }
-
-    private void UpdateBusy(bool busy, string? activity)
-    {
-        BusyPanel.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
-        BusyRing.IsActive = busy;
-        if (busy) BusyText.Text = string.IsNullOrWhiteSpace(activity) ? "Working..." : activity;
-    }
-
-    private void UpdatePlanProgress(int done, int total, bool active)
-    {
-        PlanProgressPanel.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
-        if (total > 0)
-        {
-            PlanProgressBar.Value = done * 100.0 / total;
-            PlanProgressText.Text = $"Plan: step {Math.Min(done + 1, total)} of {total}";
-        }
-    }
-
-    // ============================================================
-    // Input handling
-    // ============================================================
-
-    private void SendButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_controller.IsProcessing)
-        {
-            _controller.CancelActiveRequest();
-            return;
-        }
-        SubmitCurrentInput();
-    }
-
-    private void SubmitCurrentInput()
-    {
-        var text = InputBox.Text;
-        if (string.IsNullOrWhiteSpace(text) || _controller.IsProcessing) return;
-
-        InputBox.Text = "";
-        HideSuggestions();
-        UpdateStatusBar();
-
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await _controller.SubmitAsync(text);
-            }
-            catch (Exception ex)
-            {
-                _transcript.Append(_html.Error($"Unexpected error: {ex.Message}"));
-            }
-        });
-    }
-
-    // PreviewKeyDown, NOT KeyDown: the TextBox's own class handler runs before instance
-    // KeyDown handlers, so with AcceptsReturn=true an Enter had already inserted a newline
-    // — which made TextChanged hide the suggestions popup, and the handler then fell
-    // through to submit. Preview (tunneling) fires first, so Handled=true genuinely
-    // suppresses the newline and Enter-to-accept behaves exactly like a mouse click.
-    private void InputBox_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
-    {
-        if (e.Key == VirtualKey.Enter)
-        {
-            var shift = Microsoft.UI.Input.InputKeyboardSource
-                .GetKeyStateForCurrentThread(VirtualKey.Shift)
-                .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
-            if (!shift)
-            {
-                e.Handled = true;
-
-                // If suggestions are open, Enter accepts (falling back to the first row —
-                // never submit the half-typed token as a message).
-                if (SuggestionsPanel.Visibility == Visibility.Visible)
-                {
-                    var pick = SuggestionsList.SelectedItem as CommandSuggestion ?? _suggestions.FirstOrDefault();
-                    if (pick != null)
-                    {
-                        AcceptSuggestion(pick);
-                        return;
-                    }
-                }
-                SubmitCurrentInput();
-            }
-        }
-        else if (e.Key == VirtualKey.Tab && SuggestionsPanel.Visibility == Visibility.Visible)
-        {
-            var pick = (SuggestionsList.SelectedItem ?? _suggestions.FirstOrDefault()) as CommandSuggestion;
-            if (pick != null)
-            {
-                e.Handled = true;
-                AcceptSuggestion(pick);
-            }
-        }
-        else if (e.Key == VirtualKey.Down && SuggestionsPanel.Visibility == Visibility.Visible)
-        {
-            e.Handled = true;
-            SuggestionsList.SelectedIndex = Math.Min(SuggestionsList.SelectedIndex + 1, _suggestions.Count - 1);
-            SuggestionsList.ScrollIntoView(SuggestionsList.SelectedItem);
-        }
-        else if (e.Key == VirtualKey.Up && SuggestionsPanel.Visibility == Visibility.Visible)
-        {
-            e.Handled = true;
-            SuggestionsList.SelectedIndex = Math.Max(SuggestionsList.SelectedIndex - 1, 0);
-            SuggestionsList.ScrollIntoView(SuggestionsList.SelectedItem);
-        }
-        else if (e.Key == VirtualKey.Escape)
-        {
-            if (SuggestionsPanel.Visibility == Visibility.Visible) HideSuggestions();
-            else _controller.CancelActiveRequest();
-        }
-    }
-
     private void Root_KeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (e.Key == VirtualKey.Escape && ApprovalOverlay.Visibility != Visibility.Visible)
-            _controller.CancelActiveRequest();
+        if (e.Key == VirtualKey.Escape) ActiveChat?.HandleEscape();
     }
 
-    private void InputBox_TextChanged(object sender, TextChangedEventArgs e) => UpdateSuggestions();
-
-    private void UpdateSuggestions()
+    private void ApplyThemeToAllTabs()
     {
-        var text = InputBox.Text;
-        var caret = InputBox.SelectionStart;
-
-        // Slash commands: input starts with '/' and is still a single token.
-        if (text.StartsWith('/') && !text.Contains(' '))
-        {
-            var matches = _controller.GetCommandSuggestions(text);
-            if (ShowSuggestions(SuggestMode.Command, 0, caret,
-                    matches.Select(m => new CommandSuggestion { Command = m.Command, Description = m.Description })))
-                return;
-        }
-
-        // @file references: find the token containing the caret; if it starts with '@',
-        // filter project files/directories through the same provider the CLI uses
-        // (directories come back with a trailing '/' — selecting one drills into it).
-        var tokenStart = caret;
-        while (tokenStart > 0 && !char.IsWhiteSpace(text[tokenStart - 1]))
-            tokenStart--;
-
-        if (tokenStart < caret && tokenStart < text.Length && text[tokenStart] == '@')
-        {
-            var fragment = text[(tokenStart + 1)..caret];
-            List<string> matches;
-            try { matches = _fileProvider.FilterFiles(fragment); }
-            catch { matches = new List<string>(); }
-
-            if (ShowSuggestions(SuggestMode.File, tokenStart, caret,
-                    matches.Select(m => new CommandSuggestion
-                    {
-                        Command = m,
-                        Description = m.EndsWith('/') ? "folder — select to drill in" : "file"
-                    })))
-                return;
-        }
-
-        HideSuggestions();
+        foreach (var tab in _tabs) tab.View.ApplyTheme();
     }
 
-    private bool ShowSuggestions(SuggestMode mode, int tokenStart, int tokenEnd, IEnumerable<CommandSuggestion> items)
+    private void CopyToClipboard(string text)
     {
-        _suggestions.Clear();
-        foreach (var item in items) _suggestions.Add(item);
-        if (_suggestions.Count == 0) return false;
-
-        _suggestMode = mode;
-        _tokenStart = tokenStart;
-        _tokenEnd = tokenEnd;
-        SuggestionsPanel.Visibility = Visibility.Visible;
-        SuggestionsList.SelectedIndex = 0;
-        SuggestionsList.ScrollIntoView(SuggestionsList.SelectedItem);
-        return true;
-    }
-
-    private void SuggestionsList_ItemClick(object sender, ItemClickEventArgs e)
-    {
-        if (e.ClickedItem is CommandSuggestion s) AcceptSuggestion(s);
-    }
-
-    private void AcceptSuggestion(CommandSuggestion s)
-    {
-        if (_suggestMode == SuggestMode.File)
-        {
-            var text = InputBox.Text;
-            var start = Math.Min(_tokenStart, text.Length);
-            var end = Math.Min(_tokenEnd, text.Length);
-
-            // Replace the @token with the picked path. Directories keep the caret hot
-            // (no trailing space) so the reopened popup shows their contents; files
-            // close the token with a space.
-            var isFolder = s.Command.EndsWith('/');
-            var replacement = "@" + s.Command + (isFolder ? "" : " ");
-            InputBox.Text = text[..start] + replacement + text[end..];
-            InputBox.SelectionStart = start + replacement.Length;
-
-            // Setting .Text resets the caret to 0 BEFORE the line above restores it, and
-            // TextChanged runs in that window — it sees no token at caret 0 and hides the
-            // popup. Recompute now that the caret is where the user expects it:
-            // folder → drilled listing reopens; file → token ended with a space, stays hidden.
-            UpdateSuggestions();
-        }
-        else
-        {
-            InputBox.Text = s.Command + " ";
-            InputBox.SelectionStart = InputBox.Text.Length;
-            HideSuggestions();
-        }
-        InputBox.Focus(FocusState.Programmatic);
-    }
-
-    private void HideSuggestions()
-    {
-        _suggestMode = SuggestMode.None;
-        SuggestionsPanel.Visibility = Visibility.Collapsed;
-        _suggestions.Clear();
+        var package = new DataPackage();
+        package.SetText(text);
+        Clipboard.SetContent(package);
     }
 
     // ============================================================
-    // IApprovalUi — approval overlay (completes the harness's awaited TCS)
+    // Tabs
     // ============================================================
 
-    public Task<string> ShowApprovalAsync(ApprovalRequest request, CancellationToken ct = default)
+    /// <summary>One independent agent: its strip header and its chat surface.</summary>
+    private sealed class ChatTabEntry
     {
-        var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _approvalTcs = tcs;
-
-        var reg = ct.CanBeCanceled
-            ? ct.Register(() =>
-            {
-                tcs.TrySetCanceled(ct);
-                OnUi(HideApprovalOverlay);
-            })
-            : default(CancellationTokenRegistration);
-
-        OnUi(() =>
-        {
-            ApprovalTitle.Text = request.Title;
-
-            ApprovalSubtitle.Text = request.Subtitle ?? "";
-            ApprovalSubtitle.Visibility = string.IsNullOrEmpty(request.Subtitle) ? Visibility.Collapsed : Visibility.Visible;
-
-            ApprovalDetail.Text = request.Detail ?? "";
-            ApprovalDetail.Visibility = string.IsNullOrEmpty(request.Detail) ? Visibility.Collapsed : Visibility.Visible;
-
-            var rows = new List<DiffLineVm>();
-            if (request.CommandText != null)
-            {
-                rows.Add(new DiffLineVm
-                {
-                    Text = $"$ {request.CommandText}",
-                    Brush = new SolidColorBrush(Colors.LightSkyBlue)
-                });
-            }
-            if (request.DiffLines != null)
-            {
-                foreach (var line in request.DiffLines)
-                {
-                    var (prefix, color) = line.LineType switch
-                    {
-                        DiffLineType.Added => ("+ ", Colors.LightSkyBlue),
-                        DiffLineType.Removed => ("- ", Windows.UI.Color.FromArgb(255, 224, 82, 82)),
-                        _ => ("  ", Colors.Gray)
-                    };
-                    var num = (line.LineType == DiffLineType.Added ? line.NewLineNumber : line.OldLineNumber);
-                    rows.Add(new DiffLineVm
-                    {
-                        Text = $"{(num.HasValue ? num.Value.ToString().PadLeft(4) : "    ")} {prefix}{line.Content}",
-                        Brush = new SolidColorBrush(color)
-                    });
-                }
-                if (request.DiffSummary != null)
-                    rows.Add(new DiffLineVm { Text = "", Brush = new SolidColorBrush(Colors.Gray) });
-            }
-            ApprovalDiffList.ItemsSource = rows;
-            ApprovalBodyScroll.Visibility = rows.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-
-            if (!string.IsNullOrEmpty(request.DiffSummary))
-            {
-                ApprovalDetail.Text = request.DiffSummary;
-                ApprovalDetail.Visibility = Visibility.Visible;
-            }
-
-            ApprovalButtons.Children.Clear();
-            foreach (var option in request.Options)
-            {
-                var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-                if (!string.IsNullOrEmpty(option.Glyph))
-                    content.Children.Add(new FontIcon { Glyph = option.Glyph, FontSize = 13 });
-                content.Children.Add(new TextBlock { Text = option.Label });
-                var button = new Button
-                {
-                    Content = content,
-                    HorizontalAlignment = HorizontalAlignment.Stretch,
-                    HorizontalContentAlignment = HorizontalAlignment.Left,
-                    Tag = option.Label
-                };
-                button.Foreground = option.Kind switch
-                {
-                    ApprovalOptionKind.Proceed => (SolidColorBrush)Application.Current.Resources["MandoGreenBrush"],
-                    ApprovalOptionKind.Destructive => (SolidColorBrush)Application.Current.Resources["MandoRedBrush"],
-                    _ => (SolidColorBrush)Application.Current.Resources["MandoGoldBrush"]
-                };
-                button.Click += (_, _) =>
-                {
-                    var choice = (string)button.Tag;
-                    HideApprovalOverlay();
-                    reg.Dispose();
-                    _approvalTcs?.TrySetResult(choice);
-                    _approvalTcs = null;
-                };
-                ApprovalButtons.Children.Add(button);
-            }
-
-            InstructionPanel.Visibility = Visibility.Collapsed;
-            ApprovalButtons.Visibility = Visibility.Visible;
-            SetApprovalCardSize(instructionMode: false);
-            ApprovalOverlay.Visibility = Visibility.Visible;
-            _approvalToastDismissed = false;   // each new approval earns a fresh toast
-            RefreshNavIcons();
-        });
-
-        return tcs.Task;
+        public required Border Header { get; init; }
+        public required TextBlock Label { get; init; }
+        public required Ellipse Badge { get; init; }
+        public required ChatTabView View { get; init; }
     }
 
-    /// <summary>Approval mode: compact centered card. Instruction mode: full width and
-    /// half the window height, centered — room to write real instructions.</summary>
-    private void SetApprovalCardSize(bool instructionMode)
+    private readonly List<ChatTabEntry> _tabs = new();
+    private ChatTabEntry? _selected;
+    private ChatTabEntry? _pendingApprovalTab;
+    private bool _approvalToastDismissed;
+
+    /// <summary>
+    /// The agent everything else acts on: Esc, the Settings page, the MCP page. Stays put while
+    /// you're looking at Settings — that's what makes "these settings belong to Agent 2" true.
+    /// </summary>
+    private ChatTabView? ActiveChat => _selected?.View;
+
+    private void AddTab_Click(object sender, RoutedEventArgs e)
     {
-        if (instructionMode)
-        {
-            ApprovalCard.HorizontalAlignment = HorizontalAlignment.Stretch;
-            ApprovalCard.MaxWidth = double.PositiveInfinity;
-            ApprovalCard.MaxHeight = double.PositiveInfinity;
-            ApprovalCard.Height = Math.Max(320, Root.ActualHeight * 0.5);
-        }
-        else
-        {
-            ApprovalCard.HorizontalAlignment = HorizontalAlignment.Center;
-            ApprovalCard.MaxWidth = 860;
-            ApprovalCard.MaxHeight = 640;
-            ApprovalCard.Height = double.NaN;
-        }
+        var entry = CreateChatTab();
+        _ = entry.View.InitializeAsync();
     }
 
-    public Task<string> ShowInstructionInputAsync(string prompt, string placeholder = "", bool allowCancel = false, CancellationToken ct = default)
+    private ChatTabEntry CreateChatTab()
     {
-        var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _instructionTcs = tcs;
+        var session = _sessions.CreateSession();
+        var view = new ChatTabView(this, session, _html) { Visibility = Visibility.Collapsed };
 
-        OnUi(() =>
+        view.SetupRequested += () => SwitchPage("settings");
+        view.McpEditorRequested += name =>
         {
-            // First line is the question; any extra lines (e.g. a validation error on
-            // re-prompt) render below it in the smaller prompt text.
-            var newline = prompt.IndexOf('\n');
-            ApprovalTitle.Text = newline < 0 ? prompt : prompt[..newline];
-            InstructionPrompt.Text = newline < 0 ? "" : prompt[(newline + 1)..].Trim();
-            InstructionPrompt.Visibility = InstructionPrompt.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
-
-            ApprovalSubtitle.Visibility = Visibility.Collapsed;
-            ApprovalDetail.Visibility = Visibility.Collapsed;
-            ApprovalBodyScroll.Visibility = Visibility.Collapsed;
-            ApprovalButtons.Visibility = Visibility.Collapsed;
-
-            InstructionBox.Text = "";
-            InstructionBox.PlaceholderText = string.IsNullOrEmpty(placeholder)
-                ? "Type your answer and press Enter"
-                : placeholder;
-            InstructionCancelButton.Visibility = allowCancel ? Visibility.Visible : Visibility.Collapsed;
-            InstructionPanel.Visibility = Visibility.Visible;
-            SetApprovalCardSize(instructionMode: true);
-            ApprovalOverlay.Visibility = Visibility.Visible;
-            _approvalToastDismissed = false;
-            RefreshNavIcons();
-            InstructionBox.Focus(FocusState.Programmatic);
-        });
-
-        return tcs.Task;
-    }
-
-    private void InstructionBox_KeyDown(object sender, KeyRoutedEventArgs e)
-    {
-        if (e.Key == VirtualKey.Enter)
+            SwitchPage("mcp");
+            OpenMcpEditor(name);
+        };
+        view.ClipboardCopyRequested += CopyToClipboard;
+        view.ExitRequested += Close;
+        view.ApprovalStateChanged += _ => RefreshTabStrip();
+        view.HeaderChanged += v =>
         {
-            // Shift+Enter inserts a newline (the box is multi-line); plain Enter submits.
-            // PreviewKeyDown is required here — with AcceptsReturn, the class handler
-            // would insert the newline before a plain KeyDown handler ever ran.
-            var shift = Microsoft.UI.Input.InputKeyboardSource
-                .GetKeyStateForCurrentThread(VirtualKey.Shift)
-                .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
-            if (shift) return;
-            e.Handled = true;
-            SubmitInstruction();
-        }
-        else if (e.Key == VirtualKey.Escape && InstructionCancelButton.Visibility == Visibility.Visible)
-        {
-            e.Handled = true;
-            CancelInstruction();
-        }
-    }
+            var tab = _tabs.FirstOrDefault(t => ReferenceEquals(t.View, v));
+            if (tab != null) tab.Label.Text = v.Session.Title;
+        };
 
-    private void InstructionSubmit_Click(object sender, RoutedEventArgs e) => SubmitInstruction();
+        TabHost.Children.Add(view);
 
-    private void InstructionCancel_Click(object sender, RoutedEventArgs e) => CancelInstruction();
+        var (header, label, badge) = BuildTabHeader(session.Title);
+        var entry = new ChatTabEntry { Header = header, Label = label, Badge = badge, View = view };
+        _tabs.Add(entry);
+        TabStrip.Children.Add(header);
+        WireHeader(entry);
 
-    private void SubmitInstruction()
-    {
-        var text = InstructionBox.Text;
-        HideApprovalOverlay();
-        _instructionTcs?.TrySetResult(text);
-        _instructionTcs = null;
-    }
-
-    private void CancelInstruction()
-    {
-        HideApprovalOverlay();
-        _instructionTcs?.TrySetResult(ApprovalSignals.Cancelled);
-        _instructionTcs = null;
-    }
-
-    private void HideApprovalOverlay()
-    {
-        ApprovalOverlay.Visibility = Visibility.Collapsed;
-        ApprovalDiffList.ItemsSource = null;
-        _approvalToastDismissed = false;
-        RefreshNavIcons();
-        InputBox.Focus(FocusState.Programmatic);
+        SelectTab(entry);
+        return entry;
     }
 
     // ============================================================
-    // Sidebar navigation
+    // Sidebar navigation — Settings and MCP are full-screen pages, not tabs. They act on
+    // whichever agent is selected, so switching pages never changes which agent that is.
     // ============================================================
 
     private string _currentPage = "chat";
-
-    /// <summary>The approval overlay lives inside the chat page, so an approval that
-    /// arrives while you're on Settings/MCP doesn't interrupt — the chat icon turns
-    /// gold instead, and the modal is waiting when you switch back.</summary>
-    private bool _approvalToastDismissed;
-
-    private void RefreshNavIcons()
-    {
-        var accent = (SolidColorBrush)Application.Current.Resources["MandoAccentBrush"];
-        var normal = (SolidColorBrush)Application.Current.Resources["MandoDimBrush"];
-        var gold = (SolidColorBrush)Application.Current.Resources["MandoGoldBrush"];
-        var approvalPending = ApprovalOverlay.Visibility == Visibility.Visible && _currentPage != "chat";
-
-        NavChatIcon.Foreground = _currentPage == "chat" ? accent : (approvalPending ? gold : normal);
-        NavSettingsIcon.Foreground = _currentPage == "settings" ? accent : normal;
-        NavMcpIcon.Foreground = _currentPage == "mcp" ? accent : normal;
-        ToolTipService.SetToolTip(NavChat, approvalPending ? "Chat — approval waiting" : "Chat");
-
-        // The toast mirrors the same pending state: it appears when an approval shows
-        // while you're on another page, and clears the moment you reach chat or the
-        // approval resolves. Dismissing it leaves the gold icon as the passive cue.
-        if (approvalPending) ApprovalToastText.Text = ApprovalTitle.Text;
-        ApprovalToast.Visibility = approvalPending && !_approvalToastDismissed
-            ? Visibility.Visible : Visibility.Collapsed;
-    }
-
-    private void ApprovalToast_Tapped(object sender, TappedRoutedEventArgs e) => SwitchPage("chat");
-
-    private void ApprovalToastDismiss_Click(object sender, RoutedEventArgs e)
-    {
-        _approvalToastDismissed = true;
-        ApprovalToast.Visibility = Visibility.Collapsed;
-    }
 
     private void NavChat_Click(object sender, RoutedEventArgs e) => SwitchPage("chat");
     private void NavSettings_Click(object sender, RoutedEventArgs e) => SwitchPage("settings");
@@ -793,25 +233,334 @@ public sealed partial class MainWindow : Window, IApprovalUi
     private void SwitchPage(string page)
     {
         _currentPage = page;
-        ChatPage.Visibility = page == "chat" ? Visibility.Visible : Visibility.Collapsed;
+        var showingChat = page == "chat";
+
         SettingsPage.Visibility = page == "settings" ? Visibility.Visible : Visibility.Collapsed;
         McpPage.Visibility = page == "mcp" ? Visibility.Visible : Visibility.Collapsed;
 
+        // Every agent view stays loaded; only the selected one shows, and only on the chat page.
+        // Collapsing rather than removing is what keeps each WebView2's transcript alive.
+        foreach (var tab in _tabs)
+            tab.View.Visibility = showingChat && ReferenceEquals(tab, _selected)
+                ? Visibility.Visible : Visibility.Collapsed;
+
         RefreshNavIcons();
 
-        if (page == "settings")
+        switch (page)
         {
-            LoadSettings();
-            _ = RefreshModelListAsync();
+            case "settings":
+                LoadSettings();
+                _ = RefreshModelListAsync();
+                break;
+            case "mcp":
+                _ = RefreshMcpListAsync();
+                break;
+            default:
+                ActiveChat?.FocusInput();
+                break;
         }
-        else if (page == "mcp")
+    }
+
+    private void RefreshNavIcons()
+    {
+        var accent = (SolidColorBrush)Application.Current.Resources["MandoAccentBrush"];
+        var normal = (SolidColorBrush)Application.Current.Resources["MandoDimBrush"];
+        var gold = (SolidColorBrush)Application.Current.Resources["MandoGoldBrush"];
+
+        // An approval waiting in ANY agent while you're on Settings/MCP: the agents icon goes gold,
+        // because from here you can't see which tab is badged.
+        var approvalPending = _currentPage != "chat" && _tabs.Any(t => t.View.IsApprovalOpen);
+
+        NavChatIcon.Foreground = _currentPage == "chat" ? accent : (approvalPending ? gold : normal);
+        NavSettingsIcon.Foreground = _currentPage == "settings" ? accent : normal;
+        NavMcpIcon.Foreground = _currentPage == "mcp" ? accent : normal;
+        NavSnapshotsIcon.Foreground = _snapshotsPanelOpen ? accent : normal;
+        ToolTipService.SetToolTip(NavChat, approvalPending ? "Agents — approval waiting" : "Agents");
+    }
+
+    // ============================================================
+    // Snapshots panel — global (the store is app-wide), toggled from the rail. Docked left at
+    // ~37% width so the active chat stays visible; Import arms the selected agent's next message.
+    // ============================================================
+
+    private void NavSnapshots_Click(object sender, RoutedEventArgs e)
+    {
+        if (_snapshotsPanelOpen) CloseSnapshots();
+        else OpenSnapshots();
+    }
+
+    private void CloseSnapshots_Click(object sender, RoutedEventArgs e) => CloseSnapshots();
+
+    private void OpenSnapshots()
+    {
+        _snapshotsPanelOpen = true;
+        SnapshotsColumn.Width = new GridLength(0.6, GridUnitType.Star);   // ~37% of the content area
+        SnapshotsPanel.Visibility = Visibility.Visible;
+        PopulateSnapshots();
+        RefreshNavIcons();
+    }
+
+    private void CloseSnapshots()
+    {
+        _snapshotsPanelOpen = false;
+        SnapshotsColumn.Width = new GridLength(0);
+        SnapshotsPanel.Visibility = Visibility.Collapsed;
+        RefreshNavIcons();
+    }
+
+    private void OnSnapshotsChanged()
+    {
+        RefreshSnapshotsBadge();
+        if (_snapshotsPanelOpen) PopulateSnapshots();
+    }
+
+    private void PopulateSnapshots()
+    {
+        var items = _snapshotStore.Items;   // newest-first copy of the shared store
+        SnapshotsList.ItemsSource = items;
+        var empty = items.Count == 0;
+        SnapshotsEmpty.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
+        SnapshotsScroller.Visibility = empty ? Visibility.Collapsed : Visibility.Visible;
+        RefreshSnapshotsBadge();
+    }
+
+    private void RefreshSnapshotsBadge()
+    {
+        var n = _snapshotStore.Count;
+        NavSnapshotsBadge.Visibility = n > 0 ? Visibility.Visible : Visibility.Collapsed;
+        NavSnapshotsBadgeText.Text = n > 99 ? "99+" : n.ToString();
+    }
+
+    private void SnapshotImport_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not ContextSnapshot snap) return;
+        var target = _selected?.View;
+        if (target == null) return;
+
+        target.Session.Controller.ImportContext(snap);   // arms the active agent's next message
+        SwitchPage("chat");   // so the "context armed" note is visible in the active tab
+    }
+
+    private void SnapshotDelete_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not ContextSnapshot snap) return;
+        _snapshotStore.Remove(snap);
+        PopulateSnapshots();
+    }
+
+    /// <summary>"Make Default for New Agents" — snapshot the selected agent's settings to disk.</summary>
+    private void MakeDefault_Click(object sender, RoutedEventArgs e)
+    {
+        var agent = _sessions.Active;
+        if (agent == null) return;
+
+        _controller.SaveAsDefaults();
+        SettingsStatus.Text = $"Saved {agent.Title}'s settings as the default for new agents. "
+                            + "Agents already open keep their own.";
+    }
+
+    private (Border Header, TextBlock Label, Ellipse Badge) BuildTabHeader(string title)
+    {
+        var label = new TextBlock
         {
-            _ = RefreshMcpListAsync();
+            Text = title,
+            FontSize = 13,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            MaxWidth = 170
+        };
+
+        // Gold dot: an approval is waiting in a tab you aren't looking at.
+        var badge = new Ellipse
+        {
+            Width = 7,
+            Height = 7,
+            Visibility = Visibility.Collapsed,
+            VerticalAlignment = VerticalAlignment.Center,
+            Fill = (SolidColorBrush)Application.Current.Resources["MandoGoldBrush"]
+        };
+
+        // Options "..." menu (rename / snapshot / export / close) replaces a bare close button — so
+        // the last remaining tab isn't stuck showing an X it isn't allowed to use.
+        var options = new Button
+        {
+            Padding = new Thickness(3),
+            Background = new SolidColorBrush(Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Content = new FontIcon { Glyph = "", FontSize = 12 }   // More
+        };
+        ToolTipService.SetToolTip(options, "Tab options");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(options, "Tab options");
+
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7 };
+        row.Children.Add(label);
+        row.Children.Add(badge);
+        row.Children.Add(options);
+
+        var header = new Border
+        {
+            Child = row,
+            Padding = new Thickness(12, 6, 8, 6),
+            CornerRadius = new CornerRadius(7),
+            BorderThickness = new Thickness(1),
+            BorderBrush = new SolidColorBrush(Colors.Transparent),
+            Background = new SolidColorBrush(Colors.Transparent)
+        };
+        return (header, label, badge);
+    }
+
+    /// <summary>Wired after the entry exists so the menu handlers can close over it.</summary>
+    private void WireHeader(ChatTabEntry entry)
+    {
+        // The options Button consumes the pointer, so opening its menu doesn't also raise Tapped
+        // on the header. Selecting first would be harmless anyway.
+        entry.Header.Tapped += (_, _) => SelectTab(entry);
+
+        var row = (StackPanel)entry.Header.Child;
+        var options = (Button)row.Children[^1];
+
+        var menu = new MenuFlyout();
+
+        var rename = new MenuFlyoutItem { Text = "Rename…", Icon = new FontIcon { Glyph = "" } };
+        rename.Click += (_, _) => _ = RenameTabAsync(entry);
+
+        var snapshot = new MenuFlyoutItem { Text = "Take snapshot", Icon = new FontIcon { Glyph = "" } };
+        snapshot.Click += (_, _) => entry.View.TakeSnapshotManually();
+
+        var export = new MenuFlyoutItem { Text = "Export transcript…", Icon = new FontIcon { Glyph = "" } };
+        export.Click += (_, _) => _ = entry.View.ExportTranscriptAsync();
+
+        var close = new MenuFlyoutItem { Text = "Close tab", Icon = new FontIcon { Glyph = "" } };
+        close.Click += (_, _) => CloseTab(entry);
+
+        menu.Items.Add(rename);
+        menu.Items.Add(snapshot);
+        menu.Items.Add(export);
+        menu.Items.Add(new MenuFlyoutSeparator());
+        menu.Items.Add(close);
+
+        // The last remaining agent can't be closed (Settings and MCP need one to act on), so grey
+        // the item rather than leave a dead button. Re-evaluated each time the menu opens.
+        menu.Opening += (_, _) => close.IsEnabled = _tabs.Count > 1;
+
+        options.Flyout = menu;
+    }
+
+    /// <summary>Renames a tab via a small dialog. The name is display-only (the folder stays in
+    /// the header); it survives folder changes and model switches.</summary>
+    private async Task RenameTabAsync(ChatTabEntry entry)
+    {
+        var box = new TextBox { Text = entry.View.Session.Title };
+        box.SelectAll();
+
+        var dialog = new ContentDialog
+        {
+            Title = "Rename agent",
+            Content = box,
+            PrimaryButtonText = "Rename",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = Content.XamlRoot,
+        };
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+
+        var name = box.Text.Trim();
+        if (name.Length == 0) return;
+
+        entry.View.Session.Title = name;
+        entry.Label.Text = name;
+        RefreshTabStrip();
+    }
+
+    /// <summary>Selecting an agent also returns you to the chat page — the Settings you were
+    /// looking at belonged to the agent you just left.</summary>
+    private void SelectTab(ChatTabEntry entry)
+    {
+        _selected = entry;
+        _sessions.Activate(entry.View.Session);
+        RefreshTabStrip();
+        SwitchPage("chat");
+    }
+
+    private void CloseTab(ChatTabEntry entry)
+    {
+        var index = _tabs.IndexOf(entry);
+        if (index < 0) return;
+
+        // The last agent stays: Settings and MCP have no agent to act on without one.
+        if (_tabs.Count == 1) return;
+
+        _tabs.RemoveAt(index);
+        TabStrip.Children.Remove(entry.Header);
+
+        // Shut down BEFORE unparenting. Removing the view from the tree unloads the WebView2 and
+        // nulls its CoreWebView2, so Close() and any last transcript write would hit null.
+        entry.View.Shutdown();
+        TabHost.Children.Remove(entry.View);
+        _sessions.CloseSession(entry.View.Session);
+
+        if (!ReferenceEquals(_selected, entry))
+        {
+            RefreshTabStrip();
+            return;
+        }
+
+        _selected = null;
+        SelectTab(_tabs[Math.Min(index, _tabs.Count - 1)]);
+    }
+
+    private void RefreshTabStrip()
+    {
+        var accent = (SolidColorBrush)Application.Current.Resources["MandoAccentBrush"];
+        var border = (SolidColorBrush)Application.Current.Resources["MandoBorderBrush"];
+        var dim = (SolidColorBrush)Application.Current.Resources["MandoDimBrush"];
+        var background = (SolidColorBrush)Application.Current.Resources["MandoBackgroundBrush"];
+        var transparent = new SolidColorBrush(Colors.Transparent);
+
+        ChatTabEntry? pending = null;
+
+        foreach (var tab in _tabs)
+        {
+            var isSelected = ReferenceEquals(tab, _selected);
+            tab.Header.Background = isSelected ? background : transparent;
+            tab.Header.BorderBrush = isSelected ? accent : border;
+            tab.Label.Foreground = isSelected ? accent : dim;
+
+            tab.View.IsSelected = isSelected;
+            var badged = tab.View.IsApprovalOpen && !isSelected;
+            tab.Badge.Visibility = badged ? Visibility.Visible : Visibility.Collapsed;
+            if (badged) pending ??= tab;
+        }
+
+        // With several agents running, "an approval is waiting" is useless without saying where,
+        // so the toast names the agent and selecting it is one click.
+        _pendingApprovalTab = pending;
+        if (pending != null && !_approvalToastDismissed)
+        {
+            ApprovalToastText.Text = pending.View.ApprovalHeadline;
+            ApprovalToastTarget.Text = $"Click to review in \"{pending.View.Session.Title}\"";
+            ApprovalToast.Visibility = Visibility.Visible;
         }
         else
         {
-            InputBox.Focus(FocusState.Programmatic);
+            ApprovalToast.Visibility = Visibility.Collapsed;
+            if (pending == null) _approvalToastDismissed = false;   // next approval earns a fresh toast
         }
+
+        RefreshNavIcons();
+    }
+
+    private void ApprovalToast_Tapped(object sender, TappedRoutedEventArgs e)
+    {
+        if (_pendingApprovalTab != null) SelectTab(_pendingApprovalTab);
+    }
+
+    private void ApprovalToastDismiss_Click(object sender, RoutedEventArgs e)
+    {
+        _approvalToastDismissed = true;
+        ApprovalToast.Visibility = Visibility.Collapsed;
     }
 
     // ============================================================
@@ -827,7 +576,10 @@ public sealed partial class MainWindow : Window, IApprovalUi
         _loadingSettings = true;
         try
         {
+            // The SELECTED agent's config, not the saved defaults. Switch agents and this page
+            // shows different values.
             var cfg = _controller.Config;
+            SettingsAgentChip.Text = _sessions.Active?.Title ?? "";
             EndpointBox.Text = cfg.OllamaEndpoint;
             _modelComboTarget = cfg.GetEffectiveModelName();
             ApplyModelComboTarget();
@@ -916,18 +668,6 @@ public sealed partial class MainWindow : Window, IApprovalUi
         if (_loadingSettings || ThemeList.SelectedItem is not ThemeVm vm) return;
         ThemeManager.Apply(vm.Theme, Root);
         SettingsStatus.Text = $"Theme set to {vm.Theme.Name}.";
-    }
-
-    /// <summary>Recolors the WebView2 transcript in place (CSS variables) when the theme changes.</summary>
-    private async void ApplyThemeToTranscript()
-    {
-        var theme = ThemeManager.Current;
-        TranscriptView.DefaultBackgroundColor = ThemeManager.C(theme.Background);
-        if (_webViewReady)
-        {
-            try { await TranscriptView.CoreWebView2.ExecuteScriptAsync(ThemeManager.BuildTranscriptScript(theme)); }
-            catch { /* WebView gone (window closing) — nothing to recolor */ }
-        }
     }
 
     private string _modelComboTarget = "";
@@ -1315,54 +1055,4 @@ public sealed partial class MainWindow : Window, IApprovalUi
         McpPageStatus.Text = message;
     }
 
-    // ============================================================
-    // Project folder + clipboard
-    // ============================================================
-
-    private async void OpenFolderButton_Click(object sender, RoutedEventArgs e)
-    {
-        var picker = new Windows.Storage.Pickers.FolderPicker();
-        picker.FileTypeFilter.Add("*");
-
-        // Unpackaged apps must initialize pickers with the window handle.
-        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
-
-        var folder = await picker.PickSingleFolderAsync();
-        if (folder == null) return;
-
-        _projectRoot.ProjectRoot = folder.Path;
-        var fileProvider = App.Services.GetRequiredService<MandoCode.Services.FileAutocompleteProvider>();
-        fileProvider.RefreshCache();
-
-        _transcript.Append(_html.Info($"Project root changed to: {folder.Path}"));
-        _transcript.Append(_html.Dim("Rebuilding the AI session for the new project…"));
-
-        await Task.Run(async () =>
-        {
-            var ai = App.Services.GetRequiredService<MandoCode.Services.AIService>();
-            await ai.ReinitializeAsync(_controller.Config);
-            _transcript.Append(_html.Success("✓ Ready."));
-        });
-        UpdateStatusBar();
-    }
-
-    private static void OpenInBrowser(string url)
-    {
-        try
-        {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url)
-            {
-                UseShellExecute = true
-            });
-        }
-        catch { /* a dead link must not crash the app */ }
-    }
-
-    private void CopyToClipboard(string text)
-    {
-        var package = new DataPackage();
-        package.SetText(text);
-        Clipboard.SetContent(package);
-    }
 }
