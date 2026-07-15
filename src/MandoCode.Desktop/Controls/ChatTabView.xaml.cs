@@ -112,6 +112,7 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         _controller.McpEditorRequested += OnMcpEditorRequested;
         _controller.ClipboardCopyRequested += OnClipboardCopy;
         _controller.ExitRequested += OnExitRequested;
+        _controller.SnapshotOfferChanged += OnSnapshotOfferChanged;
 
         UpdateHeader();
     }
@@ -126,6 +127,7 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
     private void OnMcpEditorRequested(string? name) => OnUi(() => McpEditorRequested?.Invoke(name));
     private void OnClipboardCopy(string text) => OnUi(() => ClipboardCopyRequested?.Invoke(text));
     private void OnExitRequested() => OnUi(() => ExitRequested?.Invoke());
+    private void OnSnapshotOfferChanged() => OnUi(RefreshSnapshotOffer);
 
     private void OnUi(Action action)
     {
@@ -278,6 +280,7 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         _controller.McpEditorRequested -= OnMcpEditorRequested;
         _controller.ClipboardCopyRequested -= OnClipboardCopy;
         _controller.ExitRequested -= OnExitRequested;
+        _controller.SnapshotOfferChanged -= OnSnapshotOfferChanged;
 
         _controller.CancelActiveRequest();
 
@@ -327,12 +330,91 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         catch { }
     }
 
-    /// <summary>Snapshots the transcript document to a standalone .html file. The highlight
-    /// classes and CSS are already baked into the DOM, so the saved page keeps its colors.</summary>
-    private void SaveTranscript_Click(object sender, RoutedEventArgs e) => _ = ExportTranscriptAsync();
+    /// <summary>Offer to snapshot this tab's conversation (the "Take snapshot" tab action) — pops the
+    /// opt-in create card so the user can pick a summarizer model.</summary>
+    public void TakeSnapshotManually() => _ = _controller.OfferManualSnapshotAsync();
 
-    /// <summary>Manually snapshot this tab's conversation (the "Take snapshot" tab action).</summary>
-    public void TakeSnapshotManually() => _ = _controller.CaptureManualSnapshotAsync();
+    // ============================================================
+    // Create-snapshot offer card — shown when the controller buffers a conversation (on a model
+    // switch or "Take snapshot"). The user picks a summarizer model and creates, or dismisses to
+    // discard. Snapshots are born summarized; there is no light/un-enhanced state.
+    // ============================================================
+
+    /// <summary>Shows or hides the offer card to match the controller's pending buffer, and (when
+    /// shown) loads the model picker.</summary>
+    private void RefreshSnapshotOffer()
+    {
+        var offer = _controller.PendingOffer;
+        if (offer == null)
+        {
+            SnapshotOfferCard.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        SnapshotOfferSubtitle.Text =
+            $"{offer.MessageCount} message{(offer.MessageCount == 1 ? "" : "s")} from {offer.OriginModel} — "
+            + "pick a model to write the recap, or dismiss to discard.";
+        SnapshotCreateButton.Content = "Create";
+        SnapshotNameBox.Text = "";   // a fresh offer starts unnamed
+        SnapshotOfferCard.Visibility = Visibility.Visible;
+        _ = LoadSnapshotModelsAsync(offer.OriginModel);
+    }
+
+    /// <summary>Populates the model picker without making the card wait on a network round-trip: the
+    /// model that had the conversation is shown selected instantly, then the full installed-model list
+    /// (an Ollama /api/tags fetch, slow on cloud setups) streams in behind it for "pick another."</summary>
+    private async Task LoadSnapshotModelsAsync(string originModel)
+    {
+        // Instant: seed with just the current model so the card is usable with zero lag.
+        var current = new ModelChoice(originModel, MandoCodeConfig.IsCloudModel(originModel));
+        SnapshotModelCombo.ItemsSource = new List<ModelChoice> { current };
+        SnapshotModelCombo.SelectedIndex = 0;
+        SnapshotModelCombo.IsEnabled = true;
+        SnapshotCreateButton.IsEnabled = true;
+
+        // Background: fetch the rest so the dropdown fills in for choosing another model.
+        var result = await _controller.LoadAvailableModelsAsync();
+        if (!result.Ok || result.Models.Count == 0) return;   // keep the single current entry
+
+        // Guard against a race: if a newer offer/switch swapped models while we were fetching, don't
+        // clobber its selection with this stale list.
+        if ((SnapshotModelCombo.SelectedItem as ModelChoice)?.Name != originModel) return;
+
+        var choices = result.Models
+            .Select(m => new ModelChoice(m, MandoCodeConfig.IsCloudModel(m)))
+            .ToList();
+        if (!choices.Any(c => string.Equals(c.Name, originModel, StringComparison.OrdinalIgnoreCase)))
+            choices.Insert(0, current);   // keep the current model even if the list omits it
+
+        SnapshotModelCombo.ItemsSource = choices;
+        SnapshotModelCombo.SelectedItem =
+            choices.First(c => string.Equals(c.Name, originModel, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private async void SnapshotCreate_Click(object sender, RoutedEventArgs e)
+    {
+        if (SnapshotModelCombo.SelectedItem is not ModelChoice choice)
+        {
+            _transcript.Append(_html.Warn("Pick a model to summarize with first."));
+            return;
+        }
+
+        SnapshotCreateButton.IsEnabled = false;
+        SnapshotCreateButton.Content = "Creating Snapshot...";
+
+        var error = await _controller.CreateSnapshotAsync(choice.Name, SnapshotNameBox.Text);
+        if (error != null)
+        {
+            SnapshotCreateButton.IsEnabled = true;
+            SnapshotCreateButton.Content = "Create";
+            _transcript.Append(_html.Warn(error));
+        }
+        // On success the controller clears the offer → SnapshotOfferChanged → RefreshSnapshotOffer
+        // hides the card, and a "Snapshot saved" chip lands in the transcript.
+    }
+
+    private void SnapshotOfferDismiss_Click(object sender, RoutedEventArgs e)
+        => _controller.DismissSnapshotOffer();
 
     /// <summary>Saves this tab's transcript as a standalone HTML page. Shared by the header save
     /// button and the tab's options menu.</summary>

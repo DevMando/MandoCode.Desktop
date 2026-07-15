@@ -4,16 +4,13 @@ using Microsoft.SemanticKernel;
 namespace MandoCode.Desktop.Services;
 
 /// <summary>
-/// Desktop port of <c>AIService.SynthesizeHistorySummary</c>, which is <c>private</c> in the pinned
-/// harness. It walks a chat history and produces a compact recap. Fed by the public
-/// <c>AIService.GetHistoryAsync()</c>, so it needs no harness change.
+/// Flattens a chat history into a plain-text transcript, fed by the public
+/// <c>AIService.GetHistoryAsync()</c>. Snapshots buffer this <see cref="Full"/> dump and hand it to
+/// <see cref="SnapshotEnhancer"/> to summarize — the LLM does the recap, so nothing here truncates.
 ///
-/// Two flavors: <see cref="Light"/> — truncated per line and capped overall, the instant/free
-/// snapshot taken on every model switch — and <see cref="Full"/> — untruncated, stored alongside so
-/// a richer LLM summary can be generated later without the original conversation still being live.
-///
-/// Behavioural port: if the harness's original changes when the submodule pin is rolled, re-check
-/// this against it (same class of "ported seam" as ChatController / WinUiApprovalService).
+/// (The deterministic per-line/overall truncation this once did — a port of the harness's compaction
+/// summary — was dropped when snapshots moved to LLM summaries: it kept the oldest turns and cut the
+/// most recent, which is backwards for a resumption recap.)
 /// </summary>
 public static class HistorySummarizer
 {
@@ -27,11 +24,7 @@ public static class HistorySummarizer
         return false;
     }
 
-    /// <summary>Truncated, capped recap — mirrors the harness's compaction summary.</summary>
-    public static string Light(IReadOnlyList<ChatMessageContent> history, int startIndex = 1, int maxChars = 1500)
-        => Build(history, startIndex, lineMax: 180, maxChars: maxChars);
-
-    /// <summary>Full untruncated dump — stored for a possible later AI enhancement.</summary>
+    /// <summary>Full untruncated dump — the text handed to the summarizer.</summary>
     public static string Full(IReadOnlyList<ChatMessageContent> history, int startIndex = 1)
         => Build(history, startIndex, lineMax: int.MaxValue, maxChars: int.MaxValue);
 
