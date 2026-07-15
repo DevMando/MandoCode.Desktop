@@ -12,10 +12,11 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <!-- ======= Per-tab header =======
-             Connection, model, tokens, project folder, and the two folder/save actions all
+             Connection, model, tokens, project folder, and the folder action all
              describe THIS agent. Each tab has its own, because each tab has its own
              AIService, TokenTrackingService, and ProjectRootAccessor. -->
         <Grid Grid.Row="0" Padding="16,8,16,8" Background="{StaticResource MandoPanelBrush}"
@@ -104,10 +105,6 @@
                        ToolTipService.ToolTip="This tab's project folder"/>
 
             <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
-                <Button x:Name="SaveTranscriptButton" Click="SaveTranscript_Click" Padding="8,5"
-                        ToolTipService.ToolTip="Save this tab's transcript as a standalone HTML page">
-                    <FontIcon Glyph="&#xE74E;" FontSize="15"/>
-                </Button>
                 <Button x:Name="OpenFolderButton" Click="OpenFolderButton_Click" Padding="8,5"
                         ToolTipService.ToolTip="Change this tab's project folder">
                     <FontIcon Glyph="&#xE8B7;" FontSize="15"/>
@@ -132,7 +129,64 @@
             <TextBlock Text="(Esc to cancel)" VerticalAlignment="Center" Opacity="0.4" FontSize="12"/>
         </StackPanel>
 
-        <Grid Grid.Row="4" Padding="16,10,16,14" ColumnSpacing="8">
+        <!-- ======= Create-snapshot offer (opt-in) =======
+             Appears when a model switch (or "Take snapshot") buffers a conversation. Snapshots are
+             born summarized: pick the model to summarize with — the origin model by default, or any
+             installed model (local = free, cloud = may spend tokens). Ignore it and the conversation
+             is discarded (pure opt-in, no auto-save). -->
+        <Border x:Name="SnapshotOfferCard" Grid.Row="4" Visibility="Collapsed"
+                Margin="16,8,16,0" Padding="14,12" CornerRadius="10"
+                Background="{StaticResource MandoPanelBrush}"
+                BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1">
+            <StackPanel Spacing="10">
+                <Grid>
+                    <StackPanel Spacing="2">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon Glyph="&#xE81C;" FontSize="14" VerticalAlignment="Center"
+                                      Foreground="{StaticResource MandoAccentBrush}"/>
+                            <TextBlock Text="Create a context snapshot?" FontWeight="SemiBold" FontSize="13"/>
+                        </StackPanel>
+                        <TextBlock x:Name="SnapshotOfferSubtitle" Opacity="0.6" FontSize="12"
+                                   TextWrapping="Wrap"/>
+                    </StackPanel>
+                    <Button Click="SnapshotOfferDismiss_Click" Padding="6" Background="Transparent"
+                            BorderThickness="0" HorizontalAlignment="Right" VerticalAlignment="Top"
+                            ToolTipService.ToolTip="Dismiss — the conversation won't be saved">
+                        <FontIcon Glyph="&#xE711;" FontSize="12"/>
+                    </Button>
+                </Grid>
+                <!-- Name (optional) and the summarizer model share one row: [name] [model] [Create]. -->
+                <Grid ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBox x:Name="SnapshotNameBox" Grid.Column="0" PlaceholderText="Name (optional)"
+                             MaxLength="80" VerticalAlignment="Center"/>
+                    <ComboBox x:Name="SnapshotModelCombo" Grid.Column="1" HorizontalAlignment="Stretch"
+                              VerticalAlignment="Center"
+                              ToolTipService.ToolTip="Model that will write the recap">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="local:ModelChoice">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock Text="{x:Bind Name}" VerticalAlignment="Center"/>
+                                    <Border CornerRadius="5" Padding="6,1" VerticalAlignment="Center"
+                                            Background="{StaticResource MandoBackgroundBrush}">
+                                        <TextBlock Text="{x:Bind Tag}" FontSize="10" Opacity="0.75"/>
+                                    </Border>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <Button x:Name="SnapshotCreateButton" Grid.Column="2" Content="Create"
+                            Click="SnapshotCreate_Click" VerticalAlignment="Center"
+                            Style="{StaticResource AccentButtonStyle}"/>
+                </Grid>
+            </StackPanel>
+        </Border>
+
+        <Grid Grid.Row="5" Padding="16,10,16,14" ColumnSpacing="8">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>

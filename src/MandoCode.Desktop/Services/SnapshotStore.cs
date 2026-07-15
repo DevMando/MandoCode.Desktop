@@ -29,7 +29,8 @@ public sealed class SnapshotStore
         get { lock (_lock) return _items.Count; }
     }
 
-    public ContextSnapshot Add(string originModel, string switchedTo, string lightRecap, string rawHistory, int messageCount)
+    public ContextSnapshot Add(string originModel, string summarizerModel, string recap, int messageCount,
+        string? name = null)
     {
         ContextSnapshot snapshot;
         lock (_lock)
@@ -39,10 +40,10 @@ public sealed class SnapshotStore
                 Id = ++_nextId,
                 CapturedAt = DateTimeOffset.Now,
                 OriginModel = originModel,
-                SwitchedToModel = switchedTo,
-                LightRecap = lightRecap,
-                RawHistory = rawHistory,
+                SummarizerModel = summarizerModel,
+                Recap = recap,
                 MessageCount = messageCount,
+                Name = string.IsNullOrWhiteSpace(name) ? null : name.Trim(),
             };
             _items.Insert(0, snapshot);   // newest first
         }

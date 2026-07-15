@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Text.Json;
 using MandoCode.Models;
 using MandoCode.Desktop.Services;
@@ -10,6 +11,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Shapes;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.System;
@@ -21,6 +23,13 @@ public sealed class CommandSuggestion
 {
     public string Command { get; init; } = "";
     public string Description { get; init; } = "";
+}
+
+/// <summary>Row model for the snapshot summarizer dropdown — a model name plus whether it's a cloud
+/// model (which may spend tokens) or a local one (free).</summary>
+public sealed record ModelChoice(string Name, bool IsCloud)
+{
+    public string Tag => IsCloud ? "cloud · uses tokens" : "local · free";
 }
 
 /// <summary>Row model for diff lines shown in the approval overlay.</summary>
@@ -71,6 +80,16 @@ public sealed partial class MainWindow : Window
     private readonly Microsoft.UI.Dispatching.DispatcherQueue _dispatcher;
     private bool _snapshotsPanelOpen;
 
+    // Slide animation state for the snapshots panel. The column width is tweened per-frame off
+    // CompositionTarget.Rendering so the panel glides in/out instead of snapping. Width is always
+    // held in pixels during and after the tween (never star) so an interrupted open/close can read
+    // the current width and continue smoothly from wherever it is.
+    private readonly Stopwatch _snapAnimClock = new();
+    private EventHandler<object>? _snapAnimHandler;
+    private double _snapAnimFrom, _snapAnimTo;
+    private bool _snapAnimHideOnDone;
+    private const double SnapAnimDurationMs = 220;
+
     /// <summary>
     /// Settings and MCP edit the app-global config, but they still need a controller to route
     /// through — it owns ConfigKeySetter, the MCP coordinator, and a transcript to report into.
@@ -87,7 +106,7 @@ public sealed partial class MainWindow : Window
         // ONE window-level subscription to the static ThemeChanged event. Chat tabs must not
         // subscribe individually — the handler would outlive every closed tab and leak.
         ThemeManager.ThemeChanged += () => OnUi(ApplyThemeToAllTabs);
-        SettingsTabs.SelectedItem = Tab_Appearance;
+        SettingsTabs.SelectedItem = Tab_Connection;   // the setup that matters most opens first
         ThemeList.ItemsSource = UiTheme.All.Select(t => new ThemeVm { Theme = t }).ToList();
         ModelCombo.Loaded += (_, _) => ApplyModelComboTarget();
         S_WindowOpacity.Value = ThemeManager.WindowOpacity * 100;
@@ -227,8 +246,13 @@ public sealed partial class MainWindow : Window
     private string _currentPage = "chat";
 
     private void NavChat_Click(object sender, RoutedEventArgs e) => SwitchPage("chat");
-    private void NavSettings_Click(object sender, RoutedEventArgs e) => SwitchPage("settings");
-    private void NavMcp_Click(object sender, RoutedEventArgs e) => SwitchPage("mcp");
+
+    // Settings/MCP act as toggles: clicking the one you're already on closes it and returns to the
+    // last active agent, rather than reloading the page in place.
+    private void NavSettings_Click(object sender, RoutedEventArgs e)
+        => SwitchPage(_currentPage == "settings" ? "chat" : "settings");
+    private void NavMcp_Click(object sender, RoutedEventArgs e)
+        => SwitchPage(_currentPage == "mcp" ? "chat" : "mcp");
 
     private void SwitchPage(string page)
     {
@@ -237,6 +261,11 @@ public sealed partial class MainWindow : Window
 
         SettingsPage.Visibility = page == "settings" ? Visibility.Visible : Visibility.Collapsed;
         McpPage.Visibility = page == "mcp" ? Visibility.Visible : Visibility.Collapsed;
+
+        // Glide the full-screen page in from the rail side (translate + fade). Both run on the
+        // composition thread, so the whole page slides smoothly regardless of how much it holds.
+        if (page == "settings") SlideInPage(SettingsPage, SettingsPageTransform);
+        else if (page == "mcp") SlideInPage(McpPage, McpPageTransform);
 
         // Every agent view stays loaded; only the selected one shows, and only on the chat page.
         // Collapsing rather than removing is what keeps each WebView2's transcript alive.
@@ -259,6 +288,39 @@ public sealed partial class MainWindow : Window
                 ActiveChat?.FocusInput();
                 break;
         }
+    }
+
+    /// <summary>Slides a full-screen page (Settings/MCP) into view from the rail side, with a short
+    /// fade. Translate and Opacity are independent animations, so this stays smooth on the
+    /// composition thread no matter how much the page contains.</summary>
+    private static void SlideInPage(UIElement page, TranslateTransform transform)
+    {
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+
+        var slide = new DoubleAnimation
+        {
+            From = -48,
+            To = 0,
+            Duration = new Duration(TimeSpan.FromMilliseconds(260)),
+            EasingFunction = ease,
+        };
+        Storyboard.SetTarget(slide, transform);
+        Storyboard.SetTargetProperty(slide, "X");
+
+        var fade = new DoubleAnimation
+        {
+            From = 0,
+            To = 1,
+            Duration = new Duration(TimeSpan.FromMilliseconds(200)),
+            EasingFunction = ease,
+        };
+        Storyboard.SetTarget(fade, page);
+        Storyboard.SetTargetProperty(fade, "Opacity");
+
+        var sb = new Storyboard();
+        sb.Children.Add(slide);
+        sb.Children.Add(fade);
+        sb.Begin();
     }
 
     private void RefreshNavIcons()
@@ -294,18 +356,51 @@ public sealed partial class MainWindow : Window
     private void OpenSnapshots()
     {
         _snapshotsPanelOpen = true;
-        SnapshotsColumn.Width = new GridLength(0.6, GridUnitType.Star);   // ~37% of the content area
         SnapshotsPanel.Visibility = Visibility.Visible;
         PopulateSnapshots();
         RefreshNavIcons();
+        // Target ~37% of the content area (everything right of the 48px rail), matching the old
+        // 0.6* / 1* split. Computed in pixels at open time so the tween can drive the column.
+        double target = Math.Max(320, (Root.ActualWidth - 48) * 0.375);
+        AnimateSnapshotsColumn(target, hideOnDone: false);
     }
 
     private void CloseSnapshots()
     {
         _snapshotsPanelOpen = false;
-        SnapshotsColumn.Width = new GridLength(0);
-        SnapshotsPanel.Visibility = Visibility.Collapsed;
         RefreshNavIcons();
+        AnimateSnapshotsColumn(0, hideOnDone: true);
+    }
+
+    /// <summary>Tweens the snapshots column width to <paramref name="toPx"/> with an ease-out curve,
+    /// gliding the panel open or closed. Re-entrant: a click mid-slide retargets from the current
+    /// width rather than restarting from the edge.</summary>
+    private void AnimateSnapshotsColumn(double toPx, bool hideOnDone)
+    {
+        // Drop any in-flight tween so rapid toggles can't stack Rendering handlers.
+        if (_snapAnimHandler != null) CompositionTarget.Rendering -= _snapAnimHandler;
+
+        _snapAnimFrom = SnapshotsColumn.Width.IsAbsolute ? SnapshotsColumn.Width.Value : 0;
+        _snapAnimTo = toPx;
+        _snapAnimHideOnDone = hideOnDone;
+        _snapAnimClock.Restart();
+
+        _snapAnimHandler = (_, _) =>
+        {
+            double t = Math.Clamp(_snapAnimClock.Elapsed.TotalMilliseconds / SnapAnimDurationMs, 0, 1);
+            double eased = 1 - Math.Pow(1 - t, 3);   // ease-out cubic
+            double w = _snapAnimFrom + (_snapAnimTo - _snapAnimFrom) * eased;
+            SnapshotsColumn.Width = new GridLength(w, GridUnitType.Pixel);
+
+            if (t >= 1)
+            {
+                CompositionTarget.Rendering -= _snapAnimHandler;
+                _snapAnimHandler = null;
+                _snapAnimClock.Stop();
+                if (_snapAnimHideOnDone) SnapshotsPanel.Visibility = Visibility.Collapsed;
+            }
+        };
+        CompositionTarget.Rendering += _snapAnimHandler;
     }
 
     private void OnSnapshotsChanged()
@@ -621,6 +716,10 @@ public sealed partial class MainWindow : Window
         TabPanel_Limits.Visibility = s == Tab_Limits ? Visibility.Visible : Visibility.Collapsed;
         TabPanel_Integrations.Visibility = s == Tab_Integrations ? Visibility.Visible : Visibility.Collapsed;
         TabPanel_Appearance.Visibility = s == Tab_Appearance ? Visibility.Visible : Visibility.Collapsed;
+
+        // Appearance is app-wide (a window property), not a per-agent setting, so "Make Default for
+        // New Agents" has nothing to save there — hide it on that tab to avoid a no-op button.
+        MakeDefaultButton.Visibility = s == Tab_Appearance ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void WindowOpacity_Changed(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)

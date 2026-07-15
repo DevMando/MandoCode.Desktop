@@ -38,10 +38,12 @@ public sealed partial class ChatController
     private readonly McpCoordinator _mcp;
     private readonly SnapshotStore _snapshots;
 
-    /// <summary>Recap armed by "Import" — prepended (invisibly) to this agent's next message.
-    /// There is no public harness API to inject a message into a fresh conversation, so we ride it
-    /// along on the next send instead.</summary>
-    private string? _armedContext;
+    /// <summary>Recaps armed by "Import" — prepended (invisibly) to this agent's next message.
+    /// There is no public harness API to inject a message into a fresh conversation, so we ride them
+    /// along on the next send instead. Multiple imports ACCUMULATE (each is a distinct past
+    /// conversation), and all ride along together on the next send.</summary>
+    private readonly List<string> _armedContexts = new();
+    private readonly HashSet<int> _armedSnapshotIds = new();   // dedupe: don't queue the same snapshot twice
 
     private CancellationTokenSource? _requestCts;
     private bool _isProcessing;
@@ -342,15 +344,19 @@ public sealed partial class ChatController
             var needsPlanning = _taskPlanner.RequiresPlanning(input);
             var processedInput = ProcessFileReferences(input);
 
-            // An imported snapshot (from "Import" in the Snapshots panel) rides along ONCE, as
-            // background the model already knows — the user's echoed message stays their own text.
-            if (_armedContext is { Length: > 0 })
+            // Imported snapshots (from "Import" in the Snapshots panel) ride along ONCE, as background
+            // the model already knows — the user's echoed message stays their own text. Multiple
+            // imports accumulate and are all sent together, each kept as a distinct recap.
+            if (_armedContexts.Count > 0)
             {
+                var noun = _armedContexts.Count == 1 ? "recap" : "recaps";
                 processedInput =
-                    "[Imported context recap from a previous model. Treat it as background you " +
-                    "already have; do not reply to it directly.]\n" + _armedContext +
+                    $"[Imported context — {_armedContexts.Count} {noun} from previous conversations. " +
+                    "Treat as background you already have; do not reply to it directly.]\n" +
+                    string.Join("\n\n", _armedContexts) +
                     "\n\n[Current request:]\n" + processedInput;
-                _armedContext = null;
+                _armedContexts.Clear();
+                _armedSnapshotIds.Clear();   // a new batch can re-import the same snapshots next time
             }
 
             if (needsPlanning)
@@ -1125,11 +1131,12 @@ public sealed partial class ChatController
     /// </summary>
     private async Task ApplyModelSwitchAsync(string modelTag)
     {
-        // Snapshot the outgoing conversation BEFORE anything clears it. ReinitializeAsync below
-        // wipes the live history (a different model mid-history is a different conversation), so
-        // this is the one chance to salvage it for a later re-import.
+        // Buffer the outgoing conversation BEFORE anything clears it. ReinitializeAsync below wipes
+        // the live history (a different model mid-history is a different conversation), so this is the
+        // one chance to grab it. It is NOT auto-saved — we offer the user a snapshot (summarized by a
+        // model of their choice) after the switch; if they ignore the offer, the buffer is discarded.
         var previousModel = _config.GetEffectiveModelName();
-        var captured = await CaptureContextSnapshotAsync(previousModel, modelTag);
+        _pending = await BufferConversationAsync(previousModel);
 
         _config.ModelName = modelTag;
         _config.ModelPath = null;
@@ -1155,55 +1162,119 @@ public sealed partial class ChatController
         }
 
         _transcript.Append(_html.StatusChip(modelTag, "now active", "ok"));
-        _transcript.Append(captured
-            ? _html.StatusChip("Context cleared", "snapshot saved", "")
-            : _html.StatusChip("Context cleared", "new model starts fresh", ""));
+
+        // Only mention the cleared context — and offer a snapshot — when there was actually a
+        // conversation to clear. Switching an empty chat has nothing to salvage, so stay quiet.
+        if (_pending != null)
+        {
+            _transcript.Append(_html.StatusChip("Context cleared", "create a snapshot?", ""));
+            SnapshotOfferChanged?.Invoke();
+        }
+
         StateChanged?.Invoke();
     }
 
-    /// <summary>
-    /// Captures the outgoing conversation as a <see cref="ContextSnapshot"/> before a model switch
-    /// clears it. Returns false (and stores nothing) when there is nothing worth keeping. Never
-    /// throws — a failed snapshot must not block the switch.
-    /// </summary>
-    private async Task<bool> CaptureContextSnapshotAsync(string originModel, string switchedTo)
+    /// <summary>The outgoing conversation buffered on a model switch (or the live one, for a manual
+    /// snapshot), held only until the user creates a snapshot from it or ignores the offer. Pure
+    /// opt-in: it is NOT auto-saved, and is discarded on the next switch or when the app closes.</summary>
+    public sealed record PendingSnapshot(string OriginModel, string RawHistory, int MessageCount);
+
+    private PendingSnapshot? _pending;
+
+    /// <summary>The conversation currently on offer to snapshot, or null if there's nothing pending.</summary>
+    public PendingSnapshot? PendingOffer => _pending;
+
+    /// <summary>Raised when <see cref="PendingOffer"/> appears or clears, so the tab can show/hide its
+    /// "create a snapshot?" card. Fires on the calling thread.</summary>
+    public event Action? SnapshotOfferChanged;
+
+    /// <summary>Buffers the outgoing conversation before a switch clears it. Returns null (nothing
+    /// buffered) when there's nothing worth keeping. Never throws — must not block the switch.</summary>
+    private async Task<PendingSnapshot?> BufferConversationAsync(string originModel)
     {
         try
         {
             var history = await _ai.GetHistoryAsync();
-            if (!HistorySummarizer.HasContent(history)) return false;
-
-            _snapshots.Add(
-                originModel,
-                switchedTo,
-                HistorySummarizer.Light(history),
-                HistorySummarizer.Full(history),
-                history.Count - 1);   // exclude the system prompt at index 0
-            return true;
+            if (!HistorySummarizer.HasContent(history)) return null;
+            // Full (untruncated) — this is only ever fed to the summarizer, never stored on a snapshot.
+            return new PendingSnapshot(originModel, HistorySummarizer.Full(history), history.Count - 1);
         }
         catch
         {
-            return false;
+            return null;
         }
     }
 
-    /// <summary>
-    /// Snapshots the current conversation on demand — without switching models or clearing it.
-    /// The "Take snapshot" tab action. Notes the outcome in the transcript.
-    /// </summary>
-    public async Task CaptureManualSnapshotAsync()
+    /// <summary>Offers to snapshot the CURRENT conversation on demand (the "Take snapshot" tab action),
+    /// without switching models or clearing it. Shows the create card, or notes there's nothing to save.</summary>
+    public async Task OfferManualSnapshotAsync()
     {
-        var captured = await CaptureContextSnapshotAsync(ModelName, ModelName);
-        _transcript.Append(captured
-            ? _html.StatusChip("Snapshot saved", "in Snapshots", "ok")
-            : _html.StatusChip("Nothing to snapshot", "start a conversation first", "warn"));
+        _pending = await BufferConversationAsync(ModelName);
+        if (_pending == null)
+        {
+            _transcript.Append(_html.StatusChip("Nothing to snapshot", "start a conversation first", "warn"));
+            return;
+        }
+        SnapshotOfferChanged?.Invoke();
+    }
+
+    /// <summary>Creates a snapshot from the pending conversation, summarized by
+    /// <paramref name="summarizerModel"/> (the origin model, the user's favorite, or an explicit pick).
+    /// Born summarized — there is no light/un-enhanced state. Returns null on success, else an error.</summary>
+    public async Task<string?> CreateSnapshotAsync(string summarizerModel, string? name = null)
+    {
+        var pending = _pending;
+        if (pending == null) return "Nothing to snapshot.";
+        if (string.IsNullOrWhiteSpace(summarizerModel)) return "Pick a model to summarize with.";
+
+        try
+        {
+            // The endpoint is shared (Ollama routes local and cloud models alike), so any installed
+            // model summarizes fine regardless of which model the chat is on.
+            var recap = await SnapshotEnhancer.SummarizeAsync(
+                _config.OllamaEndpoint, summarizerModel, pending.RawHistory);
+
+            if (string.IsNullOrWhiteSpace(recap))
+                return "The model returned an empty recap.";
+
+            _snapshots.Add(pending.OriginModel, summarizerModel, recap, pending.MessageCount, name);
+            _pending = null;
+            SnapshotOfferChanged?.Invoke();
+            var label = string.IsNullOrWhiteSpace(name) ? $"summarized by {summarizerModel}" : $"\"{name.Trim()}\"";
+            _transcript.Append(_html.StatusChip("Snapshot saved", label, "ok"));
+            return null;
+        }
+        catch (Exception ex)
+        {
+            return $"Snapshot failed: {ex.Message}";
+        }
+    }
+
+    /// <summary>Declines the pending snapshot offer — pure opt-in, so the buffered conversation is
+    /// discarded.</summary>
+    public void DismissSnapshotOffer()
+    {
+        if (_pending == null) return;
+        _pending = null;
+        SnapshotOfferChanged?.Invoke();
     }
 
     /// <summary>Arms a snapshot's recap so it rides along (invisibly) with this agent's next message.</summary>
     public void ImportContext(ContextSnapshot snapshot)
     {
-        _armedContext = snapshot.BestRecap;
-        _transcript.Append(_html.StatusChip("Context imported", $"from {snapshot.OriginModel}", ""));
+        // Skip a snapshot that's already queued for the next send, so a double-click (or re-import)
+        // doesn't stack the same recap twice.
+        if (!_armedSnapshotIds.Add(snapshot.Id))
+        {
+            _transcript.Append(_html.StatusChip("Already imported", $"{snapshot.DisplayTitle} is queued", ""));
+            return;
+        }
+
+        // Accumulate — importing several snapshots stacks them, each labeled so the model can tell
+        // the distinct past conversations apart. They all ride along on the next send.
+        _armedContexts.Add($"From \"{snapshot.DisplayTitle}\":\n{snapshot.Recap}");
+        // Show the snapshot's name when it has one, else the model it came from.
+        _transcript.Append(_html.StatusChip("Context imported", $"from {snapshot.DisplayTitle}", ""));
     }
 
     private async Task HandleLearnCommandAsync()
