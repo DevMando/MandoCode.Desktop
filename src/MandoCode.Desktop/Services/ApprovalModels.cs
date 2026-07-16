@@ -46,6 +46,11 @@ public sealed class ApprovalRequest
     /// <summary>Render as a non-covering bottom bar rather than the centered modal. Used for plan
     /// approval so the plan card stays readable in the transcript while the user decides.</summary>
     public bool BottomBar { get; init; }
+
+    /// <summary>Short, specific line for the cross-agent "Approval required" toast — describes WHAT
+    /// is waiting (e.g. "Wants to edit Program.cs"), not the modal's question. Falls back to
+    /// <see cref="Title"/> when unset.</summary>
+    public string? ToastSummary { get; init; }
 }
 
 /// <summary>

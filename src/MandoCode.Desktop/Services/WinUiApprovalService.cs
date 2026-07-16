@@ -99,6 +99,7 @@ public sealed class WinUiApprovalService
             Subtitle = relativePath,
             DiffLines = displayLines,
             DiffSummary = summary,
+            ToastSummary = isNewFile ? $"Wants to create {fileName}" : $"Wants to edit {fileName}",
             Options = options
         };
 
@@ -176,6 +177,7 @@ public sealed class WinUiApprovalService
         {
             Title = "Run this command?",
             CommandText = command,
+            ToastSummary = $"Wants to run: {(command.Length > 48 ? command[..48] + "…" : command)}",
             Options = options
         };
 
@@ -276,6 +278,9 @@ public sealed class WinUiApprovalService
             Subtitle = relativePath,
             Detail = warning,
             DiffLines = displayLines,
+            ToastSummary = isFolder
+                ? $"Wants to delete folder {Path.GetFileName(relativePath)}/"
+                : $"Wants to delete {Path.GetFileName(relativePath)}",
             Options = options
         };
 
@@ -345,6 +350,7 @@ public sealed class WinUiApprovalService
         {
             Title = $"Allow MCP tool \"{toolName}\" from \"{serverName}\"?",
             Detail = description,
+            ToastSummary = $"Wants to run tool \"{toolName}\"",
             Options = options
         };
 
