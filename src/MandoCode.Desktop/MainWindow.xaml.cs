@@ -106,7 +106,7 @@ public sealed partial class MainWindow : Window
         // ONE window-level subscription to the static ThemeChanged event. Chat tabs must not
         // subscribe individually — the handler would outlive every closed tab and leak.
         ThemeManager.ThemeChanged += () => OnUi(ApplyThemeToAllTabs);
-        SettingsTabs.SelectedItem = Tab_Connection;   // the setup that matters most opens first
+        SettingsTabs.SelectedItem = Tab_Model;   // the setup that matters most opens first
         ThemeList.ItemsSource = UiTheme.All.Select(t => new ThemeVm { Theme = t }).ToList();
         ModelCombo.Loaded += (_, _) => ApplyModelComboTarget();
         S_WindowOpacity.Value = ThemeManager.WindowOpacity * 100;
@@ -253,6 +253,8 @@ public sealed partial class MainWindow : Window
         => SwitchPage(_currentPage == "settings" ? "chat" : "settings");
     private void NavMcp_Click(object sender, RoutedEventArgs e)
         => SwitchPage(_currentPage == "mcp" ? "chat" : "mcp");
+    private void NavAppearance_Click(object sender, RoutedEventArgs e)
+        => SwitchPage(_currentPage == "appearance" ? "chat" : "appearance");
 
     private void SwitchPage(string page)
     {
@@ -261,11 +263,13 @@ public sealed partial class MainWindow : Window
 
         SettingsPage.Visibility = page == "settings" ? Visibility.Visible : Visibility.Collapsed;
         McpPage.Visibility = page == "mcp" ? Visibility.Visible : Visibility.Collapsed;
+        AppearancePage.Visibility = page == "appearance" ? Visibility.Visible : Visibility.Collapsed;
 
         // Glide the full-screen page in from the rail side (translate + fade). Both run on the
         // composition thread, so the whole page slides smoothly regardless of how much it holds.
         if (page == "settings") SlideInPage(SettingsPage, SettingsPageTransform);
         else if (page == "mcp") SlideInPage(McpPage, McpPageTransform);
+        else if (page == "appearance") SlideInPage(AppearancePage, AppearancePageTransform);
 
         // Every agent view stays loaded; only the selected one shows, and only on the chat page.
         // Collapsing rather than removing is what keeps each WebView2's transcript alive.
@@ -336,6 +340,7 @@ public sealed partial class MainWindow : Window
         NavChatIcon.Foreground = _currentPage == "chat" ? accent : (approvalPending ? gold : normal);
         NavSettingsIcon.Foreground = _currentPage == "settings" ? accent : normal;
         NavMcpIcon.Foreground = _currentPage == "mcp" ? accent : normal;
+        NavAppearanceIcon.Foreground = _currentPage == "appearance" ? accent : normal;
         NavSnapshotsIcon.Foreground = _snapshotsPanelOpen ? accent : normal;
         ToolTipService.SetToolTip(NavChat, approvalPending ? "Agents — approval waiting" : "Agents");
     }
@@ -454,6 +459,55 @@ public sealed partial class MainWindow : Window
                             + "Agents already open keep their own.";
     }
 
+    /// <summary>Resets the visible tab's settings to the app's factory defaults (this agent, this
+    /// session). Reads a fresh <see cref="MandoCodeConfig"/> for the defaults and applies each key
+    /// through the same validated path as editing a field. Leaves connection (endpoint/model) and the
+    /// Tavily secret untouched — those aren't "tunable knobs" you'd want wiped by a reset.</summary>
+    private async void ResetTab_Click(object sender, RoutedEventArgs e)
+    {
+        var d = new MandoCodeConfig();   // factory defaults (property initializers)
+        var s = SettingsTabs.SelectedItem;
+        var resets = new List<(string Key, string Value)>();
+        string tabName;
+
+        static string Bool(bool b) => b ? "true" : "false";
+        static string Num(long n) => n.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        if (s == Tab_Behavior)
+        {
+            tabName = "Behavior";
+            resets.Add(("taskPlanning", Bool(d.EnableTaskPlanning)));
+            resets.Add(("diffApprovals", Bool(d.EnableDiffApprovals)));
+            resets.Add(("autoContinue", Bool(d.EnableAutoContinuation)));
+            resets.Add(("maxContinuations", Num(d.MaxAutoContinuations)));
+            resets.Add(("timeout", Num(d.RequestTimeoutMinutes)));
+            resets.Add(("modelResponseTimeout", Num(d.ModelResponseTimeoutSeconds)));
+            resets.Add(("toolBudget", Num(d.ToolResultCharBudget)));
+            resets.Add(("renderTimeout", Num(d.MarkdownRenderTimeoutSeconds)));
+        }
+        else if (s == Tab_Integrations)
+        {
+            tabName = "Integrations";
+            resets.Add(("webSearch", Bool(d.EnableWebSearch)));
+        }
+        else
+        {
+            tabName = "Model";
+            resets.Add(("temperature", d.Temperature.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)));
+            resets.Add(("maxTokens", Num(d.MaxTokens)));
+            resets.Add(("contextLength", Num(d.ContextLength)));
+            resets.Add(("streaming", d.ResponseStreaming));
+        }
+
+        ResetTabButton.IsEnabled = false;
+        foreach (var (key, value) in resets)
+            await _controller.ApplyConfigKeyAsync(key, value);
+        ResetTabButton.IsEnabled = true;
+
+        LoadSettings();   // reflect the restored values (also clears the status line)
+        SettingsStatus.Text = $"{tabName} settings reset to factory defaults.";
+    }
+
     private (Border Header, TextBlock Label, Ellipse Badge) BuildTabHeader(string title)
     {
         var label = new TextBlock
@@ -520,7 +574,7 @@ public sealed partial class MainWindow : Window
         var rename = new MenuFlyoutItem { Text = "Rename…", Icon = new FontIcon { Glyph = "" } };
         rename.Click += (_, _) => _ = RenameTabAsync(entry);
 
-        var snapshot = new MenuFlyoutItem { Text = "Take snapshot", Icon = new FontIcon { Glyph = "" } };
+        var snapshot = new MenuFlyoutItem { Text = "Take snapshot", Icon = new FontIcon { Glyph = "" } };
         snapshot.Click += (_, _) => entry.View.TakeSnapshotManually();
 
         var export = new MenuFlyoutItem { Text = "Export transcript…", Icon = new FontIcon { Glyph = "" } };
@@ -696,7 +750,6 @@ public sealed partial class MainWindow : Window
             S_TavilyKey.PasswordRevealMode = PasswordRevealMode.Hidden;
             TavilyViewButton.Content = "View";
             TavilyViewButton.IsEnabled = !string.IsNullOrEmpty(cfg.TavilyApiKey);
-            S_Mcp.IsOn = cfg.EnableMcp;
             for (int i = 0; i < UiTheme.All.Count; i++)
                 if (UiTheme.All[i] == ThemeManager.Current) ThemeList.SelectedIndex = i;
             SettingsStatus.Text = "";
@@ -710,16 +763,15 @@ public sealed partial class MainWindow : Window
     private void SettingsTabs_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
     {
         var s = sender.SelectedItem;
-        TabPanel_Connection.Visibility = s == Tab_Connection ? Visibility.Visible : Visibility.Collapsed;
-        TabPanel_Generation.Visibility = s == Tab_Generation ? Visibility.Visible : Visibility.Collapsed;
+        TabPanel_Model.Visibility = s == Tab_Model ? Visibility.Visible : Visibility.Collapsed;
         TabPanel_Behavior.Visibility = s == Tab_Behavior ? Visibility.Visible : Visibility.Collapsed;
-        TabPanel_Limits.Visibility = s == Tab_Limits ? Visibility.Visible : Visibility.Collapsed;
         TabPanel_Integrations.Visibility = s == Tab_Integrations ? Visibility.Visible : Visibility.Collapsed;
-        TabPanel_Appearance.Visibility = s == Tab_Appearance ? Visibility.Visible : Visibility.Collapsed;
 
-        // Appearance is app-wide (a window property), not a per-agent setting, so "Make Default for
-        // New Agents" has nothing to save there — hide it on that tab to avoid a no-op button.
-        MakeDefaultButton.Visibility = s == Tab_Appearance ? Visibility.Collapsed : Visibility.Visible;
+        // "Reset" acts on the visible tab, so its label names that tab.
+        ResetTabButtonText.Text = s == Tab_Behavior ? "Reset Behavior"
+            : s == Tab_Integrations ? "Reset Integrations" : "Reset Model";
+        // Every remaining tab is per-agent now (Appearance moved to its own rail page), so
+        // "Make Default for New Agents" always applies.
     }
 
     private void WindowOpacity_Changed(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
@@ -807,7 +859,18 @@ public sealed partial class MainWindow : Window
 
     private async void Setting_NumberChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
     {
-        if (_loadingSettings || double.IsNaN(args.NewValue)) return;
+        if (_loadingSettings) return;
+
+        // Clearing the box (its "X") or typing something invalid yields NaN. Don't apply it, and
+        // don't leave the field empty/stuck — snap back to the last valid value so the spin buttons
+        // keep working. If even the old value is gone, reload the whole form from config.
+        if (double.IsNaN(args.NewValue))
+        {
+            if (!double.IsNaN(args.OldValue)) sender.Value = args.OldValue;
+            else LoadSettings();
+            return;
+        }
+
         await ApplySettingAsync((string)sender.Tag, ((long)args.NewValue).ToString());
     }
 
@@ -882,6 +945,12 @@ public sealed partial class MainWindow : Window
 
     private async Task RefreshMcpListAsync()
     {
+        // Reflect the active agent's per-agent MCP opt-in (the servers themselves are app-wide).
+        // Guard so setting IsOn programmatically doesn't fire Setting_Toggled and re-apply it.
+        _loadingSettings = true;
+        McpEnableToggle.IsOn = _controller.Config.EnableMcp;
+        _loadingSettings = false;
+
         McpPageStatus.Text = "Checking server status…";
         var rows = await Task.Run(_controller.GetMcpStatusRowsAsync);
 
@@ -896,7 +965,7 @@ public sealed partial class MainWindow : Window
         }).ToList();
 
         McpPageStatus.Text = rows.Count == 0
-            ? "No MCP servers configured yet — add one below. Same config file as the CLI."
+            ? "No MCP servers configured yet — add one below."
             : $"{rows.Count} server(s) configured.";
     }
 

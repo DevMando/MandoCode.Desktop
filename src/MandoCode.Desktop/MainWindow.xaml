@@ -14,22 +14,23 @@
         </Grid.ColumnDefinitions>
 
         <!-- ======= Sidebar rail =======
-             Settings and MCP are full-screen pages, not tabs. They act on whichever agent tab is
-             currently selected: change a setting here and it applies to that agent alone. -->
+             Full-screen pages, not tabs. Settings acts on whichever agent tab is currently selected
+             (per-agent). Snapshots, MCP servers, and Appearance are app-global — one surface for the
+             whole app, regardless of which agent is active. -->
         <StackPanel Grid.Column="0" Background="{StaticResource MandoPanelBrush}"
                     Padding="4,12" Spacing="6">
             <Button x:Name="NavChat" Click="NavChat_Click" Padding="10,8" Background="Transparent"
                     BorderThickness="0" HorizontalAlignment="Stretch"
-                    ToolTipService.ToolTip="Agents">
+                    ToolTipService.ToolTip="Agents — your chat tabs">
                 <FontIcon x:Name="NavChatIcon" Glyph="&#xE8BD;" FontSize="16"/>
             </Button>
             <!-- Global (not per-agent): the snapshot store is app-wide, so one manager lists every
                  tab's snapshots. Toggles the wide panel to the right of the rail. -->
             <Button x:Name="NavSnapshots" Click="NavSnapshots_Click" Padding="10,8" Background="Transparent"
                     BorderThickness="0" HorizontalAlignment="Stretch"
-                    ToolTipService.ToolTip="Context snapshots">
+                    ToolTipService.ToolTip="Context snapshots — save &amp; reuse a conversation">
                 <Grid>
-                    <FontIcon x:Name="NavSnapshotsIcon" Glyph="&#xE81C;" FontSize="16"/>
+                    <FontIcon x:Name="NavSnapshotsIcon" Glyph="&#xE722;" FontSize="16"/>
                     <Border x:Name="NavSnapshotsBadge" Visibility="Collapsed"
                             Background="{StaticResource MandoGoldBrush}" CornerRadius="7"
                             MinWidth="14" Height="14" Padding="3,0"
@@ -41,13 +42,20 @@
             </Button>
             <Button x:Name="NavSettings" Click="NavSettings_Click" Padding="10,8" Background="Transparent"
                     BorderThickness="0" HorizontalAlignment="Stretch"
-                    ToolTipService.ToolTip="Settings for the selected agent">
+                    ToolTipService.ToolTip="Settings — the selected agent's config">
                 <FontIcon x:Name="NavSettingsIcon" Glyph="&#xE713;" FontSize="16"/>
             </Button>
             <Button x:Name="NavMcp" Click="NavMcp_Click" Padding="10,8" Background="Transparent"
                     BorderThickness="0" HorizontalAlignment="Stretch"
-                    ToolTipService.ToolTip="MCP servers">
+                    ToolTipService.ToolTip="MCP servers — connect external tools">
                 <FontIcon x:Name="NavMcpIcon" Glyph="&#xE71B;" FontSize="16"/>
+            </Button>
+            <!-- Global (a window property, not per-agent): themes + window opacity. Last on the rail
+                 since it's cosmetic and set-once. -->
+            <Button x:Name="NavAppearance" Click="NavAppearance_Click" Padding="10,8" Background="Transparent"
+                    BorderThickness="0" HorizontalAlignment="Stretch"
+                    ToolTipService.ToolTip="Appearance — app-wide themes &amp; opacity">
+                <FontIcon x:Name="NavAppearanceIcon" Glyph="&#xE771;" FontSize="16"/>
             </Button>
         </StackPanel>
 
@@ -70,7 +78,7 @@
                     </Grid.ColumnDefinitions>
                     <StackPanel Spacing="3">
                         <TextBlock Text="Context snapshots" FontSize="16" FontWeight="SemiBold"/>
-                        <TextBlock Text="Created on demand when you switch a tab's model or Take snapshot — summarized by a model you choose. Import carries a recap into the active agent's next message."
+                        <TextBlock Text="A snapshot is an AI-written summary of a conversation. Switching a model clears the chat, so snapshots let you save that context and carry it forward — Import one to hand it to another model or a fresh agent on its next message."
                                    Opacity="0.6" FontSize="12" TextWrapping="Wrap"/>
                     </StackPanel>
                     <Button Grid.Column="1" Click="CloseSnapshots_Click" Padding="6" Background="Transparent"
@@ -81,7 +89,7 @@
                 </Grid>
 
                 <TextBlock x:Name="SnapshotsEmpty" Grid.Row="1" Visibility="Collapsed"
-                           Text="No snapshots yet. Switch a tab's model, or use a tab's ⋯ menu → Take snapshot — then choose a model to summarize it."
+                           Text="No snapshots yet. When you switch a tab's model — or pick Take snapshot from a tab's ⋯ menu — you'll be offered to save the conversation as a snapshot, summarized by a model you choose."
                            Opacity="0.6" FontSize="12" TextWrapping="Wrap" Padding="18,8,18,18"/>
 
                 <ScrollViewer x:Name="SnapshotsScroller" Grid.Row="1">
@@ -100,7 +108,7 @@
                                         Padding="12,10">
                                     <StackPanel Spacing="6">
                                         <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <FontIcon Glyph="&#xE81C;" FontSize="13" VerticalAlignment="Center"
+                                            <FontIcon Glyph="&#xE722;" FontSize="13" VerticalAlignment="Center"
                                                       Foreground="{StaticResource MandoAccentBrush}"/>
                                             <TextBlock Text="{x:Bind DisplayTitle}" FontWeight="SemiBold" FontSize="13"
                                                        VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
@@ -212,23 +220,22 @@
                                            Foreground="{StaticResource MandoSkyBrush}"/>
                             </Border>
                         </StackPanel>
-                        <TextBlock Text="These settings belong to the selected agent, for this session. Another agent keeps its own. Validated by the same engine as the CLI's /config set."
+                        <TextBlock Text="These settings belong to the selected agent, for this session — another agent keeps its own."
                                    Opacity="0.6" FontSize="12" TextWrapping="Wrap"/>
                     </StackPanel>
 
                     <SelectorBar Grid.Row="1" x:Name="SettingsTabs" SelectionChanged="SettingsTabs_SelectionChanged">
-                        <SelectorBarItem x:Name="Tab_Connection" Text="Connection"/>
-                        <SelectorBarItem x:Name="Tab_Appearance" Text="Appearance"/>
-                        <SelectorBarItem x:Name="Tab_Generation" Text="Generation"/>
+                        <SelectorBarItem x:Name="Tab_Model" Text="Model"/>
                         <SelectorBarItem x:Name="Tab_Behavior" Text="Behavior"/>
-                        <SelectorBarItem x:Name="Tab_Limits" Text="Limits"/>
                         <SelectorBarItem x:Name="Tab_Integrations" Text="Integrations"/>
                     </SelectorBar>
 
                     <ScrollViewer Grid.Row="2">
                         <Grid>
-                            <StackPanel x:Name="TabPanel_Connection" Visibility="Collapsed" Spacing="14" MaxWidth="680"
+                            <StackPanel x:Name="TabPanel_Model" Visibility="Collapsed" Spacing="14" MaxWidth="680"
                                         HorizontalAlignment="Left" Padding="0,4,0,8">
+                                <TextBlock Text="Connection" FontSize="13" FontWeight="SemiBold"
+                                           Foreground="{StaticResource MandoAccentBrush}"/>
                                 <TextBlock Text="Ollama endpoint" FontSize="13" Opacity="0.8"/>
                                 <TextBox x:Name="EndpointBox" PlaceholderText="http://localhost:11434" MinWidth="560"
                                          HorizontalAlignment="Left"
@@ -254,10 +261,10 @@
                                     <TextBlock x:Name="ModelListStatus" Text="" VerticalAlignment="Center"
                                                FontSize="12" Opacity="0.7"/>
                                 </StackPanel>
-                            </StackPanel>
 
-                            <StackPanel x:Name="TabPanel_Generation" Visibility="Collapsed" Spacing="14" MaxWidth="680"
-                                        HorizontalAlignment="Left" Padding="0,4,0,8">
+                                <Border Height="1" Background="{StaticResource MandoBorderBrush}" Margin="0,4"/>
+                                <TextBlock Text="Generation" FontSize="13" FontWeight="SemiBold"
+                                           Foreground="{StaticResource MandoAccentBrush}"/>
                                 <Grid ColumnSpacing="12">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>
@@ -270,14 +277,14 @@
                                                Margin="0,0,0,8" Opacity="0.7" FontSize="13" MinWidth="36"/>
                                 </Grid>
                                 <NumberBox x:Name="S_MaxTokens" Header="Max response tokens" Tag="maxTokens"
-                                           SpinButtonPlacementMode="Compact" SmallChange="1024"
+                                           Minimum="1" SpinButtonPlacementMode="Compact" SmallChange="1024"
                                            ValueChanged="Setting_NumberChanged" HorizontalAlignment="Stretch"
                                            ToolTipService.ToolTip="Upper limit on how long a single response can be. Raise it if answers get cut off mid-code; lower it for shorter, faster replies."/>
                                 <NumberBox x:Name="S_ContextLength" Header="Context window (tokens, 0 = Ollama default) — app-wide"
-                                           Tag="contextLength" SpinButtonPlacementMode="Compact" SmallChange="2048"
+                                           Tag="contextLength" Minimum="0" SpinButtonPlacementMode="Compact" SmallChange="2048"
                                            ValueChanged="Setting_NumberChanged" HorizontalAlignment="Stretch"
                                            ToolTipService.ToolTip="How much conversation and file content the model can see at once. Larger windows track big files and long chats but use much more RAM/VRAM and respond slower. 0 keeps Ollama's default."/>
-                                <TextBlock Text="Applied as OLLAMA_CONTEXT_LENGTH when MandoCode starts the Ollama daemon. One daemon serves every agent, so unlike the settings above this one is not per-agent."
+                                <TextBlock Text="Applied when MandoCode starts Ollama (as OLLAMA_CONTEXT_LENGTH). One Ollama server backs every agent, so unlike the settings above this one is app-wide, not per-agent."
                                            Opacity="0.5" FontSize="11" TextWrapping="Wrap" Margin="0,-6,0,0"/>
                                 <ComboBox x:Name="S_Streaming" Header="Response streaming" SelectionChanged="Streaming_Changed"
                                           HorizontalAlignment="Stretch"
@@ -290,6 +297,8 @@
 
                             <StackPanel x:Name="TabPanel_Behavior" Visibility="Collapsed" Spacing="14" MaxWidth="680"
                                         HorizontalAlignment="Left" Padding="0,4,0,8">
+                                <TextBlock Text="Behavior" FontSize="13" FontWeight="SemiBold"
+                                           Foreground="{StaticResource MandoAccentBrush}"/>
                                 <ToggleSwitch x:Name="S_TaskPlanning" Header="Task planning (propose_plan for multi-step requests)"
                                               Tag="taskPlanning" Toggled="Setting_Toggled"
                                               ToolTipService.ToolTip="For multi-step requests the model first proposes a numbered plan you approve before any work starts. More predictable on big tasks; an extra step on small ones."/>
@@ -300,27 +309,27 @@
                                               Tag="autoContinue" Toggled="Setting_Toggled"
                                               ToolTipService.ToolTip="When a request exhausts its tool budget mid-task, MandoCode automatically tells the model to keep going instead of stopping to ask you."/>
                                 <NumberBox x:Name="S_MaxContinuations" Header="Max auto-continuations per request" Tag="maxContinuations"
-                                           SpinButtonPlacementMode="Compact" SmallChange="1"
+                                           Minimum="0" SpinButtonPlacementMode="Compact" SmallChange="1"
                                            ValueChanged="Setting_NumberChanged" HorizontalAlignment="Stretch"
                                            ToolTipService.ToolTip="Safety cap on auto-continue — stops a model that never finishes from looping forever."/>
-                            </StackPanel>
 
-                            <StackPanel x:Name="TabPanel_Limits" Visibility="Collapsed" Spacing="14" MaxWidth="680"
-                                        HorizontalAlignment="Left" Padding="0,4,0,8">
+                                <Border Height="1" Background="{StaticResource MandoBorderBrush}" Margin="0,4"/>
+                                <TextBlock Text="Limits" FontSize="13" FontWeight="SemiBold"
+                                           Foreground="{StaticResource MandoAccentBrush}"/>
                                 <NumberBox x:Name="S_RequestTimeout" Header="Per-request timeout (minutes)" Tag="timeout"
-                                           SpinButtonPlacementMode="Compact" SmallChange="1"
+                                           Minimum="1" SpinButtonPlacementMode="Compact" SmallChange="1"
                                            ValueChanged="Setting_NumberChanged" HorizontalAlignment="Stretch"
                                            ToolTipService.ToolTip="Hard ceiling for one whole request — every model call and tool run combined. Raise it for big tasks on slow hardware; lower it to fail fast."/>
                                 <NumberBox x:Name="S_StallTimeout" Header="Stall watchdog per model call (seconds)" Tag="modelResponseTimeout"
-                                           SpinButtonPlacementMode="Compact" SmallChange="30"
+                                           Minimum="5" SpinButtonPlacementMode="Compact" SmallChange="30"
                                            ValueChanged="Setting_NumberChanged" HorizontalAlignment="Stretch"
                                            ToolTipService.ToolTip="How long a single model call may stay silent before MandoCode treats it as stalled and aborts. Raise it if large models on slow hardware get killed while still thinking."/>
                                 <NumberBox x:Name="S_ToolBudget" Header="Tool-result character budget per request" Tag="toolBudget"
-                                           SpinButtonPlacementMode="Compact" SmallChange="50000"
+                                           Minimum="1000" SpinButtonPlacementMode="Compact" SmallChange="50000"
                                            ValueChanged="Setting_NumberChanged" HorizontalAlignment="Stretch"
                                            ToolTipService.ToolTip="Max characters of tool output (file reads, command results) fed back to the model in one request. Higher = the model sees more of your project, but responses slow down and can overflow small context windows."/>
                                 <NumberBox x:Name="S_RenderTimeout" Header="Markdown render timeout (seconds)" Tag="renderTimeout"
-                                           SpinButtonPlacementMode="Compact" SmallChange="10"
+                                           Minimum="1" SpinButtonPlacementMode="Compact" SmallChange="10"
                                            ValueChanged="Setting_NumberChanged" HorizontalAlignment="Stretch"
                                            ToolTipService.ToolTip="How long to spend turning a response into rich formatting before falling back to plain text. Purely cosmetic — never changes what the model says."/>
                             </StackPanel>
@@ -346,52 +355,8 @@
                                     <Button Grid.Column="2" Content="Save key" Click="TavilySave_Click"
                                             ToolTipService.ToolTip="Save this key to the shared MandoCode config (type 'clear' to remove the saved key)"/>
                                 </Grid>
-                                <ToggleSwitch x:Name="S_Mcp" Header="MCP server integration" Tag="mcp" Toggled="Setting_Toggled"
-                                              ToolTipService.ToolTip="Enables Model Context Protocol servers (managed on the MCP page). Each connected server adds tools the model can call — more capabilities, slightly more for it to reason about."/>
-                            </StackPanel>
-
-                            <StackPanel x:Name="TabPanel_Appearance" Spacing="14" MaxWidth="680"
-                                        HorizontalAlignment="Left" Padding="0,4,0,8">
-                                <Grid ColumnSpacing="12">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <Slider x:Name="S_WindowOpacity" Header="Window opacity" Minimum="30" Maximum="100"
-                                            Value="100" MinWidth="320" ValueChanged="WindowOpacity_Changed"
-                                            ToolTipService.ToolTip="Makes the whole window translucent so you can see what's behind it. 100% = solid (default). Purely visual — never affects the model."/>
-                                    <TextBlock x:Name="S_WindowOpacityLabel" Grid.Column="1" Text="100%"
-                                               VerticalAlignment="Bottom" Margin="0,0,0,8" Opacity="0.7"
-                                               FontSize="13" MinWidth="44"/>
-                                </Grid>
-                                <TextBlock Text="Appearance is app-wide, not per-agent — it's a property of the window. Themes restyle everything, transcripts included. Saved on this machine only; never touches the shared CLI config, and unaffected by 'Make Default for New Agents'."
-                                           Opacity="0.6" FontSize="12" TextWrapping="Wrap"/>
-                                <ListView x:Name="ThemeList" SelectionMode="Single" SelectionChanged="ThemeList_SelectionChanged">
-                                    <ListView.ItemTemplate>
-                                        <DataTemplate x:DataType="local:ThemeVm">
-                                            <Border Background="{x:Bind BgBrush}" BorderBrush="{x:Bind EdgeBrush}"
-                                                    BorderThickness="1" CornerRadius="8" Padding="14,10" Margin="0,4">
-                                                <Grid ColumnSpacing="12">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="*"/>
-                                                        <ColumnDefinition Width="Auto"/>
-                                                    </Grid.ColumnDefinitions>
-                                                    <StackPanel Spacing="2">
-                                                        <TextBlock Text="{x:Bind Name}" Foreground="{x:Bind FgBrush}" FontWeight="SemiBold"/>
-                                                        <TextBlock Text="{x:Bind Description}" Foreground="{x:Bind DimBrush}"
-                                                                   FontSize="12" TextWrapping="Wrap"/>
-                                                    </StackPanel>
-                                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                                        <Ellipse Width="14" Height="14" Fill="{x:Bind AccentBrush}"/>
-                                                        <Ellipse Width="14" Height="14" Fill="{x:Bind GoldBrush}"/>
-                                                        <Ellipse Width="14" Height="14" Fill="{x:Bind SkyBrush}"/>
-                                                        <Ellipse Width="14" Height="14" Fill="{x:Bind GreenBrush}"/>
-                                                    </StackPanel>
-                                                </Grid>
-                                            </Border>
-                                        </DataTemplate>
-                                    </ListView.ItemTemplate>
-                                </ListView>
+                                <TextBlock Text="MCP servers are managed on the MCP page (rail), where each agent also opts in to using their tools."
+                                           Opacity="0.5" FontSize="11" TextWrapping="Wrap"/>
                             </StackPanel>
                         </Grid>
                     </ScrollViewer>
@@ -400,13 +365,22 @@
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
 
                         <TextBlock x:Name="SettingsStatus" FontSize="12" Opacity="0.75" TextWrapping="Wrap"
                                    VerticalAlignment="Center"
                                    Foreground="{StaticResource MandoGoldBrush}"/>
 
-                        <Button Grid.Column="1" x:Name="MakeDefaultButton" Click="MakeDefault_Click"
+                        <Button Grid.Column="1" x:Name="ResetTabButton" Click="ResetTab_Click"
+                                ToolTipService.ToolTip="Reset this tab's settings to the app's factory defaults (this agent only). Leaves the connection endpoint/model and your Tavily key untouched.">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE7A7;" FontSize="13"/>
+                                <TextBlock x:Name="ResetTabButtonText" Text="Reset tab"/>
+                            </StackPanel>
+                        </Button>
+
+                        <Button Grid.Column="2" x:Name="MakeDefaultButton" Click="MakeDefault_Click"
                                 ToolTipService.ToolTip="Write this agent's settings to ~/.mandocode/config.json as the starting point for every new agent. Agents already open keep their own.">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <FontIcon Glyph="&#xE74E;" FontSize="13"/>
@@ -414,6 +388,69 @@
                             </StackPanel>
                         </Button>
                     </Grid>
+                </Grid>
+
+                <!-- ============ APPEARANCE PAGE ============
+                     App-wide (a window property), so it lives on the rail rather than in the
+                     per-agent Settings tabs. -->
+                <Grid x:Name="AppearancePage" Visibility="Collapsed" Padding="24,16,24,16" RowSpacing="12">
+                    <Grid.RenderTransform>
+                        <TranslateTransform x:Name="AppearancePageTransform"/>
+                    </Grid.RenderTransform>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Appearance" FontSize="22" FontWeight="SemiBold"
+                                   Foreground="{StaticResource MandoAccentBrush}"/>
+                        <TextBlock Text="A property of the window, not per-agent. Themes restyle everything, transcripts included. Saved on this machine only; never touches the shared CLI config."
+                                   Opacity="0.6" FontSize="12" TextWrapping="Wrap"/>
+                    </StackPanel>
+
+                    <ScrollViewer Grid.Row="1">
+                        <StackPanel Spacing="14" MaxWidth="680" HorizontalAlignment="Left" Padding="0,8,0,8">
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <Slider x:Name="S_WindowOpacity" Header="Window opacity" Minimum="30" Maximum="100"
+                                        Value="100" MinWidth="320" ValueChanged="WindowOpacity_Changed"
+                                        ToolTipService.ToolTip="Makes the whole window translucent so you can see what's behind it. 100% = solid (default). Purely visual — never affects the model."/>
+                                <TextBlock x:Name="S_WindowOpacityLabel" Grid.Column="1" Text="100%"
+                                           VerticalAlignment="Bottom" Margin="0,0,0,8" Opacity="0.7"
+                                           FontSize="13" MinWidth="44"/>
+                            </Grid>
+                            <ListView x:Name="ThemeList" SelectionMode="Single" SelectionChanged="ThemeList_SelectionChanged">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="local:ThemeVm">
+                                        <Border Background="{x:Bind BgBrush}" BorderBrush="{x:Bind EdgeBrush}"
+                                                BorderThickness="1" CornerRadius="8" Padding="14,10" Margin="0,4">
+                                            <Grid ColumnSpacing="12">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel Spacing="2">
+                                                    <TextBlock Text="{x:Bind Name}" Foreground="{x:Bind FgBrush}" FontWeight="SemiBold"/>
+                                                    <TextBlock Text="{x:Bind Description}" Foreground="{x:Bind DimBrush}"
+                                                               FontSize="12" TextWrapping="Wrap"/>
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                    <Ellipse Width="14" Height="14" Fill="{x:Bind AccentBrush}"/>
+                                                    <Ellipse Width="14" Height="14" Fill="{x:Bind GoldBrush}"/>
+                                                    <Ellipse Width="14" Height="14" Fill="{x:Bind SkyBrush}"/>
+                                                    <Ellipse Width="14" Height="14" Fill="{x:Bind GreenBrush}"/>
+                                                </StackPanel>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </StackPanel>
+                    </ScrollViewer>
                 </Grid>
 
                 <!-- ============ MCP PAGE ============ -->
@@ -437,11 +474,16 @@
                             <TextBlock Text="shared by every agent" FontSize="12" Opacity="0.7"/>
                         </Border>
                     </StackPanel>
-                    <StackPanel Grid.Row="1" Spacing="4">
+                    <StackPanel Grid.Row="1" Spacing="10">
                         <!-- Static explanation. McpPageStatus below is overwritten with the live
                              server count on every refresh, so the two can't share an element. -->
-                        <TextBlock Text="Model Context Protocol servers give the AI extra tools. They run as one set of processes for the whole app, so this list is app-wide and saved the moment you change it. Each agent chooses whether to use them: Settings → Integrations → MCP server integration."
+                        <TextBlock Text="MCP servers connect the AI to outside systems — databases, APIs, docs, other apps — as tools it can call during a chat. Servers are shared across every agent; each agent opts in with the toggle below. Changes save immediately."
                                    Opacity="0.6" FontSize="12" TextWrapping="Wrap"/>
+                        <!-- Per-agent opt-in (EnableMcp is a per-agent setting), even though the server
+                             list above is app-wide. Loaded for the active agent in RefreshMcpListAsync. -->
+                        <ToggleSwitch x:Name="McpEnableToggle" Tag="mcp" Toggled="Setting_Toggled"
+                                      Header="Use MCP tools in the active agent"
+                                      ToolTipService.ToolTip="Whether the active agent attaches the MCP servers' tools. This choice is per-agent."/>
                         <TextBlock x:Name="McpPageStatus" Text="" Opacity="0.75" FontSize="12"
                                    TextWrapping="Wrap" Foreground="{StaticResource MandoGoldBrush}"/>
                     </StackPanel>

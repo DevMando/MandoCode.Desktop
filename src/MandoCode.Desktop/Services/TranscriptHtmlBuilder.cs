@@ -286,7 +286,11 @@ public sealed class TranscriptHtmlBuilder
   .chip-row { margin: 2px 0; }
   .chip { display: inline-flex; align-items: center; gap: 7px;
     padding: 3px 12px; border-radius: 999px; font-size: 12.5px;
-    border: 1px solid var(--border); background: var(--panel); }
+    border: 1px solid var(--border); background: var(--panel);
+    /* Uniform floor so status pills line up — the "MCP / N connected" pill is the
+       widest of them, so shorter pills (model / ready) pad up to match. Longer
+       chips still grow past it. */
+    box-sizing: border-box; min-width: 190px; }
   .chip .dot { width: 7px; height: 7px; border-radius: 50%; flex: none;
     background: var(--dim); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dim) 20%, transparent); }
   .chip.ok .dot { background: var(--green);

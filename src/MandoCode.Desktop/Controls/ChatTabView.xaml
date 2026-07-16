@@ -130,59 +130,126 @@
         </StackPanel>
 
         <!-- ======= Create-snapshot offer (opt-in) =======
-             Appears when a model switch (or "Take snapshot") buffers a conversation. Snapshots are
-             born summarized: pick the model to summarize with — the origin model by default, or any
-             installed model (local = free, cloud = may spend tokens). Ignore it and the conversation
-             is discarded (pure opt-in, no auto-save). -->
-        <Border x:Name="SnapshotOfferCard" Grid.Row="4" Visibility="Collapsed"
-                Margin="16,8,16,0" Padding="14,12" CornerRadius="10"
-                Background="{StaticResource MandoPanelBrush}"
-                BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1">
-            <StackPanel Spacing="10">
-                <Grid>
-                    <StackPanel Spacing="2">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <FontIcon Glyph="&#xE81C;" FontSize="14" VerticalAlignment="Center"
-                                      Foreground="{StaticResource MandoAccentBrush}"/>
-                            <TextBlock Text="Create a context snapshot?" FontWeight="SemiBold" FontSize="13"/>
-                        </StackPanel>
-                        <TextBlock x:Name="SnapshotOfferSubtitle" Opacity="0.6" FontSize="12"
-                                   TextWrapping="Wrap"/>
-                    </StackPanel>
-                    <Button Click="SnapshotOfferDismiss_Click" Padding="6" Background="Transparent"
-                            BorderThickness="0" HorizontalAlignment="Right" VerticalAlignment="Top"
+             Slides down from the top of the transcript when a model switch (or "Take snapshot")
+             buffers a conversation. Two stages: a thin notification bar, then (on Create) the full
+             name + model picker. Non-blocking — keep prompting; it persists until you create or
+             dismiss. Grid.Row="1" + Top alignment floats it over the top of the WebView transcript;
+             declared after it so it layers on top. -->
+        <Grid x:Name="SnapshotOfferRoot" Grid.Row="1" Visibility="Collapsed"
+              VerticalAlignment="Top" Margin="16,10,16,0">
+            <Grid.RenderTransform>
+                <TranslateTransform x:Name="SnapshotOfferTransform"/>
+            </Grid.RenderTransform>
+
+            <!-- Stage 1: thin notification bar -->
+            <Border x:Name="SnapshotNotifyBar" Padding="12,8" CornerRadius="10"
+                    Background="{StaticResource MandoPanelBrush}"
+                    BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1">
+                <Grid ColumnSpacing="10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <FontIcon Glyph="&#xE722;" FontSize="14" VerticalAlignment="Center"
+                              Foreground="{StaticResource MandoAccentBrush}"/>
+                    <TextBlock x:Name="SnapshotNotifyText" Grid.Column="1" VerticalAlignment="Center"
+                               FontSize="13" TextTrimming="CharacterEllipsis"/>
+                    <Button Grid.Column="2" Content="Create" Padding="12,4"
+                            Click="SnapshotNotifyCreate_Click" Style="{StaticResource AccentButtonStyle}"/>
+                    <Button Grid.Column="3" Click="SnapshotOfferDismiss_Click" Padding="6"
+                            Background="Transparent" BorderThickness="0"
                             ToolTipService.ToolTip="Dismiss — the conversation won't be saved">
                         <FontIcon Glyph="&#xE711;" FontSize="12"/>
                     </Button>
                 </Grid>
-                <!-- Name (optional) and the summarizer model share one row: [name] [model] [Create]. -->
-                <Grid ColumnSpacing="8">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBox x:Name="SnapshotNameBox" Grid.Column="0" PlaceholderText="Name (optional)"
-                             MaxLength="80" VerticalAlignment="Center"/>
-                    <ComboBox x:Name="SnapshotModelCombo" Grid.Column="1" HorizontalAlignment="Stretch"
-                              VerticalAlignment="Center"
-                              ToolTipService.ToolTip="Model that will write the recap">
-                        <ComboBox.ItemTemplate>
-                            <DataTemplate x:DataType="local:ModelChoice">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <TextBlock Text="{x:Bind Name}" VerticalAlignment="Center"/>
-                                    <Border CornerRadius="5" Padding="6,1" VerticalAlignment="Center"
-                                            Background="{StaticResource MandoBackgroundBrush}">
-                                        <TextBlock Text="{x:Bind Tag}" FontSize="10" Opacity="0.75"/>
-                                    </Border>
-                                </StackPanel>
-                            </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                    </ComboBox>
-                    <Button x:Name="SnapshotCreateButton" Grid.Column="2" Content="Create"
-                            Click="SnapshotCreate_Click" VerticalAlignment="Center"
-                            Style="{StaticResource AccentButtonStyle}"/>
+            </Border>
+
+            <!-- Stage 2: full name + model picker (shown after Create on the bar) -->
+            <Border x:Name="SnapshotOfferCard" Visibility="Collapsed" Padding="14,12" CornerRadius="10"
+                    Background="{StaticResource MandoPanelBrush}"
+                    BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1">
+                <Grid>
+                <StackPanel x:Name="SnapshotOfferContent" Spacing="10">
+                    <Grid>
+                        <StackPanel Spacing="2">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE722;" FontSize="14" VerticalAlignment="Center"
+                                          Foreground="{StaticResource MandoAccentBrush}"/>
+                                <TextBlock Text="Create a context snapshot?" FontWeight="SemiBold" FontSize="13"/>
+                            </StackPanel>
+                            <TextBlock x:Name="SnapshotOfferSubtitle" Opacity="0.6" FontSize="12"
+                                       TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <Button Click="SnapshotOfferDismiss_Click" Padding="6" Background="Transparent"
+                                BorderThickness="0" HorizontalAlignment="Right" VerticalAlignment="Top"
+                                ToolTipService.ToolTip="Dismiss — the conversation won't be saved">
+                            <FontIcon Glyph="&#xE711;" FontSize="12"/>
+                        </Button>
+                    </Grid>
+                    <!-- Name (optional) and the summarizer model share one row: [name] [model] [Create]. -->
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="SnapshotNameBox" Grid.Column="0" PlaceholderText="Name (optional)"
+                                 MaxLength="80" VerticalAlignment="Center"/>
+                        <ComboBox x:Name="SnapshotModelCombo" Grid.Column="1" HorizontalAlignment="Stretch"
+                                  VerticalAlignment="Center"
+                                  ToolTipService.ToolTip="Model that will write the recap">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate x:DataType="local:ModelChoice">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="{x:Bind Name}" VerticalAlignment="Center"/>
+                                        <Border CornerRadius="5" Padding="6,1" VerticalAlignment="Center"
+                                                Background="{StaticResource MandoBackgroundBrush}">
+                                            <TextBlock Text="{x:Bind Tag}" FontSize="10" Opacity="0.75"/>
+                                        </Border>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                        <Button x:Name="SnapshotCreateButton" Grid.Column="2" Content="Create"
+                                Click="SnapshotCreate_Click" VerticalAlignment="Center"
+                                Style="{StaticResource AccentButtonStyle}"/>
+                    </Grid>
+                </StackPanel>
+
+                <!-- Busy overlay while the model writes the recap: content fades behind a spinner
+                     and contextual text ("Creating …snapshot"). -->
+                <StackPanel x:Name="SnapshotBusyPanel" Visibility="Collapsed" Orientation="Horizontal"
+                            Spacing="12" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <ProgressRing x:Name="SnapshotBusyRing" IsActive="False" Width="20" Height="20"
+                                  Foreground="{StaticResource MandoAccentBrush}"/>
+                    <TextBlock x:Name="SnapshotBusyText" VerticalAlignment="Center" FontSize="13"
+                               FontWeight="SemiBold"/>
+                </StackPanel>
                 </Grid>
+            </Border>
+        </Grid>
+
+        <!-- ======= Plan approval bar =======
+             Slides up above the input when the assistant proposes a plan. Unlike the centered
+             approval modal, it does NOT cover the transcript — the plan card stays readable above
+             while you choose. Gates the turn (it's waiting on you) without hiding the plan. -->
+        <Border x:Name="PlanApprovalBar" Grid.Row="4" Visibility="Collapsed"
+                Margin="16,0,16,10" Padding="14,12" CornerRadius="12"
+                Background="{StaticResource MandoPanelBrush}"
+                BorderBrush="{StaticResource MandoAccentBrush}" BorderThickness="1">
+            <Border.RenderTransform>
+                <TranslateTransform x:Name="PlanApprovalTransform"/>
+            </Border.RenderTransform>
+            <StackPanel Spacing="10">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon Glyph="&#xE8FD;" FontSize="15" VerticalAlignment="Center"
+                              Foreground="{StaticResource MandoAccentBrush}"/>
+                    <TextBlock x:Name="PlanApprovalTitle" FontWeight="SemiBold" FontSize="13"
+                               VerticalAlignment="Center" TextWrapping="Wrap"/>
+                </StackPanel>
+                <StackPanel x:Name="PlanApprovalButtons" Orientation="Horizontal" Spacing="8"/>
             </StackPanel>
         </Border>
 
@@ -234,7 +301,7 @@
              Each tab owns its WinUiApprovalService, ApprovalPromptGate and McpApprovalGate,
              so two agents can sit at an approval prompt simultaneously without one blocking
              the other's overlay from ever rendering. ======= -->
-        <Grid x:Name="ApprovalOverlay" Grid.RowSpan="5" Visibility="Collapsed"
+        <Grid x:Name="ApprovalOverlay" Grid.RowSpan="6" Visibility="Collapsed"
               Background="#B0000000">
             <Border x:Name="ApprovalCard" MaxWidth="860" MaxHeight="640" Margin="24" Padding="20"
                     HorizontalAlignment="Center" VerticalAlignment="Center"

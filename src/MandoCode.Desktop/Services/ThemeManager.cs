@@ -59,12 +59,12 @@ public sealed record UiTheme
         },
         new UiTheme
         {
-            Name = "Phosphor",
-            Description = "Green-on-black terminal. Old-school hacker energy.",
-            Background = "#0A0F0A", Panel = "#111B11", Border = "#234023",
-            Text = "#CDEFCD", Dim = "#6F8F6F",
-            Accent = "#3DFF7B", Gold = "#D9FF66", Sky = "#43E0C8",
-            Green = "#3DFF7B", Red = "#FF6259", DiffAdd = "#A8FF60",
+            Name = "Phosphor Fwog",
+            Description = "Tree-fwog green on a dark pond — Phosphor's terminal roots, but froggier. 🐸",
+            Background = "#0B1410", Panel = "#15211A", Border = "#294A34",
+            Text = "#D8F3CF", Dim = "#7FA383",
+            Accent = "#63D94B", Gold = "#FFCB47", Sky = "#4FD6C2",
+            Green = "#63D94B", Red = "#FF6F5B", DiffAdd = "#A7E86A",
         },
         new UiTheme
         {
