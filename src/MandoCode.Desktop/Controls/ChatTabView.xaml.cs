@@ -63,9 +63,10 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
     public bool IsApprovalOpen => ApprovalOverlay.Visibility == Visibility.Visible
         || PlanApprovalBar.Visibility == Visibility.Visible;
 
-    /// <summary>The pending approval's headline — MainWindow shows it in the cross-tab toast.</summary>
-    public string ApprovalHeadline => PlanApprovalBar.Visibility == Visibility.Visible
-        ? PlanApprovalTitle.Text : ApprovalTitle.Text;
+    /// <summary>The pending approval's toast summary — what's waiting (e.g. "Wants to edit
+    /// Program.cs"), set when the approval is shown. MainWindow shows it in the cross-tab toast.</summary>
+    public string ApprovalHeadline => _approvalSummary;
+    private string _approvalSummary = "";
 
     /// <summary>Set by MainWindow when this tab is selected. Only a background tab badges.</summary>
     public bool IsSelected { get; set; }
@@ -878,6 +879,10 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
 
         OnUi(() =>
         {
+            // What the cross-tab toast will say — a specific "what's waiting" line, not the modal's
+            // question. Set for both the bottom-bar and modal paths.
+            _approvalSummary = string.IsNullOrEmpty(request.ToastSummary) ? request.Title : request.ToastSummary;
+
             // Plan approvals render as a non-covering bottom bar so the plan card stays readable.
             if (request.BottomBar)
             {

@@ -672,6 +672,7 @@ public sealed partial class ChatController
                 Title = "The assistant proposes this plan. What would you like to do?",
                 // Bottom bar, not the centered modal — the plan card above stays readable.
                 BottomBar = true,
+                ToastSummary = "Wants to run a proposed plan",
                 Options = new[]
                 {
                     new ApprovalOption(ExecutePlanLabel, ApprovalOptionKind.Proceed),

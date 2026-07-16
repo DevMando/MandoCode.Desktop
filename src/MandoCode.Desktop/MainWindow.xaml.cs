@@ -278,6 +278,9 @@ public sealed partial class MainWindow : Window
                 ? Visibility.Visible : Visibility.Collapsed;
 
         RefreshNavIcons();
+        // Re-evaluate the approval toast for the new page — leaving the chat can newly "hide" the
+        // selected agent's approval, which should now raise the toast (and returning clears it).
+        RefreshTabStrip();
 
         switch (page)
         {
@@ -680,7 +683,12 @@ public sealed partial class MainWindow : Window
             tab.View.IsSelected = isSelected;
             var badged = tab.View.IsApprovalOpen && !isSelected;
             tab.Badge.Visibility = badged ? Visibility.Visible : Visibility.Collapsed;
-            if (badged) pending ??= tab;
+
+            // Toast for any approval you can't currently see: a background tab, OR the selected tab
+            // while you're away on Settings/MCP/Appearance (its chat — and the approval — is
+            // collapsed there, so without this you'd get no notice at all).
+            if (tab.View.IsApprovalOpen && (!isSelected || _currentPage != "chat"))
+                pending ??= tab;
         }
 
         // With several agents running, "an approval is waiting" is useless without saying where,

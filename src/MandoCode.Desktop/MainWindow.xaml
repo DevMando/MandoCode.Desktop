@@ -561,7 +561,10 @@
         <!-- ======= Approval toast — top-right, shown only when an approval arrives in an agent
              you're not looking at. Click = select that agent and review; X = dismiss (the tab's
              gold badge stays as the passive reminder). ======= -->
-        <Border x:Name="ApprovalToast" Grid.ColumnSpan="2" Visibility="Collapsed"
+        <!-- Span ALL three columns (rail + snapshots + content) so it anchors to the window's true
+             top-right. Spanning only 0-1 pinned it to the collapsible Snapshots column, so it was
+             clipped to the rail unless that panel happened to be open. -->
+        <Border x:Name="ApprovalToast" Grid.Column="0" Grid.ColumnSpan="3" Visibility="Collapsed"
                 HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,52,20,0"
                 MaxWidth="380" Padding="14,12"
                 Background="{StaticResource MandoPanelBrush}"
