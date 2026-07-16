@@ -8,6 +8,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 using Windows.System;
 
 namespace MandoCode.Desktop;
@@ -58,11 +59,13 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
     private TranscriptWriter _transcript => Session.Transcript;
     private MandoCode.Services.FileAutocompleteProvider _fileProvider => Session.FileProvider;
 
-    /// <summary>True while this tab's approval overlay is up and awaiting a choice.</summary>
-    public bool IsApprovalOpen => ApprovalOverlay.Visibility == Visibility.Visible;
+    /// <summary>True while this tab's approval overlay OR the plan-approval bar is up and awaiting a choice.</summary>
+    public bool IsApprovalOpen => ApprovalOverlay.Visibility == Visibility.Visible
+        || PlanApprovalBar.Visibility == Visibility.Visible;
 
     /// <summary>The pending approval's headline — MainWindow shows it in the cross-tab toast.</summary>
-    public string ApprovalHeadline => ApprovalTitle.Text;
+    public string ApprovalHeadline => PlanApprovalBar.Visibility == Visibility.Visible
+        ? PlanApprovalTitle.Text : ApprovalTitle.Text;
 
     /// <summary>Set by MainWindow when this tab is selected. Only a background tab badges.</summary>
     public bool IsSelected { get; set; }
@@ -340,24 +343,72 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
     // discard. Snapshots are born summarized; there is no light/un-enhanced state.
     // ============================================================
 
-    /// <summary>Shows or hides the offer card to match the controller's pending buffer, and (when
-    /// shown) loads the model picker.</summary>
+    /// <summary>Shows or hides the top offer to match the controller's pending buffer. Stage 1 is the
+    /// thin notification bar; the full picker is built only when the user clicks Create on it.</summary>
     private void RefreshSnapshotOffer()
     {
         var offer = _controller.PendingOffer;
         if (offer == null)
         {
-            SnapshotOfferCard.Visibility = Visibility.Collapsed;
+            SnapshotOfferRoot.Visibility = Visibility.Collapsed;
             return;
         }
 
+        // Stage 1: notification bar. Non-blocking — the user can ignore it and keep prompting.
+        SnapshotNotifyText.Text = $"Snapshot available — save the {offer.OriginModel} conversation.";
+        SnapshotNotifyBar.Visibility = Visibility.Visible;
+        SnapshotOfferCard.Visibility = Visibility.Collapsed;
+        SnapshotOfferRoot.Visibility = Visibility.Visible;
+        SlideSnapshotOfferIn();
+    }
+
+    /// <summary>Stage 2: the user accepted the notification, so expand into the full name + model
+    /// picker (reused). It hangs at the top until they create or dismiss.</summary>
+    private void SnapshotNotifyCreate_Click(object sender, RoutedEventArgs e)
+    {
+        var offer = _controller.PendingOffer;
+        if (offer == null) return;
+
         SnapshotOfferSubtitle.Text =
             $"{offer.MessageCount} message{(offer.MessageCount == 1 ? "" : "s")} from {offer.OriginModel} — "
-            + "pick a model to write the recap, or dismiss to discard.";
+            + "name it (optional), pick a model, and create.";
         SnapshotCreateButton.Content = "Create";
         SnapshotNameBox.Text = "";   // a fresh offer starts unnamed
+        // Reset any leftover busy state from a prior, interrupted attempt.
+        SnapshotBusyPanel.Visibility = Visibility.Collapsed;
+        SnapshotBusyRing.IsActive = false;
+        SnapshotOfferContent.Opacity = 1;
+        SnapshotOfferContent.IsHitTestVisible = true;
+        SnapshotNotifyBar.Visibility = Visibility.Collapsed;
         SnapshotOfferCard.Visibility = Visibility.Visible;
+        SlideSnapshotOfferIn();   // re-drop for the taller card
         _ = LoadSnapshotModelsAsync(offer.OriginModel);
+    }
+
+    /// <summary>Drops the offer down from the top of the transcript with a short fade.</summary>
+    private void SlideSnapshotOfferIn()
+    {
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var slide = new DoubleAnimation
+        {
+            From = -18, To = 0,
+            Duration = new Duration(TimeSpan.FromMilliseconds(220)),
+            EasingFunction = ease,
+        };
+        Storyboard.SetTarget(slide, SnapshotOfferTransform);
+        Storyboard.SetTargetProperty(slide, "Y");
+        var fade = new DoubleAnimation
+        {
+            From = 0, To = 1,
+            Duration = new Duration(TimeSpan.FromMilliseconds(180)),
+            EasingFunction = ease,
+        };
+        Storyboard.SetTarget(fade, SnapshotOfferRoot);
+        Storyboard.SetTargetProperty(fade, "Opacity");
+        var sb = new Storyboard();
+        sb.Children.Add(slide);
+        sb.Children.Add(fade);
+        sb.Begin();
     }
 
     /// <summary>Populates the model picker without making the card wait on a network round-trip: the
@@ -399,18 +450,43 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
             return;
         }
 
-        SnapshotCreateButton.IsEnabled = false;
-        SnapshotCreateButton.Content = "Creating Snapshot...";
+        // Summarizing can take a while (especially a cloud model), so show a clear busy state:
+        // fade the controls out and spin, with the snapshot's name in the message when it has one.
+        var name = SnapshotNameBox.Text?.Trim() ?? "";
+        SnapshotBusyText.Text = string.IsNullOrEmpty(name)
+            ? "Creating snapshot…"
+            : $"Creating “{name}” snapshot…";
+        SetSnapshotBusy(true);
 
-        var error = await _controller.CreateSnapshotAsync(choice.Name, SnapshotNameBox.Text);
+        var error = await _controller.CreateSnapshotAsync(choice.Name, name);
         if (error != null)
         {
-            SnapshotCreateButton.IsEnabled = true;
-            SnapshotCreateButton.Content = "Create";
+            SetSnapshotBusy(false);
             _transcript.Append(_html.Warn(error));
         }
         // On success the controller clears the offer → SnapshotOfferChanged → RefreshSnapshotOffer
-        // hides the card, and a "Snapshot saved" chip lands in the transcript.
+        // hides the whole thing, and a "Snapshot saved" chip lands in the transcript.
+    }
+
+    /// <summary>Toggles the create card's busy state: fades the inputs out (and blocks them) while a
+    /// centered spinner + "Creating…" text shows.</summary>
+    private void SetSnapshotBusy(bool busy)
+    {
+        SnapshotBusyRing.IsActive = busy;
+        SnapshotBusyPanel.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+        SnapshotOfferContent.IsHitTestVisible = !busy;
+
+        var fade = new DoubleAnimation
+        {
+            To = busy ? 0.25 : 1.0,
+            Duration = new Duration(TimeSpan.FromMilliseconds(160)),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+        };
+        Storyboard.SetTarget(fade, SnapshotOfferContent);
+        Storyboard.SetTargetProperty(fade, "Opacity");
+        var sb = new Storyboard();
+        sb.Children.Add(fade);
+        sb.Begin();
     }
 
     private void SnapshotOfferDismiss_Click(object sender, RoutedEventArgs e)
@@ -796,12 +872,25 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
             ? ct.Register(() =>
             {
                 tcs.TrySetCanceled(ct);
-                OnUi(HideApprovalOverlay);
+                OnUi(() => { HideApprovalOverlay(); HidePlanApprovalBar(); });
             })
             : default(CancellationTokenRegistration);
 
         OnUi(() =>
         {
+            // Plan approvals render as a non-covering bottom bar so the plan card stays readable.
+            if (request.BottomBar)
+            {
+                ShowPlanApprovalBar(request, choice =>
+                {
+                    HidePlanApprovalBar();
+                    reg.Dispose();
+                    tcs.TrySetResult(choice);
+                    if (ReferenceEquals(_approvalTcs, tcs)) _approvalTcs = null;
+                });
+                return;
+            }
+
             ApprovalTitle.Text = request.Title;
 
             ApprovalSubtitle.Text = request.Subtitle ?? "";
@@ -868,6 +957,8 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
                     ApprovalOptionKind.Destructive => (SolidColorBrush)Application.Current.Resources["MandoRedBrush"],
                     _ => (SolidColorBrush)Application.Current.Resources["MandoGoldBrush"]
                 };
+                if (!string.IsNullOrEmpty(option.Description))
+                    ToolTipService.SetToolTip(button, option.Description);
                 button.Click += (_, _) =>
                 {
                     var choice = (string)button.Tag;
@@ -993,6 +1084,70 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
     {
         ApprovalOverlay.Visibility = Visibility.Collapsed;
         ApprovalDiffList.ItemsSource = null;
+        ApprovalStateChanged?.Invoke(this);
+        InputBox.Focus(FocusState.Programmatic);
+    }
+
+    /// <summary>Slides the plan-approval bar up above the input. Unlike the modal it doesn't cover the
+    /// transcript (the plan stays readable), but it DOES gate input — the turn is awaiting the choice.</summary>
+    private void ShowPlanApprovalBar(ApprovalRequest request, Action<string> onChosen)
+    {
+        PlanApprovalTitle.Text = request.Title;
+        PlanApprovalButtons.Children.Clear();
+        foreach (var option in request.Options)
+        {
+            var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            if (!string.IsNullOrEmpty(option.Glyph))
+                content.Children.Add(new FontIcon { Glyph = option.Glyph, FontSize = 13 });
+            content.Children.Add(new TextBlock { Text = option.Label });
+
+            var button = new Button { Content = content, Tag = option.Label, Padding = new Thickness(14, 6, 14, 6) };
+            if (option.Kind == ApprovalOptionKind.Proceed)
+                button.Style = (Style)Application.Current.Resources["AccentButtonStyle"];   // primary
+            else
+                button.Foreground = option.Kind == ApprovalOptionKind.Destructive
+                    ? (SolidColorBrush)Application.Current.Resources["MandoRedBrush"]
+                    : (SolidColorBrush)Application.Current.Resources["MandoGoldBrush"];
+            if (!string.IsNullOrEmpty(option.Description))
+                ToolTipService.SetToolTip(button, option.Description);
+            button.Click += (_, _) => onChosen((string)button.Tag);
+            PlanApprovalButtons.Children.Add(button);
+        }
+
+        // Gate input while the plan is awaiting a decision.
+        InputBox.IsEnabled = false;
+        SendButton.IsEnabled = false;
+
+        PlanApprovalBar.Visibility = Visibility.Visible;
+        ApprovalStateChanged?.Invoke(this);
+
+        var slide = new DoubleAnimation
+        {
+            From = 24, To = 0,
+            Duration = new Duration(TimeSpan.FromMilliseconds(220)),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+        };
+        Storyboard.SetTarget(slide, PlanApprovalTransform);
+        Storyboard.SetTargetProperty(slide, "Y");
+        var fade = new DoubleAnimation
+        {
+            From = 0, To = 1,
+            Duration = new Duration(TimeSpan.FromMilliseconds(180)),
+        };
+        Storyboard.SetTarget(fade, PlanApprovalBar);
+        Storyboard.SetTargetProperty(fade, "Opacity");
+        var sb = new Storyboard();
+        sb.Children.Add(slide);
+        sb.Children.Add(fade);
+        sb.Begin();
+    }
+
+    private void HidePlanApprovalBar()
+    {
+        if (PlanApprovalBar.Visibility != Visibility.Visible) return;
+        PlanApprovalBar.Visibility = Visibility.Collapsed;
+        InputBox.IsEnabled = true;
+        SendButton.IsEnabled = true;
         ApprovalStateChanged?.Invoke(this);
         InputBox.Focus(FocusState.Programmatic);
     }

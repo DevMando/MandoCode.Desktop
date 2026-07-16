@@ -650,7 +650,7 @@ public sealed partial class ChatController
     // ============================================================
 
     private const string ExecutePlanLabel = "Execute plan";
-    private const string RejectPlanLabel = "Reject (answer without a plan)";
+    private const string RejectPlanLabel = "One-shot it";
     private const string CancelRequestLabel = "Cancel request";
     private const string SkipStepLabel = "Skip this step and continue";
     private const string CancelPlanLabel = "Cancel the plan";
@@ -670,11 +670,15 @@ public sealed partial class ChatController
             choice = await ui.ShowApprovalAsync(new ApprovalRequest
             {
                 Title = "The assistant proposes this plan. What would you like to do?",
+                // Bottom bar, not the centered modal — the plan card above stays readable.
+                BottomBar = true,
                 Options = new[]
                 {
                     new ApprovalOption(ExecutePlanLabel, ApprovalOptionKind.Proceed),
-                    new ApprovalOption(RejectPlanLabel, ApprovalOptionKind.Redirect),
-                    new ApprovalOption(CancelRequestLabel, ApprovalOptionKind.Redirect)
+                    new ApprovalOption(RejectPlanLabel, ApprovalOptionKind.Redirect,
+                        Description: "Skip the step-by-step plan — the model attempts the whole request in one shot."),
+                    // Destructive (red) so the hard "stop" reads differently from "one-shot it".
+                    new ApprovalOption(CancelRequestLabel, ApprovalOptionKind.Destructive)
                 }
             }, ct);
 
@@ -683,7 +687,7 @@ public sealed partial class ChatController
 
         if (choice == CancelRequestLabel)
         {
-            _transcript.Append(_html.Dim("Plan cancelled."));
+            _transcript.Append(_html.Dim("Request cancelled — stopping here."));
             // Cancel the request token so the turn mechanically unwinds — the return
             // string alone is a polite request small models ignore (see App.razor).
             _requestCts?.Cancel();
@@ -692,8 +696,9 @@ public sealed partial class ChatController
 
         if (choice == RejectPlanLabel)
         {
-            _transcript.Append(_html.Dim("Plan rejected — continuing without stepwise execution."));
-            return "User rejected the proposed plan. Respond to the original request directly without calling propose_plan again.";
+            _transcript.Append(_html.Dim("Plan skipped — one-shotting your request."));
+            return "User declined the step-by-step plan and wants you to one-shot it: attempt the full "
+                 + "request in a single pass. Do not call propose_plan again.";
         }
 
         _transcript.Append(_html.Success("Executing plan..."));

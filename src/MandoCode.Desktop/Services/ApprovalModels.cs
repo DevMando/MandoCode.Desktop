@@ -13,8 +13,9 @@ public enum ApprovalOptionKind
     Destructive
 }
 
-/// <summary>Glyph is an optional Segoe Fluent icon rendered before the label.</summary>
-public sealed record ApprovalOption(string Label, ApprovalOptionKind Kind, string? Glyph = null);
+/// <summary>Glyph is an optional Segoe Fluent icon rendered before the label; Description, when set,
+/// is shown as a hover tooltip explaining what the option does.</summary>
+public sealed record ApprovalOption(string Label, ApprovalOptionKind Kind, string? Glyph = null, string? Description = null);
 
 /// <summary>
 /// Everything the approval overlay needs to render one approval prompt.
@@ -41,6 +42,10 @@ public sealed class ApprovalRequest
     public string? DiffSummary { get; init; }
 
     public required IReadOnlyList<ApprovalOption> Options { get; init; }
+
+    /// <summary>Render as a non-covering bottom bar rather than the centered modal. Used for plan
+    /// approval so the plan card stays readable in the transcript while the user decides.</summary>
+    public bool BottomBar { get; init; }
 }
 
 /// <summary>
