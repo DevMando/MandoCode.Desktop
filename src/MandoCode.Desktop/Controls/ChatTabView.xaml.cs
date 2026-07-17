@@ -48,7 +48,7 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
 
     private readonly ObservableCollection<CommandSuggestion> _suggestions = new();
 
-    private enum SuggestMode { None, Command, File }
+    private enum SuggestMode { None, Command, File, Emoji }
     private SuggestMode _suggestMode = SuggestMode.None;
     private int _tokenStart;   // index of the '@' (File mode) — replaced on accept
     private int _tokenEnd;     // caret position when suggestions were computed
@@ -101,6 +101,7 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         // This tab's approval service renders into this tab's overlay.
         Session.Approvals.Ui = this;
         SuggestionsList.ItemsSource = _suggestions;
+        EmojiGrid.ItemsSource = QuickEmojis;
         TranscriptView.DefaultBackgroundColor = ThemeManager.C(ThemeManager.Current.Background);
 
         // Method groups, not lambdas: Shutdown has to be able to detach them. A closed tab that
@@ -200,6 +201,10 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
                     OpenTranscriptPath(msg["open-file:".Length..]);
                 else if (msg != null && msg.StartsWith("copy:", StringComparison.Ordinal))
                     ClipboardCopyRequested?.Invoke(msg["copy:".Length..]);
+                else if (msg != null && msg.StartsWith("react:", StringComparison.Ordinal))
+                    HandleReaction(msg["react:".Length..], add: true);
+                else if (msg != null && msg.StartsWith("unreact:", StringComparison.Ordinal))
+                    HandleReaction(msg["unreact:".Length..], add: false);
             };
 
             // Serve bundled web assets (highlight.js) to the transcript document.
@@ -223,6 +228,24 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
 
         if (_shutDown) return;
         await Task.Run(_controller.InitializeAsync);
+    }
+
+    /// <summary>A reaction chip was toggled in the transcript. Payload is JSON from the
+    /// transcript's rxChip handler: { id, emoji, snippet }. Adds/removes the pending entry
+    /// the controller folds into the next model turn; malformed payloads are ignored.</summary>
+    private void HandleReaction(string json, bool add)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var id = doc.RootElement.GetProperty("id").GetString() ?? "";
+            var emoji = doc.RootElement.GetProperty("emoji").GetString() ?? "";
+            var snippet = doc.RootElement.GetProperty("snippet").GetString() ?? "";
+            if (emoji.Length == 0) return;
+            if (add) _controller.AddReaction(id, emoji, snippet);
+            else _controller.RemoveReaction(id, emoji);
+        }
+        catch { /* malformed payload — not ours to crash over */ }
     }
 
     private Task WaitForLoadedAsync()
@@ -799,6 +822,42 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
                 return;
         }
 
+        // :emoji: shortcodes (Slack-style). Two behaviors on the token containing the caret:
+        //  - ":name:" fully typed with an exact match → replace it with the emoji right here.
+        //  - ":fra" partially typed (2+ chars, no closing ':') → suggest matching shortcodes.
+        // The 2-char minimum keeps ordinary colons (":)", "note:") from popping the list.
+        if (tokenStart < caret && tokenStart < text.Length && text[tokenStart] == ':')
+        {
+            var body = text[(tokenStart + 1)..caret];
+            if (body.Length > 1 && body.EndsWith(':'))
+            {
+                var name = body[..^1].ToLowerInvariant();
+                var exact = EmojiShortcodes.FirstOrDefault(s => s.Name == name).Emoji;
+                if (exact != null)
+                {
+                    InputBox.Text = text[..tokenStart] + exact + text[caret..];
+                    InputBox.SelectionStart = tokenStart + exact.Length;
+                    HideSuggestions();
+                    return;
+                }
+            }
+            else if (body.Length >= 2 && !body.Contains(':'))
+            {
+                var frag = body.ToLowerInvariant();
+                var matches = EmojiShortcodes.Where(s => s.Name.StartsWith(frag))
+                    .Concat(EmojiShortcodes.Where(s => !s.Name.StartsWith(frag) && s.Name.Contains(frag)));
+
+                if (ShowSuggestions(SuggestMode.Emoji, tokenStart, caret,
+                        matches.Select(m => new CommandSuggestion
+                        {
+                            Command = ":" + m.Name + ":",
+                            Description = m.Emoji,
+                            InsertText = m.Emoji,
+                        })))
+                    return;
+            }
+        }
+
         HideSuggestions();
     }
 
@@ -844,12 +903,67 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
             // folder → drilled listing reopens; file → token ended with a space, stays hidden.
             UpdateSuggestions();
         }
+        else if (_suggestMode == SuggestMode.Emoji)
+        {
+            var text = InputBox.Text;
+            var start = Math.Min(_tokenStart, text.Length);
+            var end = Math.Min(_tokenEnd, text.Length);
+            var emoji = s.InsertText ?? s.Command;
+            InputBox.Text = text[..start] + emoji + text[end..];
+            InputBox.SelectionStart = start + emoji.Length;
+            HideSuggestions();
+        }
         else
         {
             InputBox.Text = s.Command + " ";
             InputBox.SelectionStart = InputBox.Text.Length;
             HideSuggestions();
         }
+        InputBox.Focus(FocusState.Programmatic);
+    }
+
+    /// <summary>Curated quick-pick set for the emoji flyout; Win + . remains the full picker.</summary>
+    private static readonly string[] QuickEmojis =
+    {
+        "😀", "😄", "😂", "🤣", "😊", "😉", "😍", "🥰", "😎", "🤓", "🤔", "🙃",
+        "😅", "😬", "😭", "🥳", "🤯", "😴", "🙄", "😤", "😱", "🫠", "🤗", "🫡",
+        "👍", "👎", "👌", "🙏", "👏", "💪", "🤝", "✌️", "🤞", "👀", "🧠", "💯",
+        "🔥", "✨", "🚀", "🎉", "🎯", "💡", "⚡", "⭐", "❤️", "💔", "✅", "❌",
+        "⚠️", "❓", "❗", "💬", "🐛", "🔧", "🔒", "🔑", "📝", "📌", "📁", "🖥️",
+        "☕", "🍕", "🎮", "🤖",
+    };
+
+    /// <summary>Slack-style shortcode → emoji. Aliases are separate rows pointing at the same
+    /// emoji. Names must be lowercase; lookup lowercases the typed fragment.</summary>
+    private static readonly (string Name, string Emoji)[] EmojiShortcodes =
+    {
+        ("grinning", "😀"), ("smile", "😄"), ("joy", "😂"), ("rofl", "🤣"),
+        ("blush", "😊"), ("wink", "😉"), ("heart_eyes", "😍"), ("smiling_hearts", "🥰"),
+        ("sunglasses", "😎"), ("coolglasses", "😎"), ("nerd", "🤓"), ("thinking", "🤔"),
+        ("upside_down", "🙃"), ("sweat_smile", "😅"), ("grimacing", "😬"), ("sob", "😭"),
+        ("partying", "🥳"), ("mind_blown", "🤯"), ("sleeping", "😴"), ("eye_roll", "🙄"),
+        ("triumph", "😤"), ("scream", "😱"), ("melting", "🫠"), ("hugs", "🤗"),
+        ("salute", "🫡"), ("thumbsup", "👍"), ("+1", "👍"), ("thumbsdown", "👎"),
+        ("-1", "👎"), ("ok_hand", "👌"), ("pray", "🙏"), ("clap", "👏"),
+        ("muscle", "💪"), ("handshake", "🤝"), ("victory", "✌️"), ("crossed_fingers", "🤞"),
+        ("eyes", "👀"), ("brain", "🧠"), ("100", "💯"), ("fire", "🔥"),
+        ("sparkles", "✨"), ("rocket", "🚀"), ("tada", "🎉"), ("party_popper", "🎉"),
+        ("dart", "🎯"), ("bulb", "💡"), ("idea", "💡"), ("zap", "⚡"),
+        ("star", "⭐"), ("heart", "❤️"), ("broken_heart", "💔"), ("check", "✅"),
+        ("white_check_mark", "✅"), ("x", "❌"), ("cross", "❌"), ("warning", "⚠️"),
+        ("question", "❓"), ("exclamation", "❗"), ("speech_balloon", "💬"), ("bug", "🐛"),
+        ("wrench", "🔧"), ("lock", "🔒"), ("key", "🔑"), ("memo", "📝"),
+        ("note", "📝"), ("pushpin", "📌"), ("pin", "📌"), ("folder", "📁"),
+        ("desktop", "🖥️"), ("coffee", "☕"), ("pizza", "🍕"), ("video_game", "🎮"),
+        ("robot", "🤖"),
+    };
+
+    private void EmojiGrid_ItemClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is not string emoji || !InputBox.IsEnabled) return;
+        var caret = Math.Min(InputBox.SelectionStart, InputBox.Text.Length);
+        InputBox.Text = InputBox.Text.Insert(caret, emoji);
+        InputBox.SelectionStart = caret + emoji.Length;
         InputBox.Focus(FocusState.Programmatic);
     }
 
@@ -1122,6 +1236,7 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         // Gate input while the plan is awaiting a decision.
         InputBox.IsEnabled = false;
         SendButton.IsEnabled = false;
+        EmojiButton.IsEnabled = false;
 
         PlanApprovalBar.Visibility = Visibility.Visible;
         ApprovalStateChanged?.Invoke(this);
@@ -1153,6 +1268,7 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         PlanApprovalBar.Visibility = Visibility.Collapsed;
         InputBox.IsEnabled = true;
         SendButton.IsEnabled = true;
+        EmojiButton.IsEnabled = true;
         ApprovalStateChanged?.Invoke(this);
         InputBox.Focus(FocusState.Programmatic);
     }
