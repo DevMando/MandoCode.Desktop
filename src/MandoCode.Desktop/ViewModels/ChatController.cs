@@ -588,9 +588,23 @@ public sealed partial class ChatController
         _lastOperationType = call.FunctionName.Replace("FileSystem_", "").ToLowerInvariant();
 
         if (!call.FunctionName.StartsWith("FileSystem_", StringComparison.Ordinal))
-            _transcript.Append(_html.Dim($"[Function] {call.Description}"));
+            _transcript.Append(_html.ToolChip(DescribeToolCall(call)));
 
         _busy.Update(call.Description);
+    }
+
+    /// <summary>Label for a tool-call pill. For a skill load, surfaces WHICH skill (the useful bit)
+    /// instead of the generic "Skills · load_skill"; everything else keeps its normal description.</summary>
+    private static string DescribeToolCall(FunctionCall call)
+    {
+        if (call.FunctionName.EndsWith("load_skill", StringComparison.OrdinalIgnoreCase)
+            && call.Arguments.TryGetValue("name", out var nameObj)
+            && nameObj?.ToString() is { Length: > 0 } skillName)
+        {
+            return $"Skill: {skillName.Trim()}";
+        }
+
+        return call.Description;
     }
 
     private void OnFunctionCompleted(FunctionExecutionResult result)
@@ -611,12 +625,10 @@ public sealed partial class ChatController
                 _recentReadFiles.Clear();
             }
         }
-        else if (result.Success)
+        else if (!result.Success)
         {
-            _transcript.Append(_html.Success("[Done] ✓"));
-        }
-        else
-        {
+            // No completion pill for success (the invoke pill is the whole record, and recoloring it
+            // in place is what broke things). A failure still surfaces its detail line.
             _transcript.Append(_html.Error($"[Error] {result.Result}"));
         }
 
@@ -861,7 +873,7 @@ public sealed partial class ChatController
                 else
                 {
                     ClipboardCopyRequested?.Invoke(_lastAiResponse);
-                    _transcript.Append(_html.Success($"Copied to clipboard ({_lastAiResponse.Length} chars)"));
+                    _transcript.Append(_html.StatusChip("Copied", $"{_lastAiResponse.Length} chars", "ok"));
                 }
                 return;
 
@@ -994,7 +1006,7 @@ public sealed partial class ChatController
             return;
         }
 
-        _transcript.Append(_html.Dim("Opening Settings…"));
+        _transcript.Append(_html.StatusChip("Settings", "opening…"));
         SetupNeeded?.Invoke();
     }
 
@@ -1390,13 +1402,13 @@ public sealed partial class ChatController
         var matches = Regex.Matches(_lastAiResponse, @"```(?:\w*)\r?\n([\s\S]*?)```");
         if (matches.Count == 0)
         {
-            _transcript.Append(_html.Warn("No code blocks found in the last response."));
+            _transcript.Append(_html.StatusChip("Copy code", "no code blocks in the last response"));
             return;
         }
 
         var codeContent = string.Join("\n\n", matches.Cast<Match>().Select(m => m.Groups[1].Value.TrimEnd()));
         ClipboardCopyRequested?.Invoke(codeContent);
-        _transcript.Append(_html.Success($"Copied {matches.Count} code block(s) to clipboard ({codeContent.Length} chars)"));
+        _transcript.Append(_html.StatusChip("Copied", $"{matches.Count} code block{(matches.Count == 1 ? "" : "s")} · {codeContent.Length} chars", "ok"));
     }
 
     private void ShowSkills()
@@ -1639,7 +1651,7 @@ public sealed partial class ChatController
         }
     }
 
-    public sealed record McpStatusRow(string Name, string Transport, string Status, bool Connected);
+    public sealed record McpStatusRow(string Name, string Transport, string Status, bool Connected, bool Disabled);
 
     /// <summary>Live MCP server status — feeds both the /mcp listing and the MCP page.</summary>
     public async Task<List<McpStatusRow>> GetMcpStatusRowsAsync()
@@ -1674,7 +1686,7 @@ public sealed partial class ChatController
             {
                 status = "not started";
             }
-            rows.Add(new McpStatusRow(name, transport, status, connected));
+            rows.Add(new McpStatusRow(name, transport, status, connected, serverCfg.Disabled));
         }
         return rows;
     }
@@ -1771,15 +1783,17 @@ public sealed partial class ChatController
 
     private async Task HandleMcpReloadCommandAsync()
     {
-        _transcript.Append(_html.Dim("Restarting MCP servers..."));
+        // Render reload progress as centered status pills — same StatusChip family as the top
+        // "MCP · N connected" chip (a theme-aware dot, no emoji), rather than left-aligned text.
+        _transcript.Append(_html.StatusChip("MCP", "restarting…"));
 
         await _mcp.ReloadAllAsync();   // every tab's kernel re-registers, history kept
 
         var active = _mcpManager.ActiveClients.Count;
         var failed = _mcpManager.StartupErrors.Count;
         _transcript.Append(failed == 0
-            ? _html.Success($"🔌 MCP reloaded: {active} server{(active == 1 ? "" : "s")} connected.")
-            : _html.Warn($"MCP reloaded: {active} connected, {failed} failed."));
+            ? _html.StatusChip("MCP", $"{active} server{(active == 1 ? "" : "s")} connected", "ok")
+            : _html.StatusChip("MCP", $"{active} connected, {failed} failed", "warn"));
     }
 
     // ============================================================
@@ -1857,7 +1871,10 @@ public sealed partial class ChatController
             return;
         }
 
-        var state = _music.IsPaused ? "paused" : "now playing";
-        _transcript.Append(_html.Info($"♪ {state}: {track.Name}  [{track.Genre}]  · vol {(int)(_music.Volume * 100)}%"));
+        var playing = !_music.IsPaused;
+        _transcript.Append(_html.StatusChip(
+            playing ? "Now playing" : "Paused",
+            $"{track.Name} · {track.Genre} · vol {(int)(_music.Volume * 100)}%",
+            playing ? "ok" : ""));
     }
 }
