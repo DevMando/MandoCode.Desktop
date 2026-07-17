@@ -4,6 +4,8 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:MandoCode.Desktop"
+    xmlns:controls="using:MandoCode.Desktop.Controls"
+    xmlns:primitives="using:Microsoft.UI.Xaml.Controls.Primitives"
     xmlns:services="using:MandoCode.Desktop.Services">
 
     <Grid x:Name="Root" KeyDown="Root_KeyDown" Background="{StaticResource MandoBackgroundBrush}">
@@ -17,8 +19,12 @@
              Full-screen pages, not tabs. Settings acts on whichever agent tab is currently selected
              (per-agent). Snapshots, MCP servers, and Appearance are app-global — one surface for the
              whole app, regardless of which agent is active. -->
-        <StackPanel Grid.Column="0" Background="{StaticResource MandoPanelBrush}"
-                    Padding="4,12" Spacing="6">
+        <Grid Grid.Column="0" Background="{StaticResource MandoPanelBrush}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+        <StackPanel Grid.Row="0" Padding="4,12" Spacing="6">
             <Button x:Name="NavChat" Click="NavChat_Click" Padding="10,8" Background="Transparent"
                     BorderThickness="0" HorizontalAlignment="Stretch"
                     ToolTipService.ToolTip="Agents — your chat tabs">
@@ -67,6 +73,19 @@
                 <FontIcon x:Name="NavAppearanceIcon" Glyph="&#xE771;" FontSize="16"/>
             </Button>
         </StackPanel>
+
+        <!-- Integrated terminal toggle — pinned to the very bottom of the rail, VS-style.
+             Slides a real shell panel up over the chat (Ctrl+`). -->
+        <StackPanel Grid.Row="1" Padding="4,8" Spacing="6">
+            <Border Background="{StaticResource MandoBorderBrush}" Height="1"
+                    HorizontalAlignment="Stretch" Margin="8,2" Opacity="0.6"/>
+            <Button x:Name="NavTerminal" Click="NavTerminal_Click" Padding="10,8" Background="Transparent"
+                    BorderThickness="0" HorizontalAlignment="Stretch"
+                    ToolTipService.ToolTip="Terminal — open a shell (Ctrl+`)">
+                <FontIcon x:Name="NavTerminalIcon" Glyph="&#xE756;" FontSize="16"/>
+            </Button>
+        </StackPanel>
+        </Grid>
 
         <!-- ======= Snapshots panel (global) =======
              A management surface for context snapshots, toggled from the rail. Docked left, ~37%
@@ -165,11 +184,26 @@
             </Grid>
         </Border>
 
-        <Grid Grid.Column="2">
+        <Grid x:Name="ContentColumnGrid" Grid.Column="2">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition x:Name="TerminalRow" Height="0"/>
             </Grid.RowDefinitions>
+
+            <!-- Drag handle to resize the terminal — VS-style splitter on its top edge.
+                 ResizeGrip shows the ↕ cursor on hover; the drag is driven by pointer events.
+                 Collapsed (0px) until the panel is open. -->
+            <controls:ResizeGrip x:Name="TerminalSplitter" Grid.Row="2" Height="6" Visibility="Collapsed"
+                                 HorizontalAlignment="Stretch" Background="Transparent"
+                                 PointerPressed="TerminalSplitter_PointerPressed"
+                                 PointerMoved="TerminalSplitter_PointerMoved"
+                                 PointerReleased="TerminalSplitter_PointerReleased"/>
+
+            <!-- The sliding integrated terminal is created lazily in code (MainWindow.EnsureTerminal)
+                 the first time it's opened, and dropped into Grid.Row 3 — so no WebView2/shell spins
+                 up until the user actually asks for a terminal. -->
 
         <!-- ======= Agent tab strip =======
              The strip carries headers ONLY — each agent's content lives in TabHost below and is
