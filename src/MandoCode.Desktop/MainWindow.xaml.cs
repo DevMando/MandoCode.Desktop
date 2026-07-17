@@ -23,6 +23,10 @@ public sealed class CommandSuggestion
 {
     public string Command { get; init; } = "";
     public string Description { get; init; } = "";
+
+    /// <summary>What accepting the row inserts, when that differs from <see cref="Command"/>
+    /// (e.g. the ":fire:" row inserts 🔥). Null means insert the command itself.</summary>
+    public string? InsertText { get; init; }
 }
 
 /// <summary>Row model for the snapshot summarizer dropdown — a model name plus whether it's a cloud

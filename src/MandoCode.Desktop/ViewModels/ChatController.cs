@@ -45,6 +45,25 @@ public sealed partial class ChatController
     private readonly List<string> _armedContexts = new();
     private readonly HashSet<int> _armedSnapshotIds = new();   // dedupe: don't queue the same snapshot twice
 
+    /// <summary>Emoji reactions clicked on transcript responses since the last send. Same
+    /// ride-along mechanism as <see cref="_armedContexts"/>: folded into the next message's
+    /// preamble and cleared once delivered. CardId is the transcript's per-response counter;
+    /// the snippet tells the model WHICH response was reacted to.</summary>
+    private readonly List<(string CardId, string Emoji, string Snippet)> _pendingReactions = new();
+
+    /// <summary>Reaction chip toggled on in the transcript (re-clicking a different chip on
+    /// the same response accumulates — multiple reactions per response are fine).</summary>
+    public void AddReaction(string cardId, string emoji, string snippet)
+    {
+        _pendingReactions.RemoveAll(r => r.CardId == cardId && r.Emoji == emoji);
+        _pendingReactions.Add((cardId, emoji, snippet));
+    }
+
+    /// <summary>Reaction chip toggled off. Only pending (undelivered) reactions can be
+    /// retracted; once sent with a turn it's already part of the conversation.</summary>
+    public void RemoveReaction(string cardId, string emoji) =>
+        _pendingReactions.RemoveAll(r => r.CardId == cardId && r.Emoji == emoji);
+
     private CancellationTokenSource? _requestCts;
     private bool _isProcessing;
 
@@ -357,6 +376,19 @@ public sealed partial class ChatController
                     "\n\n[Current request:]\n" + processedInput;
                 _armedContexts.Clear();
                 _armedSnapshotIds.Clear();   // a new batch can re-import the same snapshots next time
+            }
+
+            // Emoji reactions ride along the same way — factual feedback the model can steer
+            // on, clearly framed as metadata so it's never mistaken for typed text.
+            if (_pendingReactions.Count > 0)
+            {
+                var lines = string.Join("\n", _pendingReactions.Select(r =>
+                    $"- {r.Emoji} on your response beginning: “{r.Snippet}”"));
+                processedInput =
+                    "[The user reacted to earlier responses with emoji — a feedback signal, not text they typed:]\n" +
+                    lines +
+                    "\n\n[Current request:]\n" + processedInput;
+                _pendingReactions.Clear();
             }
 
             if (needsPlanning)

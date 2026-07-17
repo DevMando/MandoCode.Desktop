@@ -397,6 +397,44 @@ public sealed class TranscriptHtmlBuilder
   .md pre:hover .copy-chip, .assistant:hover > .copy-chip { opacity: 1; }
   .copy-chip:hover { color: var(--fg); border-color: var(--accent); }
 
+  /* Reactions, Teams-style. A ghosted add-reaction button fades in on hover next to the
+     copy chip; clicking it opens a floating picker card (mirrors the input box's emoji
+     flyout). Chosen reactions sit under the message as pills — no space is reserved
+     until one exists. Delivery to the model: ChatController.SubmitAsync. */
+  .react-ghost { position: absolute; top: 6px; right: 56px; z-index: 1; opacity: 0;
+    transition: opacity 0.12s; background: var(--bg); color: var(--dim);
+    border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px;
+    font-size: 12px; cursor: pointer;
+    font-family: "Segoe UI Emoji", "Segoe UI", sans-serif; }
+  .assistant:hover > .react-ghost { opacity: 0.55; }
+  .react-ghost:hover { opacity: 1 !important; border-color: var(--accent); color: var(--fg); }
+  /* The copy chip widens to "Copied ✓" for ~1.4s after a click; the ghost sits close
+     enough to collide, so it ducks out for the duration of the flash. */
+  .copy-chip.copied ~ .react-ghost { opacity: 0 !important; pointer-events: none; }
+  #rx-pop { position: absolute; z-index: 50; display: none; width: 316px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 8px; box-shadow: 0 6px 24px rgba(0,0,0,0.45); }
+  #rx-pop .rx { background: none; border: 1px solid transparent; border-radius: 6px;
+    padding: 2px 5px; font-size: 17px; line-height: 22px; cursor: pointer;
+    font-family: "Segoe UI Emoji", "Segoe UI", sans-serif; }
+  #rx-pop .rx:hover { background: var(--bg); border-color: var(--border); }
+  #rx-pop .rx.on { background: var(--bg); border-color: var(--accent); }
+  /* flex-wrap is the safety net: if emoji glyphs render wider than budgeted (font
+     version varies by Windows build), the row wraps inside the card instead of
+     bleeding past its border. */
+  #rx-pop .rx-quick { display: flex; flex-wrap: wrap; gap: 2px; align-items: center; }
+  #rx-pop .rx-more-btn { margin-left: auto; background: none; border: none;
+    color: var(--dim); font-size: 12px; cursor: pointer; padding: 2px 6px; }
+  #rx-pop .rx-more-btn:hover { color: var(--fg); }
+  #rx-pop .rx-grid { display: none; flex-wrap: wrap; gap: 2px; margin-top: 6px;
+    padding-top: 6px; border-top: 1px solid var(--border); max-height: 156px;
+    overflow-y: auto; }
+  .rx-tray { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .rx-pill { background: var(--panel); border: 1px solid var(--accent); border-radius: 999px;
+    padding: 1px 9px; font-size: 13px; line-height: 19px; cursor: pointer;
+    font-family: "Segoe UI Emoji", "Segoe UI", sans-serif; }
+  .rx-pill:hover { border-color: var(--dim); opacity: 0.85; }
+
   /* Consecutive operation cards group into a collapsible run; it stays open while
      the run is active and collapses once a non-operation block lands after it. */
   details.op-group { margin: 2px 0; }
@@ -423,6 +461,16 @@ public sealed class TranscriptHtmlBuilder
   #findbar button:hover { color: var(--fg); }
   mark.find-hit { background: var(--gold); color: #000; border-radius: 2px; }
   mark.find-hit.find-current { background: var(--accent); color: #fff; }
+
+  /* Scrollbars — Chromium's stock chrome ignores the theme; restyle every scroll surface
+     (page, code blocks, reaction picker grid) to match it. */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 5px;
+    border: 2px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background-color: var(--dim); }
+  ::-webkit-scrollbar-corner { background: transparent; }
+  #rx-pop .rx-grid::-webkit-scrollbar { width: 7px; }
 </style>
 </head>
 <body>
@@ -506,6 +554,129 @@ public sealed class TranscriptHtmlBuilder
     });
   }
 
+  // --- emoji reactions on assistant responses: hover ghost → picker card → pills ---
+  // Toggling posts react:/unreact: with a JSON payload; the snippet lets the preamble
+  // on the user's next turn say WHICH response was reacted to.
+  const RX_QUICK = ['👍', '👎', '❤️', '🔥', '🎉', '🤔', '😂'];
+  const RX_MORE = ['😀', '😄', '😊', '😉', '😍', '🥰', '😎', '🤓', '🙃', '😅', '😬', '😭',
+    '🥳', '🤯', '😴', '🙄', '😤', '😱', '🫠', '🤗', '🫡', '👌', '🙏', '👏', '💪', '🤝',
+    '✌️', '🤞', '👀', '🧠', '💯', '✨', '🚀', '🎯', '💡', '⚡', '⭐', '💔', '✅', '❌',
+    '⚠️', '❓', '❗', '💬', '🐛', '🔧', '🔒', '🔑', '📝', '📌', '📁', '🖥️', '☕', '🍕',
+    '🎮', '🤖'];
+  let rxSeq = 0;
+  let rxCard = null;   // the card the open picker targets
+
+  const rxPop = document.createElement('div');
+  rxPop.id = 'rx-pop';
+  document.body.appendChild(rxPop);
+
+  function rxSnippet(card) {
+    const md = card.querySelector('.md');
+    return (md ? md.innerText : '').trim().replace(/\s+/g, ' ').slice(0, 80);
+  }
+  function rxPillFor(card, emoji) {
+    const tray = card.querySelector('.rx-tray');
+    if (!tray) return null;
+    return Array.prototype.find.call(tray.children, function (p) { return p.textContent === emoji; });
+  }
+  // Toggle a reaction on a card: pill tray + picker highlight + postMessage, all in one place.
+  function rxToggle(card, emoji) {
+    const existing = rxPillFor(card, emoji);
+    if (existing) {
+      existing.remove();
+      const tray = card.querySelector('.rx-tray');
+      if (tray && !tray.children.length) tray.remove();
+      window.chrome.webview.postMessage('unreact:' +
+        JSON.stringify({ id: card.dataset.rxId, emoji: emoji, snippet: '' }));
+    } else {
+      let tray = card.querySelector('.rx-tray');
+      if (!tray) {
+        tray = document.createElement('div');
+        tray.className = 'rx-tray';
+        card.appendChild(tray);
+      }
+      const pill = document.createElement('button');
+      pill.className = 'rx-pill';
+      pill.textContent = emoji;
+      pill.title = 'Click to remove reaction';
+      pill.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        rxToggle(card, emoji);
+      });
+      tray.appendChild(pill);
+      window.chrome.webview.postMessage('react:' +
+        JSON.stringify({ id: card.dataset.rxId, emoji: emoji, snippet: rxSnippet(card) }));
+    }
+    // Picking (or un-picking) from the open picker dismisses it — one-shot action,
+    // like Teams/Slack. Multiple reactions = reopen; chosen ones show highlighted.
+    if (rxPop.style.display === 'block' && rxCard === card) closeRxPop();
+  }
+  function rxChip(parent, emoji) {
+    const b = document.createElement('button');
+    b.className = 'rx' + (rxCard && rxPillFor(rxCard, emoji) ? ' on' : '');
+    b.textContent = emoji;
+    b.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      rxToggle(rxCard, emoji);
+    });
+    parent.appendChild(b);
+  }
+  function openRxPop(card, anchor) {
+    rxCard = card;
+    rxPop.innerHTML = '';
+    const quick = document.createElement('div');
+    quick.className = 'rx-quick';
+    RX_QUICK.forEach(function (e) { rxChip(quick, e); });
+    const moreBtn = document.createElement('button');
+    moreBtn.className = 'rx-more-btn';
+    moreBtn.textContent = 'More ▾';
+    quick.appendChild(moreBtn);
+    rxPop.appendChild(quick);
+    const grid = document.createElement('div');
+    grid.className = 'rx-grid';
+    RX_MORE.forEach(function (e) { rxChip(grid, e); });
+    rxPop.appendChild(grid);
+    moreBtn.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      const opening = grid.style.display !== 'flex';
+      grid.style.display = opening ? 'flex' : 'none';
+      moreBtn.textContent = opening ? 'Less ▴' : 'More ▾';
+    });
+    // Anchor under the ghost button, right-aligned; flip above when near the viewport bottom.
+    rxPop.style.display = 'block';
+    const r = anchor.getBoundingClientRect();
+    const pw = rxPop.offsetWidth, ph = rxPop.offsetHeight;
+    const left = Math.max(8, Math.min(r.right - pw, window.innerWidth - pw - 8)) + window.scrollX;
+    let top = r.bottom + 6 + window.scrollY;
+    if (r.bottom + ph + 12 > window.innerHeight) top = Math.max(window.scrollY + 8, r.top - ph - 6 + window.scrollY);
+    rxPop.style.left = left + 'px';
+    rxPop.style.top = top + 'px';
+  }
+  function closeRxPop() { rxPop.style.display = 'none'; rxCard = null; }
+  document.addEventListener('click', function (e) {
+    if (rxPop.style.display === 'block' && !rxPop.contains(e.target)) closeRxPop();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeRxPop();
+  });
+
+  function addReactionGhosts() {
+    log.querySelectorAll('.assistant:not([data-rx])').forEach(function (card) {
+      card.setAttribute('data-rx', '1');
+      card.dataset.rxId = String(++rxSeq);
+      const ghost = document.createElement('button');
+      ghost.className = 'react-ghost';
+      ghost.textContent = '🙂+';
+      ghost.title = 'React to this response';
+      ghost.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        if (rxPop.style.display === 'block' && rxCard === card) { closeRxPop(); return; }
+        openRxPop(card, ghost);
+      });
+      card.appendChild(ghost);
+    });
+  }
+
   window.__append = function (html) {
     const nearBottom = (window.innerHeight + window.scrollY) >= (document.body.scrollHeight - 60);
     const wrap = document.createElement('div');
@@ -513,6 +684,7 @@ public sealed class TranscriptHtmlBuilder
     while (wrap.firstChild) placeChild(wrap.firstChild);
     highlightNew();
     addCopyChips();
+    addReactionGhosts();
     if (nearBottom) window.scrollTo(0, document.body.scrollHeight);
     updatePill();
   };

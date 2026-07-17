@@ -261,9 +261,10 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
 
-            <Border x:Name="SuggestionsPanel" Grid.Row="0" Grid.ColumnSpan="2" Visibility="Collapsed"
+            <Border x:Name="SuggestionsPanel" Grid.Row="0" Grid.ColumnSpan="3" Visibility="Collapsed"
                     Background="{StaticResource MandoPanelBrush}"
                     BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1"
                     CornerRadius="8" Margin="0,0,0,8" MaxHeight="220">
@@ -287,7 +288,33 @@
                      AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="140"
                      PreviewKeyDown="InputBox_PreviewKeyDown" TextChanged="InputBox_TextChanged"/>
 
-            <Button x:Name="SendButton" Grid.Row="1" Grid.Column="1" Click="SendButton_Click"
+            <Button x:Name="EmojiButton" Grid.Row="1" Grid.Column="1"
+                    VerticalAlignment="Stretch" Padding="10,0"
+                    Background="Transparent" BorderThickness="0"
+                    ToolTipService.ToolTip="Insert emoji — or type :fire: shortcodes (Win + . opens the full Windows picker)">
+                <FontIcon Glyph="&#xE76E;" FontSize="16"/>
+                <Button.Flyout>
+                    <Flyout Placement="TopEdgeAlignedRight">
+                        <StackPanel Width="312" Spacing="6">
+                            <GridView x:Name="EmojiGrid" SelectionMode="None" IsItemClickEnabled="True"
+                                      ItemClick="EmojiGrid_ItemClick" MaxHeight="248"
+                                      ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                <GridView.ItemTemplate>
+                                    <DataTemplate x:DataType="x:String">
+                                        <TextBlock Text="{x:Bind}" FontFamily="Segoe UI Emoji" FontSize="20"
+                                                   Width="30" Height="30" TextAlignment="Center"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </DataTemplate>
+                                </GridView.ItemTemplate>
+                            </GridView>
+                            <TextBlock Text="Tip: type :fire: style shortcodes in the input box for suggestions, or press Win + . for the full Windows emoji picker"
+                                       FontSize="11" Opacity="0.6" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Flyout>
+                </Button.Flyout>
+            </Button>
+
+            <Button x:Name="SendButton" Grid.Row="1" Grid.Column="2" Click="SendButton_Click"
                     VerticalAlignment="Stretch" MinWidth="88"
                     Style="{StaticResource AccentButtonStyle}">
                 <StackPanel Orientation="Horizontal" Spacing="6">
