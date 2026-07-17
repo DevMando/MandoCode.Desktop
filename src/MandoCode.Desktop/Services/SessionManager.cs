@@ -12,6 +12,7 @@ public sealed class SessionManager
     private readonly IServiceProvider _globals;
     private readonly ConfigCoordinator _configs;
     private readonly McpCoordinator _mcp;
+    private readonly SkillCoordinator _skills;
     private readonly string _initialProjectRoot;
     private readonly List<AgentSession> _sessions = new();
 
@@ -28,15 +29,18 @@ public sealed class SessionManager
         IServiceProvider globals,
         ConfigCoordinator configs,
         McpCoordinator mcp,
+        SkillCoordinator skills,
         string initialProjectRoot)
     {
         _globals = globals;
         _configs = configs;
         _mcp = mcp;
+        _skills = skills;
         _initialProjectRoot = initialProjectRoot;
 
         _configs.SessionsAccessor = () => _sessions;
         _mcp.SessionsAccessor = () => _sessions;
+        _skills.SessionsAccessor = () => _sessions;
     }
 
     /// <summary>

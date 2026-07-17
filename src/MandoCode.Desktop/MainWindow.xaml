@@ -45,10 +45,19 @@
                     ToolTipService.ToolTip="Settings — the selected agent's config">
                 <FontIcon x:Name="NavSettingsIcon" Glyph="&#xE713;" FontSize="16"/>
             </Button>
+            <!-- Divider: everything below is app-global, not per-agent. -->
+            <Border Background="{StaticResource MandoBorderBrush}" Height="1"
+                    HorizontalAlignment="Stretch" Margin="8,2" Opacity="0.6"/>
             <Button x:Name="NavMcp" Click="NavMcp_Click" Padding="10,8" Background="Transparent"
                     BorderThickness="0" HorizontalAlignment="Stretch"
                     ToolTipService.ToolTip="MCP servers — connect external tools">
                 <FontIcon x:Name="NavMcpIcon" Glyph="&#xE71B;" FontSize="16"/>
+            </Button>
+            <!-- Global: the user skills directory is app-wide, so one manager serves every agent. -->
+            <Button x:Name="NavSkills" Click="NavSkills_Click" Padding="10,8" Background="Transparent"
+                    BorderThickness="0" HorizontalAlignment="Stretch"
+                    ToolTipService.ToolTip="Skills — reusable instructions the AI loads on demand">
+                <FontIcon x:Name="NavSkillsIcon" Glyph="&#xE7BE;" FontSize="16"/>
             </Button>
             <!-- Global (a window property, not per-agent): themes + window opacity. Last on the rail
                  since it's cosmetic and set-once. -->
@@ -461,51 +470,68 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
-                    <StackPanel Orientation="Horizontal" Spacing="10">
-                        <TextBlock Text="MCP Servers" FontSize="22" FontWeight="SemiBold"
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="MCP Servers" FontSize="22" FontWeight="SemiBold" VerticalAlignment="Center"
                                    Foreground="{StaticResource MandoAccentBrush}"/>
-                        <Border Background="{StaticResource MandoPanelBrush}"
+                        <Border Grid.Column="1" Background="{StaticResource MandoPanelBrush}"
                                 BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1"
                                 CornerRadius="12" Padding="10,3" VerticalAlignment="Center">
                             <TextBlock Text="shared by every agent" FontSize="12" Opacity="0.7"/>
                         </Border>
-                    </StackPanel>
-                    <StackPanel Grid.Row="1" Spacing="10">
-                        <!-- Static explanation. McpPageStatus below is overwritten with the live
-                             server count on every refresh, so the two can't share an element. -->
-                        <TextBlock Text="MCP servers connect the AI to outside systems — databases, APIs, docs, other apps — as tools it can call during a chat. Servers are shared across every agent; each agent opts in with the toggle below. Changes save immediately."
+                    </Grid>
+                    <StackPanel Grid.Row="1" Spacing="6">
+                        <TextBlock Text="MCP servers connect the AI to outside systems — databases, APIs, docs, other apps — as tools it can call during a chat. Servers are shared by every agent; toggle each one on or off below. Changes save immediately."
                                    Opacity="0.6" FontSize="12" TextWrapping="Wrap"/>
-                        <!-- Per-agent opt-in (EnableMcp is a per-agent setting), even though the server
-                             list above is app-wide. Loaded for the active agent in RefreshMcpListAsync. -->
-                        <ToggleSwitch x:Name="McpEnableToggle" Tag="mcp" Toggled="Setting_Toggled"
-                                      Header="Use MCP tools in the active agent"
-                                      ToolTipService.ToolTip="Whether the active agent attaches the MCP servers' tools. This choice is per-agent."/>
-                        <TextBlock x:Name="McpPageStatus" Text="" Opacity="0.75" FontSize="12"
-                                   TextWrapping="Wrap" Foreground="{StaticResource MandoGoldBrush}"/>
+                        <AutoSuggestBox x:Name="McpSearchBox" QueryIcon="Find" Margin="0,4,0,0"
+                                        PlaceholderText="Search servers by name or transport…"
+                                        TextChanged="McpSearch_TextChanged"
+                                        ToolTipService.ToolTip="Filter the list below by name or transport"/>
                     </StackPanel>
 
-                    <ListView Grid.Row="2" x:Name="McpList" SelectionMode="Single"
+                    <ListView Grid.Row="3" x:Name="McpList" SelectionMode="Single"
                               SelectionChanged="McpList_SelectionChanged" DoubleTapped="McpList_DoubleTapped"
                               Background="{StaticResource MandoPanelBrush}"
                               BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1"
                               CornerRadius="8">
+                        <ListView.GroupStyle>
+                            <GroupStyle>
+                                <GroupStyle.HeaderTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Key}" FontWeight="SemiBold" FontSize="12"
+                                                   Opacity="0.6" Margin="4,10,0,2"/>
+                                    </DataTemplate>
+                                </GroupStyle.HeaderTemplate>
+                            </GroupStyle>
+                        </ListView.GroupStyle>
                         <ListView.ItemTemplate>
                             <DataTemplate x:DataType="local:McpRow">
                                 <Grid Padding="4,8" ColumnSpacing="14">
                                     <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="70"/>
                                         <ColumnDefinition Width="200"/>
                                         <ColumnDefinition Width="60"/>
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="{x:Bind Name}" FontWeight="SemiBold"
-                                               FontFamily="Cascadia Code,Consolas" FontSize="13"/>
-                                    <TextBlock Grid.Column="1" Text="{x:Bind Transport}" Opacity="0.6" FontSize="12"
+                                    <!-- Per-server on/off (shared by every agent). Tag carries the name
+                                         so the handler knows which server without relying on selection. -->
+                                    <ToggleSwitch IsOn="{x:Bind Enabled}" Tag="{x:Bind Name}"
+                                                  Toggled="McpEnabled_Toggled" OnContent="" OffContent=""
+                                                  MinWidth="0" VerticalAlignment="Center"
+                                                  ToolTipService.ToolTip="Enable or disable this server for every agent"/>
+                                    <TextBlock Grid.Column="1" Text="{x:Bind Name}" FontWeight="SemiBold"
+                                               FontFamily="Cascadia Code,Consolas" FontSize="13" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="2" Text="{x:Bind Transport}" Opacity="0.6" FontSize="12"
                                                VerticalAlignment="Center"/>
-                                    <TextBlock Grid.Column="2" Text="{x:Bind Status}" Foreground="{x:Bind StatusBrush}"
+                                    <TextBlock Grid.Column="3" Text="{x:Bind Status}" Foreground="{x:Bind StatusBrush}"
                                                FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap"/>
                                 </Grid>
                             </DataTemplate>
@@ -515,7 +541,7 @@
                     <!-- Each button's content is an icon + label panel, so it exposes no accessible
                          name on its own. AutomationProperties.Name gives screen readers (and UI
                          tests) something to address. -->
-                    <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="8">
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8">
                         <Button x:Name="McpAddButton" Click="McpAdd_Click" Style="{StaticResource AccentButtonStyle}"
                                 AutomationProperties.Name="Add MCP Server"
                                 ToolTipService.ToolTip="Add a new MCP server">
@@ -553,7 +579,171 @@
                                 ToolTipService.ToolTip="Refresh this status list only — doesn't touch the servers">
                             <FontIcon Glyph="&#xE72C;" FontSize="14"/>
                         </Button>
+                        <!-- Divider between the action group and the filter group. -->
+                        <Border Width="1" Margin="0,4" VerticalAlignment="Stretch"
+                                Background="{StaticResource MandoBorderBrush}" Opacity="0.6"/>
+                        <ToggleButton x:Name="McpFilterAll" Content="All" IsChecked="True" Tag="all" Click="McpFilter_Click"
+                                      ToolTipService.ToolTip="Show every server"/>
+                        <ToggleButton x:Name="McpFilterEnabled" Content="Enabled" Tag="enabled" Click="McpFilter_Click"
+                                      ToolTipService.ToolTip="Show only enabled servers (running and shared with every agent)"/>
+                        <ToggleButton x:Name="McpFilterDisabled" Content="Disabled" Tag="disabled" Click="McpFilter_Click"
+                                      ToolTipService.ToolTip="Show only disabled servers (turned off, not connected)"/>
+                        <ToggleButton x:Name="McpFilterFailed" Content="Failed" Tag="failed" Click="McpFilter_Click"
+                                      ToolTipService.ToolTip="Show only servers that failed to connect"/>
                     </StackPanel>
+
+                    <!-- Footer status bar: server count / connection status / filter matches. -->
+                    <TextBlock Grid.Row="4" x:Name="McpPageStatus" Text="" Opacity="0.55" FontSize="11"
+                               HorizontalAlignment="Right" TextAlignment="Right" TextWrapping="Wrap"
+                               Margin="0,2,2,0"/>
+                </Grid>
+
+                <!-- ============ SKILLS PAGE ============
+                     Global (user) skills: folders under ~/.mandocode/skills, one SKILL.md each.
+                     App-wide like MCP — one set, shared by every agent — so it lives on the rail. -->
+                <Grid x:Name="SkillsPage" Visibility="Collapsed" Padding="24,16,24,24" RowSpacing="12">
+                    <Grid.RenderTransform>
+                        <TranslateTransform x:Name="SkillsPageTransform"/>
+                    </Grid.RenderTransform>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Skills" FontSize="22" FontWeight="SemiBold" VerticalAlignment="Center"
+                                   Foreground="{StaticResource MandoAccentBrush}"/>
+                        <Border Grid.Column="1" Background="{StaticResource MandoPanelBrush}"
+                                BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1"
+                                CornerRadius="12" Padding="10,3" VerticalAlignment="Center">
+                            <TextBlock Text="shared by every agent" FontSize="12" Opacity="0.7"/>
+                        </Border>
+                    </Grid>
+                    <StackPanel Grid.Row="1" Spacing="6">
+                        <TextBlock Text="A skill is a named set of instructions the AI loads on demand: when your request matches a skill's description, it pulls in the full steps and follows them. These are your global skills — available to every agent. Changes apply immediately."
+                                   Opacity="0.6" FontSize="12" TextWrapping="Wrap"/>
+                        <AutoSuggestBox x:Name="SkillSearchBox" QueryIcon="Find" Margin="0,4,0,0"
+                                        PlaceholderText="Search skills by name or description…"
+                                        TextChanged="SkillSearch_TextChanged"
+                                        ToolTipService.ToolTip="Filter the list below by name or description"/>
+                    </StackPanel>
+
+                    <ListView Grid.Row="3" x:Name="SkillsList" SelectionMode="Single"
+                              SelectionChanged="SkillsList_SelectionChanged" DoubleTapped="SkillsList_DoubleTapped"
+                              Background="{StaticResource MandoPanelBrush}"
+                              BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1"
+                              CornerRadius="8">
+                        <ListView.GroupStyle>
+                            <GroupStyle>
+                                <GroupStyle.HeaderTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Key}" FontWeight="SemiBold" FontSize="12"
+                                                   Opacity="0.6" Margin="4,10,0,2"/>
+                                    </DataTemplate>
+                                </GroupStyle.HeaderTemplate>
+                            </GroupStyle>
+                        </ListView.GroupStyle>
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="local:SkillRow">
+                                <Grid Padding="4,8" ColumnSpacing="14">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="70"/>
+                                        <ColumnDefinition Width="200"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <!-- Tag carries the folder path so the Toggled handler knows which
+                                         skill to flip without depending on list selection. -->
+                                    <ToggleSwitch IsOn="{x:Bind Enabled}" Tag="{x:Bind FolderPath}"
+                                                  Toggled="SkillEnabled_Toggled" OnContent="" OffContent=""
+                                                  MinWidth="0" VerticalAlignment="Center"
+                                                  ToolTipService.ToolTip="Enable or disable this skill for every agent"/>
+                                    <TextBlock Grid.Column="1" Text="{x:Bind Name}" FontWeight="SemiBold"
+                                               FontFamily="Cascadia Code,Consolas" FontSize="13"
+                                               VerticalAlignment="Center" TextWrapping="Wrap"/>
+                                    <TextBlock Grid.Column="2" Text="{x:Bind Description}" Opacity="0.7"
+                                               FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                                    <!-- Approx size of the instructions body — the load-time prompt cost.
+                                         Gold when large, so heavy skills stand out at a glance. -->
+                                    <TextBlock Grid.Column="3" Text="{x:Bind SizeLabel}" Foreground="{x:Bind SizeBrush}"
+                                               FontSize="11" VerticalAlignment="Center" TextAlignment="Right"
+                                               ToolTipService.ToolTip="Approximate tokens added to the prompt when this skill loads. Larger = heavier for the model."/>
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8">
+                        <Button x:Name="SkillNewButton" Click="SkillNew_Click" Style="{StaticResource AccentButtonStyle}"
+                                AutomationProperties.Name="New Skill"
+                                ToolTipService.ToolTip="Write a new global skill">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE710;" FontSize="13"/>
+                                <TextBlock Text="New Skill"/>
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="SkillEditButton" Click="SkillEdit_Click" IsEnabled="False"
+                                AutomationProperties.Name="Edit Skill"
+                                ToolTipService.ToolTip="Edit the selected skill (or double-click a row)">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE70F;" FontSize="13"/>
+                                <TextBlock Text="Edit"/>
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="SkillDeleteButton" Click="SkillDelete_Click" IsEnabled="False"
+                                AutomationProperties.Name="Delete Skill"
+                                ToolTipService.ToolTip="Delete the selected skill's folder">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE74D;" FontSize="13"/>
+                                <TextBlock Text="Delete"/>
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="SkillInstallButton" Click="SkillInstall_Click"
+                                AutomationProperties.Name="Install Skill"
+                                ToolTipService.ToolTip="Install skills from a git URL, a .zip, or a local folder">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE896;" FontSize="13"/>
+                                <TextBlock Text="Install from…"/>
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="SkillOpenFolderButton" Click="SkillOpenFolder_Click"
+                                AutomationProperties.Name="Open skills folder"
+                                ToolTipService.ToolTip="Open the global skills folder in File Explorer">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE838;" FontSize="13"/>
+                                <TextBlock Text="Open folder"/>
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="SkillRefreshButton" Click="SkillRefresh_Click"
+                                AutomationProperties.Name="Refresh skills"
+                                ToolTipService.ToolTip="Re-scan the skills folder">
+                            <FontIcon Glyph="&#xE72C;" FontSize="14"/>
+                        </Button>
+                        <!-- Divider between the action group and the filter group. -->
+                        <Border Width="1" Margin="0,4" VerticalAlignment="Stretch"
+                                Background="{StaticResource MandoBorderBrush}" Opacity="0.6"/>
+                        <ToggleButton x:Name="SkillFilterAll" Content="All" IsChecked="True" Tag="all" Click="SkillFilter_Click"
+                                      ToolTipService.ToolTip="Show every skill"/>
+                        <ToggleButton x:Name="SkillFilterEnabled" Content="Enabled" Tag="enabled" Click="SkillFilter_Click"
+                                      ToolTipService.ToolTip="Show only enabled skills (the ones every agent can load)"/>
+                        <ToggleButton x:Name="SkillFilterDisabled" Content="Disabled" Tag="disabled" Click="SkillFilter_Click"
+                                      ToolTipService.ToolTip="Show only disabled skills (turned off, not in any prompt)"/>
+                        <ToggleButton x:Name="SkillFilterLarge" Content="Large" Tag="large" Click="SkillFilter_Click"
+                                      ToolTipService.ToolTip="Show only large skills — a big instructions body is heavier every time it loads"/>
+                    </StackPanel>
+
+                    <!-- Footer status bar: skill count + folder path (and filter matches). Quiet and
+                         right-aligned below the list, out of the header's way. -->
+                    <TextBlock Grid.Row="4" x:Name="SkillsPageStatus" Text="" Opacity="0.55" FontSize="11"
+                               HorizontalAlignment="Right" TextAlignment="Right" TextWrapping="Wrap"
+                               Margin="0,2,2,0"/>
                 </Grid>
         </Grid>
         </Grid>
@@ -711,6 +901,213 @@
                         </Grid>
                     </StackPanel>
                 </ScrollViewer>
+            </Border>
+        </Grid>
+
+        <!-- ======= Skill editor modal =======
+             Stretches with the window (capped) rather than a fixed box, so the instructions editor
+             gets real room. Two panes: metadata + AI drafting on the left, the body on the right. -->
+        <Grid x:Name="SkillEditorOverlay" Grid.ColumnSpan="3" Visibility="Collapsed"
+              Background="#B0000000">
+            <Border Margin="72,40" MaxWidth="1200" MaxHeight="900" Padding="24"
+                    HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                    Background="{StaticResource MandoPanelBrush}"
+                    BorderBrush="{StaticResource MandoAccentBrush}" BorderThickness="1"
+                    CornerRadius="12">
+                <Grid RowSpacing="14" ColumnSpacing="20">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="400"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.ColumnSpan="2" x:Name="SkillEditorTitle" Text="New skill" FontSize="18"
+                               FontWeight="SemiBold" Foreground="{StaticResource MandoAccentBrush}"/>
+
+                    <!-- Left pane: Draft with AI, given the whole column so the intent box is large -->
+                    <Grid Grid.Row="1" Grid.Column="0" RowSpacing="10">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon Glyph="&#xE945;" FontSize="15" Foreground="{StaticResource MandoGoldBrush}"/>
+                            <TextBlock Text="Draft with AI" FontWeight="SemiBold" FontSize="14"
+                                       VerticalAlignment="Center"/>
+                        </StackPanel>
+
+                        <ComboBox Grid.Row="1" x:Name="Sk_AiModel" HorizontalAlignment="Stretch" Header="Model"
+                                  ToolTipService.ToolTip="Defaults to the active agent's model — change it per draft">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate x:DataType="local:ModelChoice">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="{x:Bind Name}" VerticalAlignment="Center"/>
+                                        <TextBlock Text="{x:Bind Tag}" Opacity="0.55" FontSize="11" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+
+                        <TextBox Grid.Row="2" x:Name="Sk_AiIntent" AcceptsReturn="True" TextWrapping="Wrap"
+                                 VerticalAlignment="Stretch" HorizontalAlignment="Stretch"
+                                 VerticalContentAlignment="Top"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 Header="What should this skill do?"
+                                 PlaceholderText="e.g. review a SQL query against the database schema and flag bad column names, then suggest fixes — describe the workflow you want the AI to follow"/>
+
+                        <StackPanel Grid.Row="3" Spacing="8">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button x:Name="Sk_GenerateButton" Click="SkillGenerate_Click"
+                                        Style="{StaticResource AccentButtonStyle}"
+                                        ToolTipService.ToolTip="Draft name, description, and instructions from your intent">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <FontIcon Glyph="&#xE945;" FontSize="13"/>
+                                        <TextBlock Text="Generate"/>
+                                    </StackPanel>
+                                </Button>
+                                <Button x:Name="Sk_RefineButton" Click="SkillRefine_Click"
+                                        ToolTipService.ToolTip="Rewrite the current instructions using your intent as the change to make">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <FontIcon Glyph="&#xE70F;" FontSize="13"/>
+                                        <TextBlock Text="Refine"/>
+                                    </StackPanel>
+                                </Button>
+                                <ProgressRing x:Name="Sk_AiSpin" IsActive="False" Width="18" Height="18"
+                                              Visibility="Collapsed" VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <TextBlock x:Name="Sk_AiStatus" Text="" FontSize="12" Opacity="0.75"
+                                       TextWrapping="Wrap" Foreground="{StaticResource MandoGoldBrush}"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Right pane: the editable fields — Name, Description, Instructions body -->
+                    <Grid Grid.Row="1" Grid.Column="1" RowSpacing="6">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Spacing="6">
+                            <TextBlock Text="Name" FontSize="13" Opacity="0.8"/>
+                            <TextBox x:Name="Sk_Name" PlaceholderText="short name (e.g. commit-message)"/>
+
+                            <TextBlock Text="Description — one line; the AI matches this against your request to decide when to load the skill"
+                                       FontSize="13" Opacity="0.8" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                            <TextBox x:Name="Sk_Description" TextWrapping="Wrap" AcceptsReturn="False"
+                                     PlaceholderText="Write a Conventional Commits message from staged changes"/>
+
+                            <Grid Margin="0,6,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Instructions (markdown) — the steps the AI follows once this skill loads"
+                                           FontSize="13" Opacity="0.8" TextWrapping="Wrap"/>
+                                <TextBlock Grid.Column="1" x:Name="Sk_BodySize" Text="" FontSize="11"
+                                           VerticalAlignment="Bottom" Margin="10,0,0,0"/>
+                            </Grid>
+                        </StackPanel>
+
+                        <TextBox Grid.Row="1" x:Name="Sk_Body" AcceptsReturn="True" TextWrapping="Wrap"
+                                 VerticalAlignment="Stretch" HorizontalAlignment="Stretch"
+                                 VerticalContentAlignment="Top" TextChanged="Sk_Body_TextChanged"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 FontFamily="Cascadia Code,Consolas" FontSize="13"
+                                 PlaceholderText="## Steps&#x0a;1. Inspect the staged diff&#x0a;2. …"/>
+                    </Grid>
+
+                    <!-- Footer spanning both panes -->
+                    <Grid Grid.Row="2" Grid.ColumnSpan="2" ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <InfoBar x:Name="Sk_StatusBar" IsOpen="False" IsClosable="True" Severity="Error"
+                                 VerticalAlignment="Center"/>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                            <Button Content="Cancel" Click="SkillEditorCancel_Click"/>
+                            <Button x:Name="SkillEditorSaveButton" Content="Save" Click="SkillEditorSave_Click"
+                                    Style="{StaticResource AccentButtonStyle}"/>
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- ======= Skill install modal ======= -->
+        <Grid x:Name="SkillInstallOverlay" Grid.ColumnSpan="3" Visibility="Collapsed"
+              Background="#B0000000">
+            <Border Width="600" Padding="24"
+                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                    Background="{StaticResource MandoPanelBrush}"
+                    BorderBrush="{StaticResource MandoAccentBrush}" BorderThickness="1"
+                    CornerRadius="12">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="Install skills" FontSize="18" FontWeight="SemiBold"
+                               Foreground="{StaticResource MandoAccentBrush}"/>
+                    <TextBlock Text="A source can hold one skill (a SKILL.md at its root) or many (subfolders, each with a SKILL.md). Anything already installed is skipped."
+                               Opacity="0.6" FontSize="12" TextWrapping="Wrap"/>
+
+                    <RadioButtons x:Name="Sk_InstallMode" MaxColumns="2"
+                                  SelectionChanged="SkillInstallMode_Changed">
+                        <x:String>From Git</x:String>
+                        <x:String>From folder / .zip</x:String>
+                    </RadioButtons>
+
+                    <!-- Git: paste is the right interaction, so no Browse here. Needs Git installed. -->
+                    <StackPanel x:Name="Sk_InstallGitPanel" Spacing="6">
+                        <TextBox x:Name="Sk_InstallGitUrl"
+                                 Header="Repository URL"
+                                 PlaceholderText="https://github.com/user/my-skills.git"
+                                 FontFamily="Cascadia Code,Consolas"/>
+                        <TextBlock Text="Clones with git — Git must be installed and on PATH."
+                                   Opacity="0.5" FontSize="11"/>
+                    </StackPanel>
+
+                    <!-- Local: Browse so you don't have to type an exact path. -->
+                    <StackPanel x:Name="Sk_InstallLocalPanel" Spacing="6" Visibility="Collapsed">
+                        <TextBox x:Name="Sk_InstallLocalPath"
+                                 Header="Folder or .zip path"
+                                 PlaceholderText="C:\path\to\skill  (or a .zip)"
+                                 FontFamily="Cascadia Code,Consolas"/>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Click="SkillBrowseFolder_Click"
+                                    ToolTipService.ToolTip="Pick a folder containing a SKILL.md (or subfolders that do)">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon Glyph="&#xE8B7;" FontSize="13"/>
+                                    <TextBlock Text="Browse folder…"/>
+                                </StackPanel>
+                            </Button>
+                            <Button Click="SkillBrowseZip_Click"
+                                    ToolTipService.ToolTip="Pick a .zip archive of skills">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon Glyph="&#xE8B7;" FontSize="13"/>
+                                    <TextBlock Text="Browse .zip…"/>
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <ProgressRing x:Name="Sk_InstallSpin" IsActive="False" Width="16" Height="16"
+                                      Visibility="Collapsed" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="Sk_InstallStatus" Text="" FontSize="12" Opacity="0.8"
+                                   TextWrapping="Wrap" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <InfoBar x:Name="Sk_InstallError" IsOpen="False" IsClosable="True" Severity="Error"/>
+                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                        <Button Content="Cancel" Click="SkillInstallCancel_Click"/>
+                        <Button x:Name="SkillInstallConfirmButton" Content="Install" Click="SkillInstallConfirm_Click"
+                                Style="{StaticResource AccentButtonStyle}"/>
+                    </StackPanel>
+                </StackPanel>
             </Border>
         </Grid>
 

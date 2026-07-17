@@ -89,10 +89,12 @@ public partial class App : Application
         // ---- Coordinators + session registry ----
         services.AddSingleton(provider => new ConfigCoordinator(provider.GetRequiredService<MandoCodeConfig>()));
         services.AddSingleton(provider => new McpCoordinator(provider.GetRequiredService<MandoCodeConfig>()));
+        services.AddSingleton(provider => new SkillCoordinator(provider.GetRequiredService<MandoCodeConfig>()));
         services.AddSingleton(provider => new SessionManager(
             provider,
             provider.GetRequiredService<ConfigCoordinator>(),
             provider.GetRequiredService<McpCoordinator>(),
+            provider.GetRequiredService<SkillCoordinator>(),
             projectRoot));
 
         return services.BuildServiceProvider();

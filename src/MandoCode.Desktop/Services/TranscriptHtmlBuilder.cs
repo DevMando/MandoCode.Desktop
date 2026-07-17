@@ -74,6 +74,23 @@ public sealed class TranscriptHtmlBuilder
         return sb.ToString();
     }
 
+    /// <summary>
+    /// A STATIC tool-call pill (no animation — draws once, costs nothing). Replaces the plain
+    /// "[Function] …" / "[Done] ✓" text lines for non-file tools with something that reads as a
+    /// distinct chip, in the same rounded, theme-colored, monochrome-glyph language as StatusChip.
+    /// Deliberately not animated: an ever-spinning element pins the WebView compositor (see the
+    /// reverted animated version). <paramref name="state"/> is "" (neutral), "done", or "err".
+    /// </summary>
+    /// <summary>
+    /// A single STATIC tool-call pill: a neutral status dot + label (e.g. "Skill: deep-research"),
+    /// in the MCP StatusChip family, centered. One pill per call — drawn once on invoke and NEVER
+    /// updated afterward. Recoloring the dot in place on completion ("turn green when done")
+    /// reproduced the CPU/stuck issue and was removed; the dot stays neutral.
+    /// </summary>
+    public string ToolChip(string label) =>
+        $"<div class=\"tool-pill\"><span class=\"tp-dot\"></span>" +
+        $"<span class=\"tp-label\">{E(label).Replace(".", " · ")}</span></div>";
+
     /// <summary>Pre-formatted block (config listings, model lists) in monospace.</summary>
     public string Mono(string text) => $"<pre class=\"mono-block\">{E(text)}</pre>";
 
@@ -181,7 +198,12 @@ public sealed class TranscriptHtmlBuilder
             }
             else if (!string.IsNullOrEmpty(op.ContentPreview))
             {
-                sb.Append($"<pre class=\"cmd-out op-detail\">{E(op.ContentPreview)}");
+                // Web results are prose, not code — render them wrapped, in the reading font, dimmed,
+                // so they recede as reference material instead of a highlighted code block. File
+                // content previews (Read) stay monospace/no-wrap since they really are code.
+                var prose = op.OperationType is "WebSearch" or "WebFetch";
+                var detailCls = prose ? "cmd-out op-detail op-prose" : "cmd-out op-detail";
+                sb.Append($"<pre class=\"{detailCls}\">{E(op.ContentPreview)}");
                 if (op.RemainingLines > 0)
                     sb.Append($"\n<span class=\"dim\">… +{op.RemainingLines} more lines</span>");
                 sb.Append("</pre>");
@@ -283,7 +305,8 @@ public sealed class TranscriptHtmlBuilder
 
   /* Status chips — compact pills for session/connection state. A CSS status dot
      (crisp, theme-aware) replaces status emoji; state = ok | warn | err | neutral. */
-  .chip-row { margin: 2px 0; }
+  /* Centered to match the tool pills: all system/status chrome sits centered, conversation stays left. */
+  .chip-row { margin: 2px 0; text-align: center; }
   .chip { display: inline-flex; align-items: center; gap: 7px;
     padding: 3px 12px; border-radius: 999px; font-size: 12.5px;
     border: 1px solid var(--border); background: var(--panel);
@@ -301,6 +324,20 @@ public sealed class TranscriptHtmlBuilder
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 24%, transparent); }
   .chip-val { color: var(--fg); font-weight: 600; }
   .chip-key { color: var(--dim); }
+
+  /* Tool-call pills — STATIC (no animation, so they never cause continuous repaint). A rounded,
+     theme-colored chip with a monochrome glyph, matching the StatusChip family. */
+  /* Centered: tool pills are the assistant's machinery, not dialogue — centering (like Slack/Discord
+     system messages) keeps the left column a clean read and marks them as ambient activity.
+     display:flex + fit-content makes the chip block-level and shrink-wrapped so margin auto centers it. */
+  .tool-pill { display: flex; width: fit-content; align-items: center; gap: 8px; margin: 2px auto;
+    padding: 3px 12px; border-radius: 999px; font-size: 12px;
+    border: 1px solid var(--border); background: var(--panel); }
+  .tool-pill .tp-dot { width: 7px; height: 7px; border-radius: 50%; flex: none;
+    background: var(--dim);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--dim) 20%, transparent); }
+  .tool-pill .tp-label { color: var(--fg);
+    font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; }
   .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
     overflow: hidden; }
   .panel.red-border { border-color: var(--red); }
@@ -325,6 +362,10 @@ public sealed class TranscriptHtmlBuilder
   .op-meta { color: var(--dim); font-size: 12px; }
   .op-detail { margin-top: 4px; background: var(--panel); border: 1px solid var(--border);
     border-radius: 8px; }
+  /* Prose tool output (web search/fetch): wrap to width, reading font, dimmed — reference material,
+     not a code block. Declared after pre.cmd-out so these win on shared properties. */
+  pre.op-prose { white-space: pre-wrap; word-break: break-word; overflow-x: hidden;
+    font-family: "Segoe UI", sans-serif; font-size: 12.5px; color: var(--dim); }
   table.plan { border-collapse: collapse; width: 100%; }
   table.plan th, table.plan td { border-top: 1px solid var(--border); padding: 5px 12px;
     text-align: left; vertical-align: top; }
