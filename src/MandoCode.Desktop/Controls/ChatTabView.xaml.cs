@@ -218,6 +218,18 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
             }
             catch { }
 
+            // User-data host: serves the chat background image (see ThemeManager.SetChatBackground).
+            // Missing folder just means no background renders.
+            try
+            {
+                Directory.CreateDirectory(ThemeManager.UserDataFolder);
+                core.SetVirtualHostNameToFolderMapping(
+                    "mandocode.userdata",
+                    ThemeManager.UserDataFolder,
+                    Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Allow);
+            }
+            catch { }
+
             core.NavigateToString(TranscriptHtmlBuilder.BaseDocument(ThemeManager.Current));
         }
         catch (Exception ex)

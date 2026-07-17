@@ -12,6 +12,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Shapes;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.System;
@@ -152,9 +153,15 @@ public sealed partial class MainWindow : Window
         ThemeManager.ThemeChanged += () => OnUi(ApplyThemeToAllTabs);
         SettingsTabs.SelectedItem = Tab_Model;   // the setup that matters most opens first
         ThemeList.ItemsSource = UiTheme.All.Select(t => new ThemeVm { Theme = t }).ToList();
+        ThemeHeaderValue.Text = ThemeManager.Current.Name;
         ModelCombo.Loaded += (_, _) => ApplyModelComboTarget();
         S_WindowOpacity.Value = ThemeManager.WindowOpacity * 100;
+        S_WindowOpacityLabel.Text = $"{(int)S_WindowOpacity.Value}%";
         ApplyWindowOpacity(ThemeManager.WindowOpacity);
+        S_BgOpacity.Value = ThemeManager.ChatBackgroundOpacity * 100;
+        S_BgOpacityLabel.Text = $"{(int)S_BgOpacity.Value}%";
+        UpdateBgControls();
+        _appearanceReady = true;   // opacity handlers may persist from here on
 
         _dispatcher = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
 
@@ -836,15 +843,78 @@ public sealed partial class MainWindow : Window
         // "Make Default for New Agents" always applies.
     }
 
+    /// <summary>False until the constructor has loaded persisted appearance settings into the
+    /// sliders. The sliders' XAML default Values fire ValueChanged during InitializeComponent —
+    /// BEFORE ThemeManager.Initialize reads ui-settings.json — and a Save() in that window
+    /// overwrites the file with defaults (that bug ate users' saved background image).</summary>
+    private bool _appearanceReady;
+
     private void WindowOpacity_Changed(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
     {
-        // The slider's XAML Value fires this during InitializeComponent, before the
-        // label (declared after it) exists — nothing to update yet, the constructor
-        // applies the persisted opacity right after the tree is built.
-        if (S_WindowOpacityLabel is null) return;
+        if (!_appearanceReady) return;
         S_WindowOpacityLabel.Text = $"{(int)e.NewValue}%";
         ThemeManager.SetWindowOpacity(e.NewValue / 100.0);
         ApplyWindowOpacity(ThemeManager.WindowOpacity);
+    }
+
+    // ============================================================
+    // Chat background image (Appearance page)
+    // ============================================================
+
+    private async void BgChoose_Click(object sender, RoutedEventArgs e)
+    {
+        var picker = new Windows.Storage.Pickers.FileOpenPicker();
+        // Desktop apps must marry the picker to an HWND before use.
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+        foreach (var ext in new[] { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp" })
+            picker.FileTypeFilter.Add(ext);
+
+        var file = await picker.PickSingleFileAsync();
+        if (file == null) return;
+
+        ThemeManager.SetChatBackground(file.Path);
+        UpdateBgControls();
+        ApplyThemeToAllTabs();
+    }
+
+    private void BgClear_Click(object sender, RoutedEventArgs e)
+    {
+        ThemeManager.SetChatBackground(null);
+        UpdateBgControls();
+        ApplyThemeToAllTabs();
+    }
+
+    private void BgOpacity_Changed(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+    {
+        if (!_appearanceReady) return;   // see _appearanceReady — a Save() here wipes settings
+        S_BgOpacityLabel.Text = $"{(int)e.NewValue}%";
+        BgPreviewImage.Opacity = e.NewValue / 100.0;
+        ThemeManager.SetChatBackgroundOpacity(e.NewValue / 100.0);
+        ApplyThemeToAllTabs();   // live preview while dragging — the script is tiny
+    }
+
+    private void UpdateBgControls()
+    {
+        var hasImage = ThemeManager.ChatBackgroundFile != null;
+        BgFileLabel.Text = hasImage ? "Image set ✓" : "No image set";
+        BgClearButton.IsEnabled = hasImage;
+        S_BgOpacity.IsEnabled = hasImage;
+        BgPreviewImage.Opacity = ThemeManager.ChatBackgroundOpacity;
+
+        // Decode from bytes, not from the file URI — a URI-sourced BitmapImage keeps the
+        // file open, and SetChatBackground must be able to overwrite it on the next pick.
+        BitmapImage? bmp = null;
+        if (hasImage)
+        {
+            try
+            {
+                using var ms = new MemoryStream(File.ReadAllBytes(ThemeManager.ChatBackgroundFile!));
+                bmp = new BitmapImage();
+                bmp.SetSource(ms.AsRandomAccessStream());
+            }
+            catch { bmp = null; /* unreadable image — preview just shows the theme colors */ }
+        }
+        BgPreviewImage.Source = bmp;
     }
 
     // WinUI has no Window.Opacity — whole-window translucency is a Win32 layered-window
@@ -880,6 +950,7 @@ public sealed partial class MainWindow : Window
     {
         if (_loadingSettings || ThemeList.SelectedItem is not ThemeVm vm) return;
         ThemeManager.Apply(vm.Theme, Root);
+        ThemeHeaderValue.Text = vm.Theme.Name;
         SettingsStatus.Text = $"Theme set to {vm.Theme.Name}.";
     }
 

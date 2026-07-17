@@ -168,6 +168,15 @@ public static class ThemeManager
     /// it via the Win32 layered-window alpha; this just owns the value and persistence.</summary>
     public static double WindowOpacity { get; private set; } = 1.0;
 
+    /// <summary>Full path of the chat background image, or null when none is set. The picked
+    /// file is COPIED into <see cref="UserDataFolder"/> (as chat-bg.&lt;ext&gt;) so the setting
+    /// survives the original moving; transcripts load it via the mandocode.userdata host.</summary>
+    public static string? ChatBackgroundFile { get; private set; }
+
+    /// <summary>Opacity of the chat background image layer only (0.05–1.0). Text never
+    /// fades — the slider dims the picture, not the conversation.</summary>
+    public static double ChatBackgroundOpacity { get; private set; } = 0.30;
+
     /// <summary>Raised after a theme is applied so the window can retheme the WebView.</summary>
     public static event Action? ThemeChanged;
 
@@ -176,6 +185,10 @@ public static class ThemeManager
     private static string SettingsPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "MandoCode.Desktop", "ui-settings.json");
+
+    /// <summary>Folder each tab's WebView2 serves as https://mandocode.userdata/ — holds the
+    /// copied chat background image (and the settings file itself, which is never requested).</summary>
+    public static string UserDataFolder => Path.GetDirectoryName(SettingsPath)!;
 
     /// <summary>Loads the saved theme (or the default) and applies it. Call once from
     /// the window constructor, before first render.</summary>
@@ -188,6 +201,12 @@ public static class ThemeManager
                 var saved = JsonSerializer.Deserialize<UiSettings>(File.ReadAllText(SettingsPath));
                 Current = UiTheme.All.FirstOrDefault(t => t.Name == saved?.Theme) ?? Current;
                 if (saved?.Opacity is > 0) WindowOpacity = Math.Clamp(saved.Opacity, 0.3, 1.0);
+                if (saved?.ChatBgOpacity is > 0) ChatBackgroundOpacity = Math.Clamp(saved.ChatBgOpacity, 0.05, 1.0);
+                if (!string.IsNullOrEmpty(saved?.ChatBackground))
+                {
+                    var bg = Path.Combine(UserDataFolder, saved.ChatBackground);
+                    if (File.Exists(bg)) ChatBackgroundFile = bg;
+                }
             }
         }
         catch { /* unreadable settings file — fall back to the defaults */ }
@@ -209,13 +228,68 @@ public static class ThemeManager
         Save();
     }
 
+    /// <summary>Copies the picked image into <see cref="UserDataFolder"/> and remembers it,
+    /// or clears the background when <paramref name="sourcePath"/> is null. The caller
+    /// re-scripts open transcripts (MainWindow.ApplyThemeToAllTabs).</summary>
+    public static void SetChatBackground(string? sourcePath)
+    {
+        try
+        {
+            if (Directory.Exists(UserDataFolder))
+                foreach (var old in Directory.GetFiles(UserDataFolder, "chat-bg.*"))
+                    File.Delete(old);
+        }
+        catch { /* an open WebView may briefly hold the old file — stale copies are harmless */ }
+
+        ChatBackgroundFile = null;
+        if (sourcePath != null)
+        {
+            try
+            {
+                Directory.CreateDirectory(UserDataFolder);
+                var dest = Path.Combine(UserDataFolder,
+                    "chat-bg" + Path.GetExtension(sourcePath).ToLowerInvariant());
+                File.Copy(sourcePath, dest, overwrite: true);
+                ChatBackgroundFile = dest;
+            }
+            catch { /* unreadable source — behave as if cleared */ }
+        }
+        Save();
+    }
+
+    public static void SetChatBackgroundOpacity(double value)
+    {
+        ChatBackgroundOpacity = Math.Clamp(value, 0.05, 1.0);
+        Save();
+    }
+
+    /// <summary>CSS value for the transcript's --chat-bg-image variable: a cache-busted
+    /// virtual-host URL, or 'none' when no background is set.</summary>
+    public static string ChatBackgroundCssValue()
+    {
+        if (ChatBackgroundFile == null || !File.Exists(ChatBackgroundFile)) return "none";
+        var v = File.GetLastWriteTimeUtc(ChatBackgroundFile).Ticks;
+        return $"url(\"https://mandocode.userdata/{Path.GetFileName(ChatBackgroundFile)}?v={v}\")";
+    }
+
+    /// <summary>Invariant-culture string for --chat-bg-opacity (a comma decimal would be
+    /// silently invalid CSS on some locales).</summary>
+    public static string ChatBackgroundOpacityCss() =>
+        ChatBackgroundOpacity.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+
     private static void Save()
     {
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
             File.WriteAllText(SettingsPath, JsonSerializer.Serialize(
-                new UiSettings { Theme = Current.Name, Opacity = WindowOpacity }));
+                new UiSettings
+                {
+                    Theme = Current.Name,
+                    Opacity = WindowOpacity,
+                    ChatBackground = ChatBackgroundFile == null ? null : Path.GetFileName(ChatBackgroundFile),
+                    ChatBgOpacity = ChatBackgroundOpacity,
+                }));
         }
         catch { /* persistence is best-effort; the setting is still applied */ }
     }
@@ -275,6 +349,8 @@ public static class ThemeManager
         $"s.setProperty('--panel','{t.Panel}');" +
         $"s.setProperty('--border','{t.Border}');" +
         $"s.setProperty('--diffadd','{t.DiffAdd}');" +
+        $"s.setProperty('--chat-bg-image','{ChatBackgroundCssValue()}');" +
+        $"s.setProperty('--chat-bg-opacity','{ChatBackgroundOpacityCss()}');" +
         "})();";
 
     private static void SetBrush(ResourceDictionary res, string key, string hex) =>
@@ -299,5 +375,7 @@ public static class ThemeManager
     {
         public string? Theme { get; set; }
         public double Opacity { get; set; } = 1.0;
+        public string? ChatBackground { get; set; }      // file name inside UserDataFolder
+        public double ChatBgOpacity { get; set; } = 0.30;
     }
 }

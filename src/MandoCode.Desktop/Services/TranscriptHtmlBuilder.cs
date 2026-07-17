@@ -263,6 +263,8 @@ public sealed class TranscriptHtmlBuilder
     --panel: {{theme.Panel}};
     --border: {{theme.Border}};
     --diffadd: {{theme.DiffAdd}};
+    --chat-bg-image: {{ThemeManager.ChatBackgroundCssValue()}};
+    --chat-bg-opacity: {{ThemeManager.ChatBackgroundOpacityCss()}};
   }
   * { box-sizing: border-box; }
   body {
@@ -270,6 +272,13 @@ public sealed class TranscriptHtmlBuilder
     font-family: "Segoe UI", sans-serif; font-size: 14px;
     margin: 0; padding: 14px 18px 24px 18px; line-height: 1.5;
   }
+  /* User-chosen chat background: a fixed full-bleed layer painted behind the log.
+     Only THIS layer fades with the appearance slider — text keeps full contrast,
+     and panels/code blocks keep their opaque theme backgrounds on top of it. */
+  #bg { position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background-image: var(--chat-bg-image); background-size: cover;
+    background-position: center; background-repeat: no-repeat;
+    opacity: var(--chat-bg-opacity); }
   #log > * { margin-bottom: 8px; animation: rise 0.18s ease-out; }
   @keyframes rise {
     from { opacity: 0; transform: translateY(4px); }
@@ -474,6 +483,7 @@ public sealed class TranscriptHtmlBuilder
 </style>
 </head>
 <body>
+<div id="bg"></div>
 <div id="log"></div>
 <script>
   const log = document.getElementById('log');
