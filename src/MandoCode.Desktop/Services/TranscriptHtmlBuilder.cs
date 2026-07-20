@@ -246,7 +246,7 @@ public sealed class TranscriptHtmlBuilder
     /// the same CSS variables when the theme changes at runtime.</summary>
     public static string BaseDocument(UiTheme theme) => $$"""
 <!DOCTYPE html>
-<html>
+<html{{(theme.FlatMotion ? " data-flat=\"1\"" : "")}}{{(theme.Crt ? " data-crt=\"1\"" : "")}}>
 <head>
 <meta charset="utf-8">
 <script src="https://mandocode.assets/highlight.min.js"></script>
@@ -283,6 +283,65 @@ public sealed class TranscriptHtmlBuilder
   @keyframes rise {
     from { opacity: 0; transform: translateY(4px); }
     to { opacity: 1; transform: none; }
+  }
+  /* E-ink / flat-motion themes: no fade-in, no hover transitions, no smooth scroll — the
+     transcript repaints instantly and stays still, the way an e-reader page does. The
+     attribute is set at build time and toggled live by ThemeManager.BuildTranscriptScript. */
+  html[data-flat] #log > * { animation: none; }
+  html[data-flat] *, html[data-flat] { transition: none !important; scroll-behavior: auto !important; }
+  /* E-ink background image: treat the (static) chat-background layer like a Kindle image —
+     grayscale + contrast + 1-bit Bayer ordered dithering into black/white halftone dots.
+     Applied ONLY to #bg (never the text) and ONLY under the flat/e-ink theme. The layer is
+     fixed and repaints once, so even this heavy filter costs nothing per frame. */
+  html[data-flat] #bg { filter: url(#eink); }
+  /* Color emoji is the loudest break in the paper illusion, so desaturate every emoji-bearing
+     surface to grayscale ink: the chrome (react ghost, reaction pills, picker) AND the inline
+     emoji in message text (.md) and user echoes. Scoped to the flat/e-ink theme only. Safe and
+     static — assistant turns are appended as COMPLETE blocks (ChatController flushes each turn
+     via AssistantCard; no token-by-token DOM streaming), so each subtree is filtered once on
+     append and never re-rasterized by later appends. Under e-ink every other glyph is already
+     ink-gray, so the only visible effect is draining the color out of emoji. */
+  html[data-flat] .react-ghost,
+  html[data-flat] .rx-pill,
+  html[data-flat] #rx-pop .rx,
+  html[data-flat] .md,
+  html[data-flat] .user-echo { filter: grayscale(1); }
+
+  /* ---- CRT picture-tube overlay (aperture-grille tube) ----------------------------------
+     Scoped to html[data-crt]. Drawn on two fixed, pointer-events:none pseudo-layers OVER the
+     transcript, so the "glass" sits in front of the text. EVERYTHING here is STATIC — no moving
+     scanline, no flicker (that is the continuous-repaint trap we keep avoiding); the tube look
+     is fixed gradients only, one paint. The set's native chrome outside the WebView is untouched,
+     exactly like a real TV where only the picture tube carries scanlines. */
+  html[data-crt] body {
+    /* phosphor bloom on every glyph — a tight bright core + a wider soft halo reads more
+       like real phosphor than one big blur (and keeps text legible). Static, so no per-frame
+       cost even though it rides the streaming-text repaint. */
+    text-shadow: 0 0 2px rgba(120, 210, 255, 0.55), 0 0 9px rgba(120, 210, 255, 0.42),
+                 0 0 18px rgba(120, 210, 255, 0.22);
+  }
+  html[data-crt] body::before {
+    content: ""; position: fixed; inset: 0; z-index: 9998; pointer-events: none;
+    background:
+      /* horizontal scanlines (4px period: 2px gap + 2px line) */
+      repeating-linear-gradient(to bottom,
+        rgba(0,0,0,0) 0, rgba(0,0,0,0) 2px,
+        rgba(0,0,0,0.22) 2px, rgba(0,0,0,0.22) 4px),
+      /* aperture grille — faint vertical RGB stripes (the aperture-grille tell, not a dot mask) */
+      repeating-linear-gradient(to right,
+        rgba(255,0,64,0.05) 0, rgba(0,255,128,0.05) 1px,
+        rgba(64,128,255,0.05) 2px, rgba(0,0,0,0) 3px);
+  }
+  html[data-crt] body::after {
+    content: ""; position: fixed; inset: 0; z-index: 9999; pointer-events: none;
+    background:
+      /* the two signature aperture-grille damper wires */
+      linear-gradient(to bottom,
+        transparent calc(33.3% - 1px), rgba(0,0,0,0.30) 33.3%, transparent calc(33.3% + 1px)),
+      linear-gradient(to bottom,
+        transparent calc(66.6% - 1px), rgba(0,0,0,0.30) 66.6%, transparent calc(66.6% + 1px)),
+      /* tube-edge vignette */
+      radial-gradient(ellipse 100% 100% at center, transparent 60%, rgba(0,0,0,0.55) 100%);
   }
   .user-echo { color: var(--gold); font-weight: 600; white-space: pre-wrap; margin-top: 14px; }
   .assistant { margin-top: 4px; position: relative; }
@@ -483,6 +542,32 @@ public sealed class TranscriptHtmlBuilder
 </style>
 </head>
 <body>
+<!-- The e-ink image "shader": a self-contained SVG filter (no WebGL, no deps). Grayscale →
+     contrast → subtract a tiled 8x8 Bayer threshold map → discretize to 1 bit. The result is
+     black/white ordered dithering — the classic Kindle/newsprint halftone. sRGB interpolation
+     keeps the threshold from drifting; alpha is forced opaque (the #bg element's own opacity
+     still fades the picture). Referenced only by html[data-flat] #bg, above. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <filter id="eink" x="0%" y="0%" width="100%" height="100%" color-interpolation-filters="sRGB">
+    <feColorMatrix type="matrix" result="g"
+      values="0.299 0.587 0.114 0 0  0.299 0.587 0.114 0 0  0.299 0.587 0.114 0 0  0 0 0 1 0"/>
+    <feComponentTransfer in="g" result="gc">
+      <feFuncR type="linear" slope="1.35" intercept="-0.17"/>
+      <feFuncG type="linear" slope="1.35" intercept="-0.17"/>
+      <feFuncB type="linear" slope="1.35" intercept="-0.17"/>
+    </feComponentTransfer>
+    <feImage result="btile" x="0" y="0" width="16" height="16" preserveAspectRatio="none"
+      href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAo0lEQVR42pXLEXMCABgA0C4IgiAIBkEQBINgEAyCIAiCYBAEgyAYDILugiAIgiAIgiAIgmAwGARBMBgEwWAQBIPBYHe7e//ge/4SSYYUWJJmTIk1iXB4o8onHQ7UudAlHspsyTKlwgs3zImHb554p8kvfU48EA8ZJtyyIcWIIivi4UiDKz321PjikXi455U8C+7YkWNGPPwx4EybH575oEU4/AOvd36QFSHM3wAAAABJRU5ErkJggg=="/>
+    <feTile in="btile" result="bayer"/>
+    <feComposite in="gc" in2="bayer" operator="arithmetic" k1="0" k2="1" k3="-1" k4="0.5" result="d"/>
+    <feComponentTransfer in="d">
+      <feFuncR type="discrete" tableValues="0 1"/>
+      <feFuncG type="discrete" tableValues="0 1"/>
+      <feFuncB type="discrete" tableValues="0 1"/>
+      <feFuncA type="discrete" tableValues="1 1"/>
+    </feComponentTransfer>
+  </filter>
+</defs></svg>
 <div id="bg"></div>
 <div id="log"></div>
 <script>
@@ -713,7 +798,8 @@ public sealed class TranscriptHtmlBuilder
   pill.textContent = '↓ Latest';
   document.body.appendChild(pill);
   pill.addEventListener('click', function () {
-    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    window.scrollTo({ top: document.body.scrollHeight,
+      behavior: document.documentElement.hasAttribute('data-flat') ? 'auto' : 'smooth' });
   });
   function updatePill() {
     const nb = (window.innerHeight + window.scrollY) >= (document.body.scrollHeight - 80);

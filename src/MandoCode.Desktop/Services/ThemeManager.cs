@@ -27,6 +27,16 @@ public sealed record UiTheme
     public required string Red { get; init; }
     public required string DiffAdd { get; init; }
 
+    /// <summary>When true, the transcript suppresses all motion — no fade-in on new
+    /// blocks, no hover transitions, no smooth scroll — for the still, instant repaint
+    /// of an e-reader page. Gated in the WebView via an html[data-flat] attribute.</summary>
+    public bool FlatMotion { get; init; }
+
+    /// <summary>When true, the transcript wears a CRT-tube overlay (scanlines, aperture
+    /// grille, Trinitron damper wires, vignette, phosphor bloom) — all STATIC gradients,
+    /// no animation. Gated in the WebView via an html[data-crt] attribute.</summary>
+    public bool Crt { get; init; }
+
     public static readonly IReadOnlyList<UiTheme> All = new[]
     {
         // First entry is the default for fresh installs (ThemeManager falls back to All[0]).
@@ -110,6 +120,39 @@ public sealed record UiTheme
             Text = "#C0CAF5", Dim = "#565F89",
             Accent = "#7AA2F7", Gold = "#E0AF68", Sky = "#7DCFFF",
             Green = "#9ECE6A", Red = "#F7768E", DiffAdd = "#9ECE6A",
+        },
+        new UiTheme
+        {
+            // Cathode Ray — a Trinitron-style aperture-grille CRT: a deep, near-black picture
+            // tube with vivid, saturated phosphors that glow. Crt=true drapes the transcript in
+            // the tube overlay (scanlines + aperture grille + the two damper wires + vignette +
+            // bloom), all static gradients. The palette is punchy on purpose — CRT phosphors are
+            // high-saturation and the scanlines darken everything, so colors need headroom.
+            // Positioned as the last of the dark themes.
+            Name = "Cathode Ray (CRT)",
+            Description = "Deep-black picture tube with glowing phosphors and cathode-ray scanlines. 📺",
+            Crt = true,
+            Background = "#0B0B0D", Panel = "#131318", Border = "#2A2A33",
+            Text = "#E9EEEC", Dim = "#7C8A86",
+            Accent = "#33CCFF", Gold = "#FFC747", Sky = "#6FD3FF",
+            Green = "#43E37A", Red = "#FF5B54", DiffAdd = "#43E37A",
+        },
+        new UiTheme
+        {
+            // Warm paper + black ink, fully grayscale — reads like a Kindle page. Positioned as
+            // the first of the light themes. Every accent collapses to a shade of warm ink (the
+            // desaturation is what sells "e-ink," more than the cream background does), and
+            // FlatMotion strips the transcript's animation so pages repaint still and instant
+            // like an e-reader. Diffs read as a paper-edit metaphor: changed lines are dark ink
+            // over faded context; the +/- glyphs (not hue) carry add-vs-remove.
+            Name = "E-Ink Paper",
+            Description = "Warm paper, black ink, grayscale, no motion — reads like a Kindle. 📖",
+            IsLight = true,
+            FlatMotion = true,
+            Background = "#E9E5DB", Panel = "#DED9CC", Border = "#C6BFAE",
+            Text = "#211C16", Dim = "#726B5B",
+            Accent = "#3B342A", Gold = "#6A5E48", Sky = "#4C4636",
+            Green = "#5A5240", Red = "#2E251E", DiffAdd = "#3B342A",
         },
         new UiTheme
         {
@@ -351,6 +394,12 @@ public static class ThemeManager
         $"s.setProperty('--diffadd','{t.DiffAdd}');" +
         $"s.setProperty('--chat-bg-image','{ChatBackgroundCssValue()}');" +
         $"s.setProperty('--chat-bg-opacity','{ChatBackgroundOpacityCss()}');" +
+        (t.FlatMotion
+            ? "document.documentElement.setAttribute('data-flat','1');"
+            : "document.documentElement.removeAttribute('data-flat');") +
+        (t.Crt
+            ? "document.documentElement.setAttribute('data-crt','1');"
+            : "document.documentElement.removeAttribute('data-crt');") +
         "})();";
 
     private static void SetBrush(ResourceDictionary res, string key, string hex) =>
