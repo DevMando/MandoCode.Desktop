@@ -452,24 +452,35 @@
                                    Opacity="0.6" FontSize="12" TextWrapping="Wrap"/>
                     </StackPanel>
 
-                    <ScrollViewer Grid.Row="1">
-                        <StackPanel Spacing="8" MaxWidth="680" HorizontalAlignment="Left" Padding="0,8,0,8">
-                            <!-- Win11-Settings style: one collapsible card per setting, with the
-                                 current value on the header so the collapsed page reads at a glance. -->
-                            <Expander MinWidth="640"
-                                      HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-                                <Expander.Header>
-                                    <StackPanel Orientation="Horizontal" Spacing="10" Padding="0,14">
-                                        <FontIcon Glyph="&#xE790;" FontSize="16"/>
-                                        <TextBlock Text="Theme" FontWeight="SemiBold"/>
-                                        <TextBlock x:Name="ThemeHeaderValue" Opacity="0.6" FontSize="13"
-                                                   VerticalAlignment="Center"/>
-                                    </StackPanel>
-                                </Expander.Header>
-                                <StackPanel Spacing="4">
-                                <TextBlock Text="Themes restyle everything, transcripts included."
+                    <!-- Two-pane layout: themes always visible on the left; chat background and
+                         window opacity always open on the right. No collapsing cards — the whole
+                         page is on screen at once, which is quicker to navigate. -->
+                    <Grid Grid.Row="1" ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" MinWidth="360"/>
+                            <ColumnDefinition Width="*" MinWidth="360"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- LEFT: theme picker, always open. The ListView scrolls internally. -->
+                        <Border Grid.Column="0" Background="{StaticResource MandoPanelBrush}"
+                                BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1"
+                                CornerRadius="8" Padding="16">
+                            <Grid RowSpacing="6">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+                                <StackPanel Orientation="Horizontal" Spacing="10">
+                                    <FontIcon Glyph="&#xE790;" FontSize="16"/>
+                                    <TextBlock Text="Theme" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="ThemeHeaderValue" Opacity="0.6" FontSize="13"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <TextBlock Grid.Row="1" Text="Themes restyle everything, transcripts included."
                                            Opacity="0.6" FontSize="12" TextWrapping="Wrap"/>
-                                <ListView x:Name="ThemeList" SelectionMode="Single" SelectionChanged="ThemeList_SelectionChanged">
+                                <ListView Grid.Row="2" x:Name="ThemeList" SelectionMode="Single"
+                                          SelectionChanged="ThemeList_SelectionChanged" Margin="0,4,0,0">
                                 <ListView.ItemTemplate>
                                     <DataTemplate x:DataType="local:ThemeVm">
                                         <Border Background="{x:Bind BgBrush}" BorderBrush="{x:Bind EdgeBrush}"
@@ -494,83 +505,87 @@
                                         </Border>
                                     </DataTemplate>
                                 </ListView.ItemTemplate>
-                            </ListView>
-                                </StackPanel>
-                            </Expander>
+                                </ListView>
+                            </Grid>
+                        </Border>
 
-                            <Expander MinWidth="640"
-                                      HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-                                <Expander.Header>
-                                    <StackPanel Orientation="Horizontal" Spacing="10" Padding="0,14">
-                                        <FontIcon Glyph="&#xE8B9;" FontSize="16"/>
-                                        <TextBlock Text="Chat background" FontWeight="SemiBold"/>
-                                        <TextBlock x:Name="BgFileLabel" Text="No image set" Opacity="0.6"
-                                                   FontSize="13" VerticalAlignment="Center"/>
-                                    </StackPanel>
-                                </Expander.Header>
-                                <StackPanel Spacing="10">
-                                    <TextBlock Text="Shown behind the conversation in every agent tab. The slider fades the image only — text always stays fully readable."
-                                               Opacity="0.6" FontSize="12" TextWrapping="Wrap"/>
+                        <!-- RIGHT: chat background (top) + window opacity (below), both always open. -->
+                        <ScrollViewer Grid.Column="1">
+                            <StackPanel Spacing="16">
+                                <!-- Chat background -->
+                                <Border Background="{StaticResource MandoPanelBrush}"
+                                        BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1"
+                                        CornerRadius="8" Padding="16">
+                                    <StackPanel Spacing="10">
+                                        <StackPanel Orientation="Horizontal" Spacing="10">
+                                            <FontIcon Glyph="&#xE8B9;" FontSize="16"/>
+                                            <TextBlock Text="Chat background" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                            <TextBlock x:Name="BgFileLabel" Text="No image set" Opacity="0.6"
+                                                       FontSize="13" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                        <TextBlock Text="Shown behind the conversation in every agent tab. The slider fades the image only — text always stays fully readable."
+                                                   Opacity="0.6" FontSize="12" TextWrapping="Wrap"/>
 
-                                    <!-- Live preview: theme background + the image at slider opacity,
-                                         with sample chat lines on top to judge readability. -->
-                                    <Border Height="120" CornerRadius="8"
-                                            BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1"
-                                            Background="{StaticResource MandoBackgroundBrush}">
-                                        <Grid>
-                                            <Image x:Name="BgPreviewImage" Stretch="UniformToFill" Opacity="0.3"/>
-                                            <StackPanel Padding="14,0" Spacing="2" VerticalAlignment="Center">
-                                                <TextBlock Text="&gt; how does this look?"
-                                                           Foreground="{StaticResource MandoGoldBrush}"
-                                                           FontWeight="SemiBold" FontSize="13"/>
-                                                <TextBlock Text="MandoCode"
-                                                           Foreground="{StaticResource MandoGreenBrush}"
-                                                           FontWeight="Bold" FontSize="12"/>
-                                                <TextBlock Text="Like this — the image fades, the text never does."
-                                                           Foreground="{StaticResource MandoTextBrush}" FontSize="13"/>
-                                            </StackPanel>
+                                        <!-- Live preview: theme background + the image at slider opacity,
+                                             with sample chat lines on top to judge readability. -->
+                                        <Border Height="120" CornerRadius="8"
+                                                BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1"
+                                                Background="{StaticResource MandoBackgroundBrush}">
+                                            <Grid>
+                                                <Image x:Name="BgPreviewImage" Stretch="UniformToFill" Opacity="0.3"/>
+                                                <StackPanel Padding="14,0" Spacing="2" VerticalAlignment="Center">
+                                                    <TextBlock Text="&gt; how does this look?"
+                                                               Foreground="{StaticResource MandoGoldBrush}"
+                                                               FontWeight="SemiBold" FontSize="13"/>
+                                                    <TextBlock Text="MandoCode"
+                                                               Foreground="{StaticResource MandoGreenBrush}"
+                                                               FontWeight="Bold" FontSize="12"/>
+                                                    <TextBlock Text="Like this — the image fades, the text never does."
+                                                               Foreground="{StaticResource MandoTextBrush}" FontSize="13"/>
+                                                </StackPanel>
+                                            </Grid>
+                                        </Border>
+
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <Button x:Name="BgChooseButton" Content="Choose image…" Click="BgChoose_Click"/>
+                                            <Button x:Name="BgClearButton" Content="Remove" Click="BgClear_Click"/>
+                                        </StackPanel>
+                                        <Grid ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Slider x:Name="S_BgOpacity" Header="Image opacity" Minimum="5" Maximum="100"
+                                                    Value="30" ValueChanged="BgOpacity_Changed"
+                                                    ToolTipService.ToolTip="How strongly the image shows through. Lower it if text gets hard to read — the text itself never fades."/>
+                                            <TextBlock x:Name="S_BgOpacityLabel" Grid.Column="1" Text="30%"
+                                                       VerticalAlignment="Bottom" Margin="0,0,0,8" Opacity="0.7"
+                                                       FontSize="13" MinWidth="44"/>
                                         </Grid>
-                                    </Border>
-
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <Button x:Name="BgChooseButton" Content="Choose image…" Click="BgChoose_Click"/>
-                                        <Button x:Name="BgClearButton" Content="Remove" Click="BgClear_Click"/>
                                     </StackPanel>
-                                    <Grid ColumnSpacing="12">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <Slider x:Name="S_BgOpacity" Header="Image opacity" Minimum="5" Maximum="100"
-                                                Value="30" MinWidth="320" ValueChanged="BgOpacity_Changed"
-                                                ToolTipService.ToolTip="How strongly the image shows through. Lower it if text gets hard to read — the text itself never fades."/>
-                                        <TextBlock x:Name="S_BgOpacityLabel" Grid.Column="1" Text="30%"
-                                                   VerticalAlignment="Bottom" Margin="0,0,0,8" Opacity="0.7"
-                                                   FontSize="13" MinWidth="44"/>
-                                    </Grid>
-                                </StackPanel>
-                            </Expander>
+                                </Border>
 
-                            <Expander MinWidth="640"
-                                      HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-                                <Expander.Header>
-                                    <StackPanel Orientation="Horizontal" Spacing="10" Padding="0,14">
-                                        <FontIcon Glyph="&#xE706;" FontSize="16"/>
-                                        <TextBlock Text="Window opacity" FontWeight="SemiBold"/>
-                                        <TextBlock x:Name="S_WindowOpacityLabel" Text="100%" Opacity="0.6"
-                                                   FontSize="13" VerticalAlignment="Center"/>
+                                <!-- Window opacity -->
+                                <Border Background="{StaticResource MandoPanelBrush}"
+                                        BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1"
+                                        CornerRadius="8" Padding="16">
+                                    <StackPanel Spacing="8">
+                                        <StackPanel Orientation="Horizontal" Spacing="10">
+                                            <FontIcon Glyph="&#xE706;" FontSize="16"/>
+                                            <TextBlock Text="Window opacity" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                            <TextBlock x:Name="S_WindowOpacityLabel" Text="100%" Opacity="0.6"
+                                                       FontSize="13" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                        <TextBlock Text="Makes the whole window translucent so you can see what's behind it. 100% = solid (default). Purely visual — never affects the model."
+                                                   Opacity="0.6" FontSize="12" TextWrapping="Wrap"/>
+                                        <Slider x:Name="S_WindowOpacity" Minimum="30" Maximum="100" Value="100"
+                                                HorizontalAlignment="Stretch"
+                                                ValueChanged="WindowOpacity_Changed"/>
                                     </StackPanel>
-                                </Expander.Header>
-                                <StackPanel Spacing="4">
-                                    <TextBlock Text="Makes the whole window translucent so you can see what's behind it. 100% = solid (default). Purely visual — never affects the model."
-                                               Opacity="0.6" FontSize="12" TextWrapping="Wrap"/>
-                                    <Slider x:Name="S_WindowOpacity" Minimum="30" Maximum="100" Value="100"
-                                            MinWidth="320" HorizontalAlignment="Left"
-                                            ValueChanged="WindowOpacity_Changed"/>
-                                </StackPanel>
-                            </Expander>
-                        </StackPanel>
-                    </ScrollViewer>
+                                </Border>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
                 </Grid>
 
                 <!-- ============ MCP PAGE ============ -->
