@@ -3,9 +3,12 @@
     x:Class="MandoCode.Desktop.ChatTabView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:local="using:MandoCode.Desktop">
+    xmlns:local="using:MandoCode.Desktop"
+    xmlns:muxc="using:Microsoft.UI.Xaml.Controls"
+    xmlns:controls="using:MandoCode.Desktop.Controls">
 
-    <Grid x:Name="ChatRoot">
+    <Grid x:Name="ChatRoot" SizeChanged="ChatRoot_SizeChanged"
+          AllowDrop="True" DragEnter="ChatRoot_DragEnter" DragLeave="ChatRoot_DragLeave">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
@@ -109,10 +112,116 @@
                         ToolTipService.ToolTip="Change this tab's project folder">
                     <FontIcon Glyph="&#xE8B7;" FontSize="15"/>
                 </Button>
+                <Button x:Name="ExplorerButton" Click="ExplorerButton_Click" Padding="8,5"
+                        ToolTipService.ToolTip="Show or hide the file explorer">
+                    <FontIcon Glyph="&#xEC50;" FontSize="15"/>
+                </Button>
             </StackPanel>
         </Grid>
 
-        <WebView2 x:Name="TranscriptView" Grid.Row="1" DefaultBackgroundColor="#16121F"/>
+        <!-- Transcript row: the explorer panel DOCKS in the second column (like the snapshot
+             list docks beside the chat), so opening it resizes the transcript instead of
+             covering its text. Column width is set in code (~20% of the window, clamped);
+             Collapsed removes it from layout entirely and the transcript reclaims the width. -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <WebView2 x:Name="TranscriptView" DefaultBackgroundColor="#16121F"/>
+
+            <!-- Drag splitter for the explorer: ResizeGrip shows the ↔ cursor on hover; the
+                 drag itself is pointer events in code-behind (same pattern as the terminal's
+                 splitter in MainWindow). Shown/hidden together with the panel. -->
+            <controls:ResizeGrip x:Name="ExplorerSplitter" Grid.Column="1" Width="6"
+                                 Visibility="Collapsed" Background="Transparent"
+                                 GripOrientation="Vertical"
+                                 PointerPressed="ExplorerSplitter_PointerPressed"
+                                 PointerMoved="ExplorerSplitter_PointerMoved"
+                                 PointerReleased="ExplorerSplitter_PointerReleased"/>
+
+            <!-- ======= File explorer panel (solution-explorer style) =======
+                 Toggled by the header's explorer button. The tree is LAZY: a folder's children
+                 are only read from disk when it is first expanded, so opening the panel never
+                 scans node_modules/bin/obj unless you drill into them. -->
+            <Grid x:Name="ExplorerPanel" Grid.Column="2" Visibility="Collapsed" Width="280"
+                  Background="{StaticResource MandoPanelBrush}"
+                  BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1,0,0,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <Grid Grid.Row="0" Padding="12,8,6,8" ColumnSpacing="8"
+                      BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="0,0,0,1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <FontIcon Glyph="&#xEC50;" FontSize="14" VerticalAlignment="Center"
+                              Foreground="{StaticResource MandoAccentBrush}"/>
+                    <TextBlock x:Name="ExplorerRootText" Grid.Column="1" FontWeight="SemiBold"
+                               FontSize="13" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"/>
+                    <Button Grid.Column="2" Click="ExplorerRefresh_Click" Padding="6"
+                            Background="Transparent" BorderThickness="0"
+                            ToolTipService.ToolTip="Refresh — re-read the folder tree from disk">
+                        <FontIcon Glyph="&#xE72C;" FontSize="12"/>
+                    </Button>
+                    <Button Grid.Column="3" Click="ExplorerClose_Click" Padding="6"
+                            Background="Transparent" BorderThickness="0"
+                            ToolTipService.ToolTip="Close the file explorer">
+                        <FontIcon Glyph="&#xE711;" FontSize="12"/>
+                    </Button>
+                </Grid>
+
+                <TreeView x:Name="ExplorerTree" Grid.Row="1" SelectionMode="Single"
+                          CanDragItems="True" CanReorderItems="False" AllowDrop="False"
+                          DragItemsStarting="ExplorerTree_DragItemsStarting"
+                          Expanding="ExplorerTree_Expanding" ItemInvoked="ExplorerTree_ItemInvoked"
+                          DoubleTapped="ExplorerTree_DoubleTapped"
+                          Padding="4,6,4,6">
+                    <TreeView.ItemContainerStyle>
+                        <Style TargetType="TreeViewItem">
+                            <Setter Property="MinHeight" Value="26"/>
+                        </Style>
+                    </TreeView.ItemContainerStyle>
+                    <TreeView.ItemTemplate>
+                        <DataTemplate x:DataType="muxc:TreeViewNode">
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <FontIcon Glyph="{x:Bind ((local:ExplorerItem)Content).Glyph}"
+                                          FontSize="13" VerticalAlignment="Center"
+                                          Foreground="{x:Bind ((local:ExplorerItem)Content).IconBrush}"/>
+                                <TextBlock Grid.Column="1"
+                                           Text="{x:Bind ((local:ExplorerItem)Content).Name}"
+                                           FontSize="13" VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis"/>
+                                <!-- Tag button: inserts this row's @token into the prompt, same as
+                                     dragging it there. Dim at rest, brightens on hover (code-behind —
+                                     WinUI styles have no triggers). -->
+                                <Button Grid.Column="2" Click="ExplorerTag_Click"
+                                        PointerEntered="ExplorerTag_PointerEntered"
+                                        PointerExited="ExplorerTag_PointerExited"
+                                        Padding="6,1" Background="Transparent" BorderThickness="0"
+                                        Opacity="0.45" VerticalAlignment="Center"
+                                        ToolTipService.ToolTip="{x:Bind ((local:ExplorerItem)Content).TagTooltip}">
+                                    <TextBlock Text="@" FontSize="13"/>
+                                </Button>
+                            </Grid>
+                        </DataTemplate>
+                    </TreeView.ItemTemplate>
+                </TreeView>
+            </Grid>
+        </Grid>
 
         <StackPanel x:Name="PlanProgressPanel" Grid.Row="2" Visibility="Collapsed" Padding="16,6,16,0">
             <TextBlock x:Name="PlanProgressText" FontSize="12" Opacity="0.7" Margin="0,0,0,2"/>
@@ -231,6 +340,31 @@
             </Border>
         </Grid>
 
+        <!-- ======= Drop-to-tag overlay =======
+             Mounts over the transcript row the moment an in-progress drag enters the tab —
+             via ChatRoot's DragEnter for drags over XAML chrome, or the transcript script's
+             'drag-enter' web message for drags over the WebView surface (Chromium owns those;
+             XAML never sees them). Once visible, the OS retargets the drag to THIS element,
+             so the drop arrives in XAML with real file paths. The inner card is hit-test
+             invisible so the whole sheet is one uniform drop target. -->
+        <Grid x:Name="DropOverlay" Grid.Row="1" Visibility="Collapsed" Background="#B0000000"
+              AllowDrop="True" DragOver="DropOverlay_DragOver" Drop="DropOverlay_Drop"
+              DragLeave="DropOverlay_DragLeave">
+            <Border IsHitTestVisible="False" HorizontalAlignment="Center" VerticalAlignment="Center"
+                    Background="{StaticResource MandoPanelBrush}"
+                    BorderBrush="{StaticResource MandoAccentBrush}" BorderThickness="2"
+                    CornerRadius="14" Padding="36,26">
+                <StackPanel Spacing="6" HorizontalAlignment="Center">
+                    <TextBlock Text="@" FontSize="40" FontWeight="Bold" HorizontalAlignment="Center"
+                               Foreground="{StaticResource MandoAccentBrush}"/>
+                    <TextBlock Text="Drop to tag in prompt" FontSize="16" FontWeight="SemiBold"
+                               HorizontalAlignment="Center"/>
+                    <TextBlock Text="Files and folders in the project become @references"
+                               FontSize="12" Opacity="0.6" HorizontalAlignment="Center"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+
         <!-- ======= Plan approval bar =======
              Slides up above the input when the assistant proposes a plan. Unlike the centered
              approval modal, it does NOT cover the transcript — the plan card stays readable above
@@ -286,6 +420,7 @@
             <TextBox x:Name="InputBox" Grid.Row="1" Grid.Column="0"
                      PlaceholderText="Ask MandoCode anything… (/ for commands, @file to attach, !cmd for shell)"
                      AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="140"
+                     AllowDrop="True" DragOver="InputBox_DragOver" Drop="InputBox_Drop"
                      PreviewKeyDown="InputBox_PreviewKeyDown" TextChanged="InputBox_TextChanged"/>
 
             <Button x:Name="EmojiButton" Grid.Row="1" Grid.Column="1"
