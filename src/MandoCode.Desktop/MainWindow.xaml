@@ -210,28 +210,59 @@
              toggled by Visibility, never re-parented. WinUI's TabView hosts just the selected
              item's content, which would detach a background agent's WebView2 and close its
              CoreWebView2 — and the transcript DOM is the only copy of that conversation. -->
-        <Border Grid.Row="0" Background="{StaticResource MandoPanelBrush}" Padding="10,6"
+        <!-- Extra top padding balances the reserved scrollbar lane at the bottom of the tab
+             content, so the tabs sit visually centered in the strip. -->
+        <Border Grid.Row="0" Background="{StaticResource MandoPanelBrush}" Padding="10,13,10,6"
                 BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="0,0,0,1">
             <Grid ColumnSpacing="12">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>   <!-- brand -->
+                    <ColumnDefinition Width="Auto"/>   <!-- divider -->
+                    <ColumnDefinition Width="*"/>      <!-- tabs (scrolls) -->
+                    <ColumnDefinition Width="Auto"/>   <!-- divider -->
+                    <ColumnDefinition Width="Auto"/>   <!-- permanent add button -->
                 </Grid.ColumnDefinitions>
 
+                <!-- Bottom margin mirrors the tab content's scrollbar lane so the title centers in
+                     the same region as the (top-aligned) tabs, instead of sitting lower. -->
                 <TextBlock Text="MandoCode" FontSize="17" FontWeight="Bold" VerticalAlignment="Center"
-                           Foreground="{StaticResource MandoAccentBrush}"/>
+                           Margin="0,0,0,18" Foreground="{StaticResource MandoAccentBrush}"/>
 
-                <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Auto"
-                              VerticalScrollBarVisibility="Disabled" VerticalScrollMode="Disabled">
-                    <StackPanel Orientation="Horizontal" Spacing="4">
-                        <StackPanel x:Name="TabStrip" Orientation="Horizontal" Spacing="4"/>
-                        <Button x:Name="AddTabButton" Click="AddTab_Click" Padding="9,6"
-                                Background="Transparent" BorderThickness="0" VerticalAlignment="Center"
-                                ToolTipService.ToolTip="New agent — its own conversation, folder, model, and settings">
-                            <FontIcon Glyph="&#xE710;" FontSize="12"/>
-                        </Button>
-                    </StackPanel>
+                <!-- Vertical divider between the brand and the agent tabs. Insets align it with the
+                     tab band (bottom inset matches the tabs' scrollbar lane). -->
+                <Rectangle Grid.Column="1" Width="1" VerticalAlignment="Stretch" Margin="0,4,0,22"
+                           Fill="{StaticResource MandoBorderBrush}"/>
+
+                <!-- Visible horizontal scrollbar, but the scroll content carries a bottom margin so
+                     WinUI's auto-hide overlay bar sits in that reserved lane BELOW the tabs instead
+                     of drawing on top of them. Mouse wheel / touchpad scroll horizontally too. -->
+                <ScrollViewer x:Name="TabScroller" Grid.Column="2" HorizontalScrollBarVisibility="Auto"
+                              VerticalScrollBarVisibility="Disabled" VerticalScrollMode="Disabled"
+                              SizeChanged="TabScroller_SizeChanged"
+                              PointerWheelChanged="TabScroller_PointerWheelChanged">
+                    <!-- Bottom lane (Margin) for the scrollbar. Sized for the HIGHLIGHTED (hover/drag)
+                         bar, which grows upward — a thinner lane clears the idle bar but the expanded
+                         one would reach into the tabs. -->
+                    <StackPanel x:Name="TabStrip" Orientation="Horizontal" Spacing="4"
+                                VerticalAlignment="Top" Margin="0,0,0,18"
+                                SizeChanged="TabStrip_SizeChanged"/>
                 </ScrollViewer>
+
+                <!-- Vertical divider between the tabs and the add button (mirrors the brand-side rule). -->
+                <Rectangle Grid.Column="3" Width="1" VerticalAlignment="Stretch" Margin="0,4,0,22"
+                           Fill="{StaticResource MandoBorderBrush}"/>
+
+                <!-- PERMANENT add-agent button, pinned far right (opposite the brand) and OUTSIDE the
+                     scroller, so it never scrolls out of reach when many agents are open. -->
+                <Button x:Name="AddTabButton" Grid.Column="4" Click="AddTab_Click" Padding="10,6"
+                        Margin="0,0,0,18" Background="Transparent" BorderThickness="0"
+                        VerticalAlignment="Center" ToolTipService.ToolTip="Add agent"
+                        AutomationProperties.Name="New agent">
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                        <FontIcon Glyph="&#xE710;" FontSize="12"/>
+                        <TextBlock Text="New agent" FontSize="13"/>
+                    </StackPanel>
+                </Button>
             </Grid>
         </Border>
 

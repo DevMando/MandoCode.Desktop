@@ -202,11 +202,27 @@ public sealed class TranscriptHtmlBuilder
                 // so they recede as reference material instead of a highlighted code block. File
                 // content previews (Read) stay monospace/no-wrap since they really are code.
                 var prose = op.OperationType is "WebSearch" or "WebFetch";
-                var detailCls = prose ? "cmd-out op-detail op-prose" : "cmd-out op-detail";
-                sb.Append($"<pre class=\"{detailCls}\">{E(op.ContentPreview)}");
-                if (op.RemainingLines > 0)
-                    sb.Append($"\n<span class=\"dim\">… +{op.RemainingLines} more lines</span>");
-                sb.Append("</pre>");
+                if (prose)
+                {
+                    // Web dumps are noisy reference material almost no one reads inline, so hide the
+                    // preview behind an "Expand" chip on the op line. Expanding reveals the detail
+                    // box, which carries its own "Collapse" button so it can be closed from the
+                    // window too. Toggling is wired in the transcript's web-toggle click handler.
+                    sb.Append("<button class=\"web-toggle\">⤢ Expand</button>");
+                    sb.Append("<div class=\"web-detail\" hidden>");
+                    sb.Append("<button class=\"expand-btn right web-collapse\" title=\"Collapse\">⤡ Collapse</button>");
+                    sb.Append($"<pre class=\"cmd-out op-detail op-prose\">{E(op.ContentPreview)}");
+                    if (op.RemainingLines > 0)
+                        sb.Append($"\n<span class=\"dim\">… +{op.RemainingLines} more lines</span>");
+                    sb.Append("</pre></div>");
+                }
+                else
+                {
+                    sb.Append($"<pre class=\"cmd-out op-detail\">{E(op.ContentPreview)}");
+                    if (op.RemainingLines > 0)
+                        sb.Append($"\n<span class=\"dim\">… +{op.RemainingLines} more lines</span>");
+                    sb.Append("</pre>");
+                }
             }
         }
 
@@ -421,6 +437,44 @@ public sealed class TranscriptHtmlBuilder
   .d-add { color: var(--diffadd); display: block; }
   .d-rem { color: var(--red); display: block; }
   .d-ctx { color: var(--dim); display: block; }
+
+  /* Collapsible long panels: a big write/diff/output otherwise fills the screen and forces
+     endless scrolling, so panel-hosted blocks taller than ~22% of the window collapse to that
+     preview height by default. A matching Expand/Collapse button sits in the top-RIGHT and
+     bottom-RIGHT corners (JS adds them only when a block is actually tall) so it's reachable
+     whether you're at the top or, after expanding, down at the bottom. The header and footer
+     pad on the right to clear the buttons. Pure class flip on click — no animation loop. */
+  .collapsible-panel { position: relative; }
+  .collapsible-panel > .panel-header,
+  .collapsible-panel > .panel-footer {
+    padding-right: 84px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  /* Reserve a bottom gutter so the bottom corner buttons never overlap the last line of a
+     footerless panel (e.g. command output). */
+  pre.collapsible { position: relative; padding-bottom: 34px; }
+  pre.collapsible.collapsed { max-height: 22vh; overflow-y: hidden; }
+  .collapse-fade { position: absolute; left: 0; right: 0; bottom: 0; height: 44px;
+    pointer-events: none; background: linear-gradient(to bottom, transparent, var(--panel)); }
+  .expand-btn { position: absolute; top: 6px; z-index: 3; cursor: pointer;
+    background: var(--bg); color: var(--dim); border: 1px solid var(--border);
+    border-radius: 6px; padding: 2px 9px; font-size: 11px;
+    font-family: "Segoe UI", sans-serif; opacity: 0.9; }
+  .expand-btn.left { left: 6px; }
+  .expand-btn.right { right: 6px; }
+  .expand-btn.bottom { top: auto; bottom: 6px; }
+  .expand-btn:hover { color: var(--fg); border-color: var(--accent); opacity: 1; }
+
+  /* Web fetch/search previews: noisy reference text, hidden by default behind an inline Expand
+     chip on the op line. Expanding reveals the detail box, which reuses the corner Collapse
+     button (.expand-btn.right) so it can be closed from the window itself. */
+  .web-toggle { margin-left: 8px; cursor: pointer; vertical-align: baseline;
+    background: var(--bg); color: var(--dim); border: 1px solid var(--border);
+    border-radius: 6px; padding: 1px 8px; font-size: 11px; font-family: "Segoe UI", sans-serif; }
+  .web-toggle:hover { color: var(--fg); border-color: var(--accent); }
+  .web-detail { position: relative; margin-top: 4px; }
+  .web-detail[hidden] { display: none; }
+  .web-detail > .op-detail { margin-top: 0; }
   a.file-link { color: var(--sky); text-decoration: none;
     border-bottom: 1px dotted color-mix(in srgb, var(--sky) 55%, transparent); cursor: pointer; }
   a.file-link:hover { color: var(--accent); border-bottom-color: var(--accent); }
@@ -772,6 +826,45 @@ public sealed class TranscriptHtmlBuilder
     });
   }
 
+  // --- collapse long diff/output panels to a preview; corner buttons maximize/minimize ---
+  // Only panel-hosted <pre> blocks (diffs, command output, folder-delete listings) taller than
+  // ~22% of the window get collapsed. A matching Expand/Collapse button is placed in the top-RIGHT
+  // and bottom-RIGHT corners so it's reachable from the top or — after expanding down — the bottom.
+  function setCollapsed(pre, collapsed) {
+    pre.classList.toggle('collapsed', collapsed);
+    const panel = pre.closest('.panel');
+    if (!panel) return;
+    const fade = panel.querySelector('.collapse-fade');
+    if (fade) fade.style.display = collapsed ? 'block' : 'none';
+    panel.querySelectorAll('.expand-btn').forEach(function (b) {
+      b.textContent = collapsed ? '⤢ Expand' : '⤡ Collapse';
+    });
+  }
+  function addCollapsers() {
+    log.querySelectorAll('pre.diff:not([data-collapse]), pre.cmd-out:not([data-collapse])').forEach(function (pre) {
+      pre.setAttribute('data-collapse', '1');
+      const panel = pre.closest('.panel');
+      if (!panel) return;                                               // only panel-hosted blocks
+      if (pre.scrollHeight <= window.innerHeight * 0.22 + 40) return;   // short enough already
+      pre.classList.add('collapsible');
+      panel.classList.add('collapsible-panel');
+      const fade = document.createElement('div');
+      fade.className = 'collapse-fade';
+      pre.appendChild(fade);
+      ['right', 'right bottom'].forEach(function (side) {
+        const b = document.createElement('button');
+        b.className = 'expand-btn ' + side;
+        b.title = 'Maximize / minimize this block';
+        b.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          setCollapsed(pre, !pre.classList.contains('collapsed'));
+        });
+        panel.appendChild(b);
+      });
+      setCollapsed(pre, true);                                          // start minimized
+    });
+  }
+
   window.__append = function (html) {
     const nearBottom = (window.innerHeight + window.scrollY) >= (document.body.scrollHeight - 60);
     const wrap = document.createElement('div');
@@ -780,6 +873,7 @@ public sealed class TranscriptHtmlBuilder
     highlightNew();
     addCopyChips();
     addReactionGhosts();
+    addCollapsers();
     if (nearBottom) window.scrollTo(0, document.body.scrollHeight);
     updatePill();
   };
@@ -790,6 +884,22 @@ public sealed class TranscriptHtmlBuilder
     if (!link) return;
     e.preventDefault();
     window.chrome.webview.postMessage('open-file:' + link.getAttribute('data-file'));
+  });
+
+  // Web fetch/search preview toggle: the inline chip opens the hidden detail box; the box's own
+  // Collapse button (and the chip again) closes it. Chip label and box visibility stay in sync.
+  document.addEventListener('click', function (e) {
+    const t = e.target.closest('.web-toggle, .web-collapse');
+    if (!t) return;
+    e.stopPropagation();
+    const op = t.closest('.op');
+    if (!op) return;
+    const detail = op.querySelector('.web-detail');
+    const toggle = op.querySelector('.web-toggle');
+    if (!detail || !toggle) return;
+    const open = t.classList.contains('web-collapse') ? false : detail.hasAttribute('hidden');
+    detail.toggleAttribute('hidden', !open);
+    toggle.textContent = open ? '⤡ Collapse' : '⤢ Expand';
   });
 
   // --- jump-to-bottom pill ---

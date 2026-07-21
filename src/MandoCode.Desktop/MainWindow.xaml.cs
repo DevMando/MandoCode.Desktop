@@ -770,8 +770,7 @@ public sealed partial class MainWindow : Window
             Text = title,
             FontSize = 13,
             VerticalAlignment = VerticalAlignment.Center,
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            MaxWidth = 170
+            TextTrimming = TextTrimming.CharacterEllipsis
         };
 
         // Gold dot: an approval is waiting in a tab you aren't looking at.
@@ -797,7 +796,16 @@ public sealed partial class MainWindow : Window
         ToolTipService.SetToolTip(options, "Tab options");
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(options, "Tab options");
 
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7 };
+        // A Grid (not a StackPanel) so the label flexes and ellipsizes when the tab is narrow,
+        // while the badge and options button stay pinned at the right. LayoutTabStrip sets each
+        // header's Width; this just governs how that width is divided.
+        var row = new Grid { ColumnSpacing = 7 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(label, 0);
+        Grid.SetColumn(badge, 1);
+        Grid.SetColumn(options, 2);
         row.Children.Add(label);
         row.Children.Add(badge);
         row.Children.Add(options);
@@ -821,7 +829,7 @@ public sealed partial class MainWindow : Window
         // on the header. Selecting first would be harmless anyway.
         entry.Header.Tapped += (_, _) => SelectTab(entry);
 
-        var row = (StackPanel)entry.Header.Child;
+        var row = (Grid)entry.Header.Child;
         var options = (Button)row.Children[^1];
 
         var menu = new MenuFlyout();
@@ -835,7 +843,7 @@ public sealed partial class MainWindow : Window
         var export = new MenuFlyoutItem { Text = "Export transcript…", Icon = new FontIcon { Glyph = "" } };
         export.Click += (_, _) => _ = entry.View.ExportTranscriptAsync();
 
-        var close = new MenuFlyoutItem { Text = "Close tab", Icon = new FontIcon { Glyph = "" } };
+        var close = new MenuFlyoutItem { Text = "Close agent", Icon = new FontIcon { Glyph = "" } };
         close.Click += (_, _) => CloseTab(entry);
 
         menu.Items.Add(rename);
@@ -886,7 +894,42 @@ public sealed partial class MainWindow : Window
         _sessions.Activate(entry.View.Session);
         RefreshTabStrip();
         SwitchPage("chat");
+
+        // Reveal the selected tab. Try now (covers clicking an already-laid-out tab) and again when
+        // the strip re-lays-out (covers a just-added agent, whose width/extent settle a frame later,
+        // via TabStrip_SizeChanged). Pending stays set until the tab is actually laid out.
+        _scrollToSelectedPending = true;
+        DispatcherQueue.TryEnqueue(TryScrollToSelected);
     }
+
+    private bool _scrollToSelectedPending;
+
+    // Scroll the strip so the selected tab is fully visible — a manual ChangeView so a newly created
+    // (last) tab scrolls ALL THE WAY to the end. StartBringIntoView only did a minimal scroll and ran
+    // before the extent settled, so it stopped short. No-op once the tab is visible; stays pending
+    // (retried on the next strip SizeChanged) while the tab isn't laid out yet (ActualWidth == 0).
+    private void TryScrollToSelected()
+    {
+        if (!_scrollToSelectedPending || _selected is null) return;
+        var header = _selected.Header;
+        if (header.ActualWidth <= 0) return;   // not laid out yet — retry on the next SizeChanged
+
+        double left = header.TransformToVisual(TabStrip)
+                            .TransformPoint(new Windows.Foundation.Point(0, 0)).X;
+        double right = left + header.ActualWidth;
+        double viewLeft = TabScroller.HorizontalOffset;
+        double viewRight = viewLeft + TabScroller.ViewportWidth;
+        const double pad = 8;
+
+        if (right > viewRight)                 // off the right (e.g. a just-added last tab)
+            TabScroller.ChangeView(right - TabScroller.ViewportWidth + pad, null, null);
+        else if (left < viewLeft)              // off the left
+            TabScroller.ChangeView(Math.Max(0, left - pad), null, null);
+
+        _scrollToSelectedPending = false;
+    }
+
+    private void TabStrip_SizeChanged(object sender, SizeChangedEventArgs e) => TryScrollToSelected();
 
     private void CloseTab(ChatTabEntry entry)
     {
@@ -959,6 +1002,43 @@ public sealed partial class MainWindow : Window
         }
 
         RefreshNavIcons();
+        LayoutTabStrip();
+    }
+
+    // Tabs stay a comfortable width when there's room, and only shrink once enough agents are open
+    // that they'd otherwise overflow — down to a floor, past which the strip scrolls instead.
+    private const double TabComfortableWidth = 200;
+    private const double TabMinWidth = 104;
+
+    private void LayoutTabStrip()
+    {
+        int count = _tabs.Count;
+        if (count == 0) return;
+
+        // The visible strip is the scroller's viewport; a later SizeChanged fixes up the first
+        // pass if it hasn't been measured yet (ActualWidth == 0 during early layout).
+        double viewport = TabScroller.ActualWidth;   // tabs only — the add button now lives outside
+        if (viewport <= 0) return;
+
+        double spacing = 4 * Math.Max(0, count - 1);         // 4px between adjacent tabs
+        double avail = viewport - spacing - 8;               // margin so rounding never forces a scrollbar
+
+        double per = Math.Max(TabMinWidth, Math.Min(TabComfortableWidth, avail / count));
+        foreach (var tab in _tabs)
+            tab.Header.Width = per;
+    }
+
+    private void TabScroller_SizeChanged(object sender, SizeChangedEventArgs e) => LayoutTabStrip();
+
+    // Mouse wheel scrolls the strip horizontally when there are more tabs than fit — a convenience
+    // on top of the visible scrollbar (which sits in a reserved bottom lane so it never overlaps
+    // the tabs). Touchpad / touch horizontal scrolling works natively.
+    private void TabScroller_PointerWheelChanged(object sender, PointerRoutedEventArgs e)
+    {
+        if (TabScroller.ScrollableWidth <= 0) return;   // everything fits; nothing to scroll
+        var delta = e.GetCurrentPoint(TabScroller).Properties.MouseWheelDelta;
+        TabScroller.ChangeView(TabScroller.HorizontalOffset - delta, null, null);
+        e.Handled = true;
     }
 
     private void ApprovalToast_Tapped(object sender, TappedRoutedEventArgs e)
