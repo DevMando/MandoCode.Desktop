@@ -1030,34 +1030,42 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
             ApprovalDetail.Text = request.Detail ?? "";
             ApprovalDetail.Visibility = string.IsNullOrEmpty(request.Detail) ? Visibility.Collapsed : Visibility.Visible;
 
+            // Pull the shared, theme-mutated brushes from app resources so the approval diff
+            // follows the active theme (these used to be hardcoded LightSkyBlue/red/gray, which
+            // stayed blue under every theme — jarring under E-Ink). Mirrors the transcript's
+            // diff coloring: command/added -> sky, removed -> red, context -> dim.
+            var skyBrush = (SolidColorBrush)Application.Current.Resources["MandoSkyBrush"];
+            var redBrush = (SolidColorBrush)Application.Current.Resources["MandoRedBrush"];
+            var dimBrush = (SolidColorBrush)Application.Current.Resources["MandoDimBrush"];
+
             var rows = new List<DiffLineVm>();
             if (request.CommandText != null)
             {
                 rows.Add(new DiffLineVm
                 {
                     Text = $"$ {request.CommandText}",
-                    Brush = new SolidColorBrush(Colors.LightSkyBlue)
+                    Brush = skyBrush
                 });
             }
             if (request.DiffLines != null)
             {
                 foreach (var line in request.DiffLines)
                 {
-                    var (prefix, color) = line.LineType switch
+                    var (prefix, brush) = line.LineType switch
                     {
-                        DiffLineType.Added => ("+ ", Colors.LightSkyBlue),
-                        DiffLineType.Removed => ("- ", Windows.UI.Color.FromArgb(255, 224, 82, 82)),
-                        _ => ("  ", Colors.Gray)
+                        DiffLineType.Added => ("+ ", skyBrush),
+                        DiffLineType.Removed => ("- ", redBrush),
+                        _ => ("  ", dimBrush)
                     };
                     var num = (line.LineType == DiffLineType.Added ? line.NewLineNumber : line.OldLineNumber);
                     rows.Add(new DiffLineVm
                     {
                         Text = $"{(num.HasValue ? num.Value.ToString().PadLeft(4) : "    ")} {prefix}{line.Content}",
-                        Brush = new SolidColorBrush(color)
+                        Brush = brush
                     });
                 }
                 if (request.DiffSummary != null)
-                    rows.Add(new DiffLineVm { Text = "", Brush = new SolidColorBrush(Colors.Gray) });
+                    rows.Add(new DiffLineVm { Text = "", Brush = dimBrush });
             }
             ApprovalDiffList.ItemsSource = rows;
             ApprovalBodyScroll.Visibility = rows.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
