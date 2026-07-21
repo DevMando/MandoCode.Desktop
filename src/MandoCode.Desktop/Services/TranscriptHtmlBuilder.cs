@@ -49,7 +49,7 @@ public sealed class TranscriptHtmlBuilder
     }
 
     public string UserEcho(string text) =>
-        $"<div class=\"user-echo\">&gt; {E(text)}</div>";
+        $"<div class=\"user-echo\"><span class=\"ue-sigil\">&gt;</span> {E(text)}</div>";
 
     public string AssistantCard(string markdown) =>
         $"<div class=\"assistant\"><div class=\"assistant-label\">MandoCode</div><div class=\"md\">{FromMarkdown(markdown)}</div></div>";
@@ -359,7 +359,19 @@ public sealed class TranscriptHtmlBuilder
       /* tube-edge vignette */
       radial-gradient(ellipse 100% 100% at center, transparent 60%, rgba(0,0,0,0.55) 100%);
   }
-  .user-echo { color: var(--gold); font-weight: 600; white-space: pre-wrap; margin-top: 14px; }
+  /* User prompts: gold marks the user's voice, at normal weight so an 8-line clamped
+     paste reads as text, not a block of emphasis. Only the sigil stays semibold. */
+  .user-echo { color: var(--gold); white-space: pre-wrap; margin-top: 14px; }
+  .ue-sigil { font-weight: 600; }
+  /* Long prompts clamp to ~8 lines (JS adds the class only when the echo is actually tall).
+     The fade is a mask on the text itself — not an overlay painted in a background color —
+     so it works over chat-background images and every theme. */
+  .user-echo.clamped { max-height: 11.5em; overflow: hidden;
+    -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 2.2em), transparent);
+    mask-image: linear-gradient(to bottom, black calc(100% - 2.2em), transparent); }
+  .ue-toggle { display: block; background: none; border: none; cursor: pointer;
+    color: var(--dim); font-size: 11px; font-family: "Segoe UI", sans-serif; padding: 1px 0; }
+  .ue-toggle:hover { color: var(--fg); }
   .assistant { margin-top: 4px; position: relative; }
   .assistant-label { color: var(--green); font-weight: 700; margin-bottom: 2px; }
   .md p { margin: 6px 0; }
@@ -673,7 +685,13 @@ public sealed class TranscriptHtmlBuilder
     });
   }
   function doCopy(text, chip) {
-    window.chrome.webview.postMessage('copy:' + text);
+    // In the app, the host writes the clipboard (copy: message). In an EXPORTED transcript
+    // there is no webview bridge, so fall back to the browser clipboard API — file:// pages
+    // are a secure context in Chromium/Firefox, and this runs on a user gesture.
+    if (window.chrome && window.chrome.webview)
+      window.chrome.webview.postMessage('copy:' + text);
+    else if (navigator.clipboard)
+      navigator.clipboard.writeText(text).catch(function () { });
     chip.classList.add('copied');
     setTimeout(function () { chip.classList.remove('copied'); }, 1400);
   }
@@ -682,26 +700,33 @@ public sealed class TranscriptHtmlBuilder
       pre.setAttribute('data-copy', '1');
       const chip = document.createElement('button');
       chip.className = 'copy-chip';
-      chip.addEventListener('click', function (ev) {
-        ev.stopPropagation();
-        const code = pre.querySelector('code');
-        doCopy(code ? code.innerText : pre.innerText, chip);
-      });
-      pre.appendChild(chip);
+      pre.appendChild(chip);      // click is handled by the delegated .copy-chip handler
     });
     log.querySelectorAll('.assistant:not([data-copy])').forEach(function (card) {
       card.setAttribute('data-copy', '1');
-      const md = card.querySelector('.md');
-      if (!md) return;
+      if (!card.querySelector('.md')) return;
       const chip = document.createElement('button');
       chip.className = 'copy-chip';
-      chip.addEventListener('click', function (ev) {
-        ev.stopPropagation();
-        doCopy(md.innerText, chip);
-      });
       card.appendChild(chip);
     });
   }
+  // Delegated so copy still works in exported transcripts (see the toggle handlers below).
+  document.addEventListener('click', function (e) {
+    const chip = e.target.closest('.copy-chip');
+    if (!chip) return;
+    e.stopPropagation();
+    const pre = chip.closest('pre');
+    let text = '';
+    if (pre) {
+      const code = pre.querySelector('code');
+      text = code ? code.innerText : pre.innerText;
+    } else {
+      const card = chip.closest('.assistant');
+      const md = card && card.querySelector('.md');
+      if (md) text = md.innerText;
+    }
+    doCopy(text, chip);
+  });
 
   // --- emoji reactions on assistant responses: hover ghost → picker card → pills ---
   // Toggling posts react:/unreact: with a JSON payload; the snippet lets the preamble
@@ -855,15 +880,50 @@ public sealed class TranscriptHtmlBuilder
         const b = document.createElement('button');
         b.className = 'expand-btn ' + side;
         b.title = 'Maximize / minimize this block';
-        b.addEventListener('click', function (ev) {
-          ev.stopPropagation();
-          setCollapsed(pre, !pre.classList.contains('collapsed'));
-        });
-        panel.appendChild(b);
+        panel.appendChild(b);   // click is handled by the delegated .expand-btn handler
       });
       setCollapsed(pre, true);                                          // start minimized
     });
   }
+
+  // --- clamp long user prompts: a big pasted prompt (log, file contents) otherwise
+  // dominates the scrollback, so echoes taller than ~9 lines clamp to ~8 with a toggle ---
+  function addEchoClamps() {
+    log.querySelectorAll('.user-echo:not([data-clamp])').forEach(function (echo) {
+      echo.setAttribute('data-clamp', '1');
+      const lh = parseFloat(getComputedStyle(echo).lineHeight) || 20;
+      if (echo.scrollHeight <= lh * 9 + 6) return;   // short enough — no chrome
+      // Count hidden lines while the echo is still unclamped; ~8 lines stay visible.
+      const hidden = Math.max(1, Math.round(echo.scrollHeight / lh) - 8);
+      echo.classList.add('clamped');
+      const btn = document.createElement('button');
+      btn.className = 'ue-toggle';
+      // The expanded label lives in a data attribute (not a closure) so it survives
+      // outerHTML serialization when the transcript is exported.
+      btn.dataset.more = 'Show more (' + hidden + ' more line' + (hidden === 1 ? '' : 's') + ')';
+      btn.textContent = btn.dataset.more;
+      echo.after(btn);
+    });
+  }
+  // Toggles are DELEGATED document handlers, not per-button listeners: exporting the
+  // transcript serializes outerHTML, which keeps the buttons but drops bound listeners.
+  // These handlers re-register when the exported page runs this script on load, so
+  // clamped prompts and collapsed panels stay expandable in the saved file.
+  document.addEventListener('click', function (e) {
+    const btn = e.target.closest('.ue-toggle');
+    if (!btn) return;
+    const echo = btn.previousElementSibling;
+    if (!echo || !echo.classList.contains('user-echo')) return;
+    const clamped = echo.classList.toggle('clamped');
+    btn.textContent = clamped ? btn.dataset.more : 'Show less';
+  });
+  document.addEventListener('click', function (e) {
+    const b = e.target.closest('.expand-btn:not(.web-collapse)');
+    if (!b) return;
+    const panel = b.closest('.panel');
+    const pre = panel && panel.querySelector('pre.collapsible');
+    if (pre) setCollapsed(pre, !pre.classList.contains('collapsed'));
+  });
 
   window.__append = function (html) {
     const nearBottom = (window.innerHeight + window.scrollY) >= (document.body.scrollHeight - 60);
@@ -874,6 +934,7 @@ public sealed class TranscriptHtmlBuilder
     addCopyChips();
     addReactionGhosts();
     addCollapsers();
+    addEchoClamps();
     if (nearBottom) window.scrollTo(0, document.body.scrollHeight);
     updatePill();
   };
@@ -885,6 +946,18 @@ public sealed class TranscriptHtmlBuilder
     e.preventDefault();
     window.chrome.webview.postMessage('open-file:' + link.getAttribute('data-file'));
   });
+
+  // --- drag hand-off: Chromium owns drags over the transcript surface, so XAML never sees
+  // them. On dragenter we alert the host, which mounts its drop overlay over this WebView;
+  // the OS then retargets the drag (and the drop, with real file paths) to that overlay.
+  // preventDefault on dragover/drop is the safety net for a drop that lands in the instant
+  // before the overlay mounts — without it the browser would navigate to the dropped file.
+  window.addEventListener('dragenter', function (e) {
+    e.preventDefault();
+    if (window.chrome && window.chrome.webview) window.chrome.webview.postMessage('drag-enter');
+  });
+  window.addEventListener('dragover', function (e) { e.preventDefault(); });
+  window.addEventListener('drop', function (e) { e.preventDefault(); });
 
   // Web fetch/search preview toggle: the inline chip opens the hidden detail box; the box's own
   // Collapse button (and the chip again) closes it. Chip label and box visibility stay in sync.

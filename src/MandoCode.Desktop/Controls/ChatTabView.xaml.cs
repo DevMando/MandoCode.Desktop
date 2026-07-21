@@ -9,6 +9,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.System;
 
 namespace MandoCode.Desktop;
@@ -205,6 +206,8 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
                     HandleReaction(msg["react:".Length..], add: true);
                 else if (msg != null && msg.StartsWith("unreact:", StringComparison.Ordinal))
                     HandleReaction(msg["unreact:".Length..], add: false);
+                else if (msg == "drag-enter")
+                    ShowDropOverlay();   // a drag crossed onto the WebView surface — see DropOverlay
             };
 
             // Serve bundled web assets (highlight.js) to the transcript document.
@@ -699,6 +702,322 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
             _transcript.Append(_html.Success("✓ Ready."));
         });
         UpdateHeader();
+        if (_explorerOpen) BuildExplorerRoot();   // the open tree must follow the new root
+    }
+
+    // ============================================================
+    // File explorer panel
+    // ============================================================
+
+    private bool _explorerOpen;
+    private string? _explorerRoot;   // root the tree was last built for
+
+    private void ExplorerButton_Click(object sender, RoutedEventArgs e) => ToggleExplorer(!_explorerOpen);
+    private void ExplorerClose_Click(object sender, RoutedEventArgs e) => ToggleExplorer(false);
+    private void ExplorerRefresh_Click(object sender, RoutedEventArgs e) => BuildExplorerRoot();
+
+    private void ChatRoot_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (_explorerOpen) SizeExplorer();
+    }
+
+    private void SizeExplorer()
+    {
+        // Default ~20% of the window, clamped so the tree stays usable on small windows and
+        // doesn't waste half a 4K monitor on the other end. Once the user has dragged the
+        // splitter, their width wins (re-clamped so a shrunken window can't strand the panel).
+        var w = ChatRoot.ActualWidth;
+        if (w <= 0) return;
+        var target = _explorerUserWidth ?? Math.Clamp(w * 0.20, 220, 460);
+        ExplorerPanel.Width = Math.Clamp(target, MinExplorerWidth, MaxExplorerWidth());
+    }
+
+    private const double MinExplorerWidth = 180;
+    private double MaxExplorerWidth() => Math.Max(MinExplorerWidth, ChatRoot.ActualWidth * 0.6);
+
+    // --- splitter drag (same pointer-capture pattern as MainWindow's terminal splitter) ---
+
+    private double? _explorerUserWidth;   // set on first drag; SizeExplorer defers to it
+    private bool _draggingExplorer;
+    private double _explorerDragStartWidth;
+    private double _explorerDragStartX;
+
+    private void ExplorerSplitter_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        _draggingExplorer = true;
+        _explorerDragStartWidth = ExplorerPanel.ActualWidth;
+        _explorerDragStartX = e.GetCurrentPoint(ChatRoot).Position.X;   // stable frame while the grip moves
+        ((UIElement)sender).CapturePointer(e.Pointer);
+    }
+
+    private void ExplorerSplitter_PointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_draggingExplorer) return;
+        // Dragging left grows the panel; right shrinks it.
+        var delta = e.GetCurrentPoint(ChatRoot).Position.X - _explorerDragStartX;
+        var next = Math.Clamp(_explorerDragStartWidth - delta, MinExplorerWidth, MaxExplorerWidth());
+        ExplorerPanel.Width = next;
+        _explorerUserWidth = next;
+    }
+
+    private void ExplorerSplitter_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_draggingExplorer) return;
+        _draggingExplorer = false;
+        ((UIElement)sender).ReleasePointerCapture(e.Pointer);
+    }
+
+    private void ToggleExplorer(bool open)
+    {
+        if (open == _explorerOpen) return;
+        _explorerOpen = open;
+
+        // Docked, not overlaid: the panel sits in the transcript row's second column, so
+        // showing it RESIZES the transcript (text stays fully readable) and collapsing it
+        // gives the width back. No slide animation — animating a WebView2's width forces
+        // continuous relayout of the browser surface, and instant dock/undock is how
+        // solution-explorer-style panels behave anyway.
+        if (open)
+        {
+            SizeExplorer();
+            // (Re)build on open when the tab's root changed since the tree was built — the
+            // panel keeps its expansion state across close/open within the same root.
+            if (_explorerRoot != _controller.ProjectRootPath) BuildExplorerRoot();
+            ExplorerPanel.Visibility = Visibility.Visible;
+            ExplorerSplitter.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            ExplorerPanel.Visibility = Visibility.Collapsed;
+            ExplorerSplitter.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void BuildExplorerRoot()
+    {
+        _explorerRoot = _controller.ProjectRootPath;
+        ExplorerRootText.Text = Path.GetFileName(Path.TrimEndingDirectorySeparator(_explorerRoot));
+        ToolTipService.SetToolTip(ExplorerRootText, _explorerRoot);
+        ExplorerTree.RootNodes.Clear();
+        foreach (var node in LoadChildNodes(_explorerRoot)) ExplorerTree.RootNodes.Add(node);
+    }
+
+    /// <summary>One directory level, folders first then files, both alphabetical. Unreadable
+    /// or vanished directories render as empty rather than throwing.</summary>
+    private List<TreeViewNode> LoadChildNodes(string dir)
+    {
+        var root = _explorerRoot ?? _controller.ProjectRootPath;
+        var nodes = new List<TreeViewNode>();
+        string[] dirs, files;
+        try
+        {
+            dirs = Directory.GetDirectories(dir);
+            files = Directory.GetFiles(dir);
+        }
+        catch (Exception) { return nodes; }
+        Array.Sort(dirs, StringComparer.OrdinalIgnoreCase);
+        Array.Sort(files, StringComparer.OrdinalIgnoreCase);
+        foreach (var d in dirs)
+            nodes.Add(new TreeViewNode { Content = ExplorerItem.ForFolder(d, root), HasUnrealizedChildren = true });
+        foreach (var f in files)
+            nodes.Add(new TreeViewNode { Content = ExplorerItem.ForFile(f, root) });
+        return nodes;
+    }
+
+    /// <summary>The row's @ button: tags the file/folder in the prompt — identical result to
+    /// dragging the row onto the input box.</summary>
+    private void ExplorerTag_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is TreeViewNode { Content: ExplorerItem item })
+            InsertFileTokens(new[] { item.FullPath });
+    }
+
+    private void ExplorerTag_PointerEntered(object sender, PointerRoutedEventArgs e)
+        => ((UIElement)sender).Opacity = 1;
+
+    private void ExplorerTag_PointerExited(object sender, PointerRoutedEventArgs e)
+        => ((UIElement)sender).Opacity = 0.45;
+
+    private void ExplorerTree_Expanding(TreeView sender, TreeViewExpandingEventArgs args)
+    {
+        if (!args.Node.HasUnrealizedChildren) return;
+        args.Node.HasUnrealizedChildren = false;
+        if (args.Node.Content is not ExplorerItem item || !item.IsDirectory) return;
+        foreach (var child in LoadChildNodes(item.FullPath)) args.Node.Children.Add(child);
+    }
+
+    private void ExplorerTree_ItemInvoked(TreeView sender, TreeViewItemInvokedEventArgs args)
+    {
+        // Single click: folders toggle, files only select. Opening is double-click territory
+        // (ExplorerTree_DoubleTapped) — a stray single click must never launch an app.
+        if (args.InvokedItem is TreeViewNode { Content: ExplorerItem { IsDirectory: true } } node)
+            node.IsExpanded = !node.IsExpanded;
+    }
+
+    private void ExplorerTree_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+    {
+        // The template's elements inherit the row's TreeViewNode as DataContext.
+        if ((e.OriginalSource as FrameworkElement)?.DataContext is not TreeViewNode node ||
+            node.Content is not ExplorerItem { IsDirectory: false } item)
+            return;
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = item.FullPath,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            _transcript.Append(_html.Warn($"Couldn't open file: {ex.Message}"));
+        }
+    }
+
+    // ============================================================
+    // Drag & drop @-references
+    // ============================================================
+
+    /// <summary>Dragging explorer rows carries their full paths as text — the input box's
+    /// Drop handler recognizes existing paths and converts them to @tokens.</summary>
+    private void ExplorerTree_DragItemsStarting(TreeView sender, TreeViewDragItemsStartingEventArgs args)
+    {
+        var paths = args.Items.OfType<TreeViewNode>()
+            .Select(n => n.Content).OfType<ExplorerItem>()
+            .Select(i => i.FullPath).ToList();
+        if (paths.Count == 0) { args.Cancel = true; return; }
+        args.Data.SetText(string.Join("\n", paths));
+        args.Data.RequestedOperation = DataPackageOperation.Copy;
+    }
+
+    private void InputBox_DragOver(object sender, DragEventArgs e)
+    {
+        if (e.DataView.Contains(StandardDataFormats.StorageItems) ||
+            e.DataView.Contains(StandardDataFormats.Text))
+        {
+            e.AcceptedOperation = DataPackageOperation.Copy;
+            e.Handled = true;
+        }
+    }
+
+    // --- drop-to-tag overlay choreography ---
+    // Show when a drag enters the tab: over XAML chrome that's ChatRoot's DragEnter; over the
+    // WebView it's the transcript script's 'drag-enter' message (Chromium owns drags there).
+    // Hide when the drag leaves the overlay/tab or when any drop completes. Moving between
+    // those regions can flicker the overlay off/on for a frame — harmless.
+
+    private void ShowDropOverlay() => DropOverlay.Visibility = Visibility.Visible;
+    private void HideDropOverlay() => DropOverlay.Visibility = Visibility.Collapsed;
+
+    private void ChatRoot_DragEnter(object sender, DragEventArgs e)
+    {
+        if (e.DataView.Contains(StandardDataFormats.StorageItems) ||
+            e.DataView.Contains(StandardDataFormats.Text))
+            ShowDropOverlay();
+    }
+
+    private void ChatRoot_DragLeave(object sender, DragEventArgs e) => HideDropOverlay();
+    private void DropOverlay_DragLeave(object sender, DragEventArgs e) => HideDropOverlay();
+
+    private void DropOverlay_DragOver(object sender, DragEventArgs e)
+    {
+        if (e.DataView.Contains(StandardDataFormats.StorageItems) ||
+            e.DataView.Contains(StandardDataFormats.Text))
+        {
+            e.AcceptedOperation = DataPackageOperation.Copy;
+            e.Handled = true;
+        }
+    }
+
+    private async void DropOverlay_Drop(object sender, DragEventArgs e)
+    {
+        HideDropOverlay();
+        await HandleDropAsync(e);
+    }
+
+    private async void InputBox_Drop(object sender, DragEventArgs e)
+    {
+        HideDropOverlay();
+        await HandleDropAsync(e);
+    }
+
+    /// <summary>Shared drop handling for the input box and the drop-to-tag overlay: paths
+    /// become @tokens, ordinary text inserts as text.</summary>
+    private async Task HandleDropAsync(DragEventArgs e)
+    {
+        e.Handled = true;
+        var deferral = e.GetDeferral();
+        try
+        {
+            if (e.DataView.Contains(StandardDataFormats.StorageItems))
+            {
+                // Shell drop (Windows Explorer): real files/folders with paths.
+                var items = await e.DataView.GetStorageItemsAsync();
+                InsertFileTokens(items.Select(i => i.Path).Where(p => !string.IsNullOrEmpty(p)));
+            }
+            else if (e.DataView.Contains(StandardDataFormats.Text))
+            {
+                // Text drop: explorer-tree rows arrive as newline-joined full paths. If every
+                // line is an existing path, tokenize; otherwise it's ordinary dragged text.
+                var text = await e.DataView.GetTextAsync();
+                var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (lines.Length > 0 && lines.All(l => File.Exists(l) || Directory.Exists(l)))
+                    InsertFileTokens(lines);
+                else
+                    InsertAtCaret(text);
+            }
+        }
+        catch (Exception ex)
+        {
+            _transcript.Append(_html.Warn($"Couldn't read the dropped item: {ex.Message}"));
+        }
+        finally
+        {
+            deferral.Complete();
+        }
+    }
+
+    /// <summary>Converts full paths into the same @tokens the autocomplete inserts: project-root
+    /// relative, forward slashes, trailing '/' for folders. Items outside this tab's project
+    /// root can't be resolved by the @ pipeline, so they're skipped with a warning.</summary>
+    private void InsertFileTokens(IEnumerable<string> fullPaths)
+    {
+        var root = _controller.ProjectRootPath;
+        var rootPrefix = Path.TrimEndingDirectorySeparator(root) + Path.DirectorySeparatorChar;
+        var tokens = new List<string>();
+        var outside = new List<string>();
+
+        foreach (var raw in fullPaths)
+        {
+            string full;
+            try { full = Path.GetFullPath(raw); }
+            catch { continue; }
+            if (!full.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                outside.Add(full);
+                continue;
+            }
+            var rel = Path.GetRelativePath(root, full).Replace('\\', '/');
+            tokens.Add("@" + rel + (Directory.Exists(full) ? "/" : ""));
+        }
+
+        if (tokens.Count > 0)
+            InsertAtCaret(string.Join(" ", tokens) + " ");
+        if (outside.Count > 0)
+            _transcript.Append(_html.Warn(
+                $"Skipped {outside.Count} dropped item{(outside.Count == 1 ? "" : "s")} outside this tab's project folder — @ references only work under {root}"));
+    }
+
+    /// <summary>Inserts at the caret with token-safe spacing: a separating space is added when
+    /// the caret touches non-whitespace, so a dropped @token never glues onto existing text.</summary>
+    private void InsertAtCaret(string insert)
+    {
+        var text = InputBox.Text;
+        var caret = Math.Clamp(InputBox.SelectionStart, 0, text.Length);
+        if (caret > 0 && !char.IsWhiteSpace(text[caret - 1])) insert = " " + insert;
+        InputBox.Text = text[..caret] + insert + text[caret..];
+        InputBox.SelectionStart = caret + insert.Length;
+        InputBox.Focus(FocusState.Programmatic);
     }
 
     // ============================================================
@@ -1310,4 +1629,35 @@ public sealed class ModelItem
     public string Badge { get; }
     public Brush BadgeForeground { get; }
     public Brush BadgeBackground { get; }
+}
+
+/// <summary>One row in the file-explorer tree. Folder nodes are created with unrealized
+/// children and lazy-load their contents on first expand (ChatTabView.ExplorerTree_Expanding).</summary>
+public sealed class ExplorerItem
+{
+    public string Name { get; private init; } = "";
+    public string FullPath { get; private init; } = "";
+    public bool IsDirectory { get; private init; }
+
+    /// <summary>The exact @token the row produces (root-relative, forward slashes, trailing
+    /// '/' on folders) \u2014 shown in the tag button's tooltip so hovering teaches the @ syntax.</summary>
+    public string Token { get; private init; } = "";
+
+    public string TagTooltip => $"Tag in prompt \u2014 inserts {Token}";
+
+    public string Glyph => IsDirectory ? "\uE8B7" : "\uE8A5";   // folder / document
+
+    /// <summary>Resolved per-realization from app resources, so icons pick up live theme
+    /// switches the next time rows are created (matching how transcript colors retheme).</summary>
+    public Brush? IconBrush =>
+        Application.Current.Resources[IsDirectory ? "MandoGoldBrush" : "MandoDimBrush"] as Brush;
+
+    public static ExplorerItem ForFolder(string path, string root) =>
+        new() { Name = Path.GetFileName(path), FullPath = path, IsDirectory = true, Token = "@" + Rel(path, root) + "/" };
+
+    public static ExplorerItem ForFile(string path, string root) =>
+        new() { Name = Path.GetFileName(path), FullPath = path, IsDirectory = false, Token = "@" + Rel(path, root) };
+
+    private static string Rel(string path, string root) =>
+        Path.GetRelativePath(root, path).Replace('\\', '/');
 }
