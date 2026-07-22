@@ -378,14 +378,22 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <FontIcon Glyph="&#xE722;" FontSize="14" VerticalAlignment="Center"
                               Foreground="{StaticResource MandoAccentBrush}"/>
                     <TextBlock x:Name="SnapshotNotifyText" Grid.Column="1" VerticalAlignment="Center"
                                FontSize="13" TextTrimming="CharacterEllipsis"/>
-                    <Button Grid.Column="2" Content="Create" Padding="12,4"
-                            Click="SnapshotNotifyCreate_Click" Style="{StaticResource AccentButtonStyle}"/>
-                    <Button Grid.Column="3" Click="SnapshotOfferDismiss_Click" Padding="6"
+                    <!-- Model switches only (hidden for manual snapshot offers): continue the
+                         SAME conversation on the new model, verbatim — memory, not a recap. -->
+                    <Button x:Name="SnapshotKeepMemoryButton" Grid.Column="2" Content="Keep memory"
+                            Padding="12,4" Visibility="Collapsed" Click="SnapshotKeepMemory_Click"
+                            Style="{StaticResource AccentButtonStyle}"
+                            ToolTipService.ToolTip="Continue this conversation on the new model with full memory — nothing summarized, nothing lost"/>
+                    <Button Grid.Column="3" Content="Snapshot" Padding="12,4"
+                            Click="SnapshotNotifyCreate_Click"
+                            ToolTipService.ToolTip="Save a summarized, portable recap you can import into any agent"/>
+                    <Button Grid.Column="4" Click="SnapshotOfferDismiss_Click" Padding="6"
                             Background="Transparent" BorderThickness="0"
                             ToolTipService.ToolTip="Dismiss — the conversation won't be saved">
                         <FontIcon Glyph="&#xE711;" FontSize="12"/>

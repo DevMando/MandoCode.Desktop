@@ -1,19 +1,51 @@
+using System.Text.Json;
+
 namespace MandoCode.Desktop.Services;
 
 /// <summary>
 /// App-wide store of <see cref="ContextSnapshot"/>s — one list shared by every tab, so a snapshot
 /// captured while Agent 1 switches models can be imported into a brand-new tab running a capable
-/// model. Session-scoped: it lives for the life of the process and is not persisted (matching the
-/// app's "settings reset on launch" stance; disk persistence is a possible follow-up).
+/// model. PERSISTED: loaded from disk at construction and rewritten on every add/remove
+/// (best-effort — a failed write never breaks the in-memory store), so snapshots survive
+/// app restarts.
 ///
 /// <see cref="Changed"/> can fire on a background thread (captures happen during a model switch),
 /// so subscribers must marshal to the UI thread themselves.
 /// </summary>
 public sealed class SnapshotStore
 {
+    private static string StorePath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "MandoCode.Desktop", "snapshots.json");
+
     private readonly object _lock = new();
     private readonly List<ContextSnapshot> _items = new();
     private int _nextId;
+
+    public SnapshotStore()
+    {
+        try
+        {
+            if (!File.Exists(StorePath)) return;
+            var loaded = JsonSerializer.Deserialize<List<ContextSnapshot>>(File.ReadAllText(StorePath));
+            if (loaded == null) return;
+            _items.AddRange(loaded);
+            _nextId = _items.Count == 0 ? 0 : _items.Max(s => s.Id);
+        }
+        catch { /* corrupt/unreadable store — start empty rather than crash the app */ }
+    }
+
+    private void Persist()
+    {
+        try
+        {
+            List<ContextSnapshot> copy;
+            lock (_lock) copy = _items.ToList();
+            Directory.CreateDirectory(Path.GetDirectoryName(StorePath)!);
+            File.WriteAllText(StorePath, JsonSerializer.Serialize(copy));
+        }
+        catch { /* persistence is best-effort; the in-memory store is still correct */ }
+    }
 
     /// <summary>Raised after any add/remove. May arrive on a background thread.</summary>
     public event Action? Changed;
@@ -30,7 +62,7 @@ public sealed class SnapshotStore
     }
 
     public ContextSnapshot Add(string originModel, string summarizerModel, string recap, int messageCount,
-        string? name = null)
+        string? name = null, string? projectRoot = null)
     {
         ContextSnapshot snapshot;
         lock (_lock)
@@ -44,9 +76,11 @@ public sealed class SnapshotStore
                 Recap = recap,
                 MessageCount = messageCount,
                 Name = string.IsNullOrWhiteSpace(name) ? null : name.Trim(),
+                ProjectRoot = projectRoot,
             };
             _items.Insert(0, snapshot);   // newest first
         }
+        Persist();
         Changed?.Invoke();
         return snapshot;
     }
@@ -55,6 +89,8 @@ public sealed class SnapshotStore
     {
         bool removed;
         lock (_lock) removed = _items.Remove(snapshot);
-        if (removed) Changed?.Invoke();
+        if (!removed) return;
+        Persist();
+        Changed?.Invoke();
     }
 }

@@ -37,6 +37,11 @@ public sealed class AgentSession
     /// <summary>Tab-strip label. Defaults to the project folder's leaf name.</summary>
     public string Title { get; set; }
 
+    /// <summary>Durable identity across app launches (unlike <see cref="Id"/>, a process-local
+    /// counter). Names this session's transcript journal on disk; a restored tab passes its
+    /// saved key back in so it reattaches to its own history.</summary>
+    public string PersistKey { get; }
+
     // ---- Per-session graph ----
     public MandoCodeConfig Config { get; }
     public ProjectRootAccessor ProjectRoot { get; }
@@ -61,9 +66,11 @@ public sealed class AgentSession
         IServiceProvider globals,
         ConfigCoordinator configs,
         McpCoordinator mcp,
-        string projectRoot)
+        string projectRoot,
+        string? persistKey = null)
     {
         Id = Interlocked.Increment(ref _nextId);
+        PersistKey = string.IsNullOrWhiteSpace(persistKey) ? Guid.NewGuid().ToString("N") : persistKey;
 
         // Globals — shared with every other tab. The MCP manager comes from the coordinator that
         // owns it, not from DI, so every agent talks to the one set of server processes.
@@ -92,6 +99,15 @@ public sealed class AgentSession
 
         Busy = new BusyStateService();
         Transcript = new TranscriptWriter();
+        // Journal every transcript block as it's written (tier-2 session persistence).
+        // /clear also clears the on-disk history — cleared means cleared, both files.
+        Transcript.BlockAdded += htmlBlock => TranscriptJournal.Append(PersistKey, htmlBlock);
+        Transcript.Cleared += () =>
+        {
+            TranscriptJournal.Delete(PersistKey);
+            ConversationLog.Delete(PersistKey);
+            SessionHistoryStore.Delete(PersistKey);
+        };
         PromptGate = new ApprovalPromptGate();
         Approvals = new WinUiApprovalService(PromptGate, Busy, PlanHandoff, Transcript, html);
         Shell = new ShellRunner(ProjectRoot, Transcript, html);
@@ -101,6 +117,10 @@ public sealed class AgentSession
             mcpManager, McpGate, Skills, FileProvider, ProjectRoot,
             music, updateCheck, Approvals, Transcript, html, Busy, Shell, PromptGate,
             configs, mcp, Snapshots);
+
+        // Tier-3 persistence: plain-text turns feed the ConversationLog so a restored
+        // session can re-brief the model.
+        Controller.ConversationLogger = (role, text) => ConversationLog.Append(PersistKey, role, text);
     }
 
     /// <summary>Repoints this tab at a different project folder and rebuilds its AI session.</summary>

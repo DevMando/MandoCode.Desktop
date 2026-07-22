@@ -169,8 +169,12 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
 
             core.Settings.AreDefaultContextMenusEnabled = true;
             core.Settings.AreDevToolsEnabled = true;   // F12 in the transcript
-            core.NavigationCompleted += (_, _) =>
+            core.NavigationCompleted += async (_, _) =>
             {
+                // Replay the journaled transcript FIRST (while _webViewReady is still false,
+                // so live blocks keep queueing) — restored history must precede this
+                // launch's boot output.
+                await RestoreJournaledTranscriptAsync();
                 _webViewReady = true;
                 while (_pendingHtml.Count > 0) AppendHtml(_pendingHtml.Dequeue());
             };
@@ -348,6 +352,120 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
     // Transcript
     // ============================================================
 
+    private bool _journalRestored;
+
+    /// <summary>Replays this session's journaled transcript into the fresh WebView — via
+    /// ExecuteScript directly, NOT through TranscriptWriter (that would re-journal every
+    /// block). Chunked so a long history is a few script calls, not a thousand.</summary>
+    private async Task RestoreJournaledTranscriptAsync()
+    {
+        if (_journalRestored) return;
+        _journalRestored = true;
+        try
+        {
+            var blocks = TranscriptJournal.Load(Session.PersistKey)
+                .Where(b => !TranscriptHtmlBuilder.IsEphemeralStatus(b))
+                .ToList();
+            if (blocks.Count == 0) return;
+
+            var chunk = new System.Text.StringBuilder();
+            foreach (var block in blocks)
+            {
+                chunk.Append(block);
+                if (chunk.Length > 400_000)
+                {
+                    await AppendRawAsync(chunk.ToString());
+                    chunk.Clear();
+                }
+            }
+            if (chunk.Length > 0) await AppendRawAsync(chunk.ToString());
+
+            // Divider goes through AppendRawAsync too — journaling it would stack one
+            // divider per relaunch. Memory restore happens LATER (RestoreConversationMemoryAsync,
+            // called by MainWindow after any saved model is re-selected — a model switch clears
+            // history, so restoring memory here would risk it being wiped moments later).
+            _replayedBlockCount = blocks.Count;
+            await AppendRawAsync(_html.Dim("— restored from your previous session —"));
+        }
+        catch { /* a failed replay must never block a fresh conversation */ }
+    }
+
+    private int _replayedBlockCount;
+
+    /// <summary>
+    /// Gives the restored session its memory back, best fidelity first. Called by MainWindow
+    /// AFTER the tab's harness is initialized and any saved model re-selected. Cascade:
+    /// 1) full-fidelity harness history (the agent genuinely remembers, tool calls included);
+    /// 2) plain-text tail armed as imported background (briefed, not remembering);
+    /// 3) an honest amnesia note, so the model never has to guess about the replayed pixels.
+    /// Fresh tabs have none of the files and fall straight through as a no-op.
+    /// </summary>
+    public async Task RestoreConversationMemoryAsync()
+    {
+        try
+        {
+            // 1) Full fidelity: rehydrate the harness's ChatHistory verbatim.
+            var historyJson = SessionHistoryStore.Load(Session.PersistKey);
+            if (historyJson != null)
+            {
+                var restored = await Task.Run(() => Session.Ai.TryRestoreHistoryJson(historyJson));
+                if (restored > 0)
+                {
+                    await AppendRawAsync(_html.Dim(
+                        $"Conversation memory restored — the agent remembers this session ({restored} messages)."));
+                    return;
+                }
+            }
+
+            // 2) Tail-brief: bounded verbatim excerpt rides the next send as imported background.
+            var turns = ConversationLog.Load(Session.PersistKey);
+            if (turns.Count > 0)
+            {
+                const int budget = 12_000;
+                var picked = new List<ConversationTurn>();
+                var used = 0;
+                for (var i = turns.Count - 1; i >= 0; i--)
+                {
+                    if (picked.Count > 0 && used + turns[i].T.Length > budget) break;
+                    picked.Add(turns[i]);
+                    used += turns[i].T.Length;
+                }
+                picked.Reverse();
+
+                var sb = new System.Text.StringBuilder();
+                if (picked.Count < turns.Count)
+                    sb.Append($"(Older turns omitted — this is the most recent {picked.Count} of {turns.Count}.)\n\n");
+                foreach (var turn in picked)
+                    sb.Append(turn.R == "u" ? "User: " : "Assistant: ").Append(turn.T).Append("\n\n");
+
+                _controller.ArmRestoredConversation(
+                    "From \"your previous session in this tab\" (verbatim excerpt, not a recap):\n" +
+                    sb.ToString().TrimEnd());
+                await AppendRawAsync(_html.Dim(
+                    "Context re-armed — the agent will be briefed on this conversation with your next message."));
+                return;
+            }
+
+            // 3) Transcript was replayed but no memory of any kind exists — say so to the model.
+            if (_replayedBlockCount > 0)
+                _controller.NoteWorkspaceEvent(
+                    "This tab was restored from a previous session. The transcript the user sees above is a replay " +
+                    "for their benefit; it is NOT in your context and you have no memory of it. If the user refers " +
+                    "to earlier work, say so honestly and re-read files instead of guessing.");
+        }
+        catch { /* memory restore is best-effort; a fresh conversation always works */ }
+    }
+
+    private async Task AppendRawAsync(string html)
+    {
+        try
+        {
+            await TranscriptView.CoreWebView2.ExecuteScriptAsync(
+                $"window.__append({JsonSerializer.Serialize(html)})");
+        }
+        catch { }
+    }
+
     private async void AppendHtml(string html)
     {
         if (_shutDown) return;
@@ -397,7 +515,12 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         }
 
         // Stage 1: notification bar. Non-blocking — the user can ignore it and keep prompting.
-        SnapshotNotifyText.Text = $"Snapshot available — save the {offer.OriginModel} conversation.";
+        // "Keep memory" only appears when a switch actually cleared a conversation.
+        SnapshotKeepMemoryButton.Visibility = _controller.CanCarryMemory
+            ? Visibility.Visible : Visibility.Collapsed;
+        SnapshotNotifyText.Text = _controller.CanCarryMemory
+            ? $"Keep the {offer.OriginModel} conversation going, or save it as a snapshot?"
+            : $"Snapshot available — save the {offer.OriginModel} conversation.";
         SnapshotNotifyBar.Visibility = Visibility.Visible;
         SnapshotOfferCard.Visibility = Visibility.Collapsed;
         SnapshotOfferRoot.Visibility = Visibility.Visible;
@@ -534,6 +657,12 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
     private void SnapshotOfferDismiss_Click(object sender, RoutedEventArgs e)
         => _controller.DismissSnapshotOffer();
 
+    /// <summary>"Keep memory": verbatim continuation on the new model. On success the offer
+    /// clears itself (SnapshotOfferChanged → RefreshSnapshotOffer); on failure the bar stays
+    /// so Snapshot remains available as the salvage path.</summary>
+    private void SnapshotKeepMemory_Click(object sender, RoutedEventArgs e)
+        => _controller.TryCarryMemoryAcrossSwitch();
+
     /// <summary>Saves this tab's transcript as a standalone HTML page. Shared by the header save
     /// button and the tab's options menu.</summary>
     public async Task ExportTranscriptAsync()
@@ -628,6 +757,12 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
             // detecting OUTSIDE-the-conversation changes before the next send.
             _wsTracker.MarkCapturePending();
             RefreshBranchChip(force: true);
+
+            // Persist the model's full memory as of this turn (tier-3 full fidelity).
+            // Off-thread: serialization of a long history shouldn't touch UI latency.
+            var key = Session.PersistKey;
+            var ai = Session.Ai;
+            _ = Task.Run(() => SessionHistoryStore.Save(key, ai.ExportHistoryJson()));
         }
     }
 
