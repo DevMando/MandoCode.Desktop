@@ -113,10 +113,18 @@ public sealed class TranscriptHtmlBuilder
     public string CommandOutputCard(string command, string output, bool failed = false) =>
         $"<div class=\"panel\"><div class=\"panel-header {(failed ? "red" : "sky")}\">$ {E(command)}</div><pre class=\"cmd-out\">{E(output)}</pre></div>";
 
-    public string DiffCard(string relativePath, IReadOnlyList<DiffLine> lines, string summary)
+    /// <summary><paramref name="interactive"/> adds Undo-changes / Clear chips to the header —
+    /// used ONLY for diffs the user requested from the Changes tab, never for diffs the agent
+    /// produces (those are a record of what happened, not an offer to act).</summary>
+    public string DiffCard(string relativePath, IReadOnlyList<DiffLine> lines, string summary, bool interactive = false)
     {
         var sb = new StringBuilder();
-        sb.Append($"<div class=\"panel\"><div class=\"panel-header sky\">Diff: {FileLink(relativePath)}</div><pre class=\"diff\">");
+        var actions = interactive
+            ? $"<span class=\"dv-actions\"><button class=\"dv-btn dv-undo\" data-file=\"{E(relativePath)}\" " +
+              "title=\"Discard this file's uncommitted changes (asks first)\">↩ Undo changes</button>" +
+              "<button class=\"dv-btn dv-clear\" title=\"Remove this diff card from the transcript\">✕ Clear</button></span>"
+            : "";
+        sb.Append($"<div class=\"panel\"><div class=\"panel-header sky\">Diff: {FileLink(relativePath)}{actions}</div><pre class=\"diff\">");
         AppendDiffLines(sb, lines);
         sb.Append("</pre>");
         sb.Append($"<div class=\"panel-footer\">{E(summary)}</div></div>");
@@ -262,7 +270,7 @@ public sealed class TranscriptHtmlBuilder
     /// the same CSS variables when the theme changes at runtime.</summary>
     public static string BaseDocument(UiTheme theme) => $$"""
 <!DOCTYPE html>
-<html{{(theme.FlatMotion ? " data-flat=\"1\"" : "")}}{{(theme.Crt ? " data-crt=\"1\"" : "")}}>
+<html{{(theme.FlatMotion ? " data-flat=\"1\"" : "")}}{{(theme.Crt ? " data-crt=\"1\"" : "")}}{{(theme.Win98 ? " data-win98=\"1\"" : "")}}{{(ThemeManager.BoxedMessages ? " data-cards=\"1\"" : "")}}>
 <head>
 <meta charset="utf-8">
 <script src="https://mandocode.assets/highlight.min.js"></script>
@@ -359,6 +367,127 @@ public sealed class TranscriptHtmlBuilder
       /* tube-edge vignette */
       radial-gradient(ellipse 100% 100% at center, transparent 60%, rgba(0,0,0,0.55) 100%);
   }
+  /* ---- Boxed messages (Appearance toggle, theme-agnostic) ---------------------------
+     Each prompt/response on its own card surface: hard message boundaries and skimmable
+     rhythm for long sessions, versus the default flat terminal look. Only theme variables,
+     so every palette works. Excluded under W98 — its bevelled message windows are bespoke. */
+  /* Frosted glass: cards are slightly translucent with a backdrop blur, so a chat
+     background image glows through without ever fighting the text (the blur is what
+     preserves contrast over busy wallpapers). Over a plain theme background the effect
+     degrades to near-solid — no image, no cost to readability. Blur is static compositing,
+     not per-frame work. */
+  html[data-cards]:not([data-win98]) .user-echo {
+    background: color-mix(in srgb, var(--panel) 82%, transparent);
+    backdrop-filter: blur(6px);
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 8px 12px; }
+  html[data-cards]:not([data-win98]) .assistant {
+    background: color-mix(in srgb, var(--panel) 82%, transparent);
+    backdrop-filter: blur(6px);
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 6px 12px 8px 12px; }
+  /* Cards sit on the panel color, so code wells inside switch to the bg color to stay
+     visually recessed (they normally use --panel against a --bg page). */
+  html[data-cards]:not([data-win98]) .md pre,
+  html[data-cards]:not([data-win98]) .md code { background: var(--bg); }
+
+  /* ---- Windows 98 chrome -----------------------------------------------------------
+     Scoped to html[data-win98]. The 3D language of 1998: silver surfaces, square corners,
+     two-tone bevels lit from the top-left (raised = chrome you can press, sunken = wells
+     that hold content), navy title-bar gradients, Tahoma, and none of the decoration the
+     era didn't have (radii, soft shadows). Colors come from the theme's CSS variables;
+     this block only reshapes geometry, bevels, and the title bars. All static — pairs
+     with the theme's FlatMotion, because nothing animated in 1998. */
+  html[data-win98] body { font-family: Tahoma, "MS Sans Serif", "Segoe UI", sans-serif;
+    /* THE desktop teal. Silver never filled a screen in 1998 — it sat in windows on this. */
+    background: #008080; padding: 12px 14px 20px 14px; }
+  /* Each MESSAGE is its own window on the desktop (not one giant expanding one): user
+     prompts are small silver windows; assistant responses are windows whose "MandoCode"
+     label becomes the navy title bar — the hover copy/react chips land on it like window
+     buttons. Status lines and tool ops sit directly on the teal like desktop icon labels,
+     with brightened colors (the theme's dark semantic hues are unreadable on teal).
+     (A user-chosen chat background image still paints over the teal via #bg — wallpaper.) */
+  html[data-win98] .user-echo { background: var(--bg); padding: 7px 12px;
+    border: 2px solid; border-color: #FFFFFF #404040 #404040 #FFFFFF; }
+  html[data-win98] .assistant { background: var(--bg);
+    border: 2px solid; border-color: #FFFFFF #404040 #404040 #FFFFFF; }
+  html[data-win98] .assistant-label {
+    background: linear-gradient(90deg, #000080, #1084D0); color: #FFFFFF;
+    padding: 3px 10px; margin-bottom: 0; font-weight: 700; }
+  html[data-win98] .assistant .md { padding: 2px 12px 8px 12px; }
+  html[data-win98] .line { color: #EAF6F4; }
+  html[data-win98] .line.info { color: #A8D8FF; }
+  html[data-win98] .line.success { color: #90EE90; }
+  html[data-win98] .line.warn { color: #FFE082; }
+  html[data-win98] .line.error { color: #FF9E8F; }
+  html[data-win98] .line.dim, html[data-win98] .op-meta, html[data-win98] .token-summary { color: #B8D8D4; }
+  html[data-win98] .op { color: #EAF6F4; }
+  html[data-win98] .op-path { color: #EAF6F4; }
+  html[data-win98] .op-head a.file-link { color: #AAD4FF; border-bottom-color: #AAD4FF; }
+  /* Op-head semantic colors (WebSearch/WebFetch/Write/Delete glyph classes) are theme-dark
+     hues built for silver — brighten them on the teal, same mapping as the .line variants. */
+  html[data-win98] .op-head.success { color: #90EE90; }
+  html[data-win98] .op-head.error, html[data-win98] .op-head.red { color: #FF9E8F; }
+  html[data-win98] .op-head.warn { color: #FFE082; }
+  html[data-win98] .op-head.info, html[data-win98] .op-head.sky { color: #A8D8FF; }
+  html[data-win98] .op-head.dim { color: #B8D8D4; }
+  /* Square EVERYTHING. */
+  html[data-win98] .panel, html[data-win98] .chip, html[data-win98] .tool-pill,
+  html[data-win98] .copy-chip, html[data-win98] .react-ghost, html[data-win98] .expand-btn,
+  html[data-win98] .web-toggle, html[data-win98] .dv-btn, html[data-win98] .ue-toggle,
+  html[data-win98] .md pre, html[data-win98] .md code, html[data-win98] pre.mono-block,
+  html[data-win98] pre.raw, html[data-win98] .op-detail, html[data-win98] #rx-pop,
+  html[data-win98] .rx-pill, html[data-win98] #rx-pop .rx { border-radius: 0 !important; }
+  /* Raised bevel: anything button-like is a silver 3D control. */
+  html[data-win98] .copy-chip, html[data-win98] .react-ghost, html[data-win98] .expand-btn,
+  html[data-win98] .web-toggle, html[data-win98] .dv-btn, html[data-win98] .ue-toggle,
+  html[data-win98] .tool-pill, html[data-win98] .chip, html[data-win98] .rx-pill {
+    background: var(--bg); color: #000;
+    border: 2px solid; border-color: #FFFFFF #404040 #404040 #FFFFFF;
+  }
+  /* ...and presses in like one. */
+  html[data-win98] .copy-chip:active, html[data-win98] .expand-btn:active,
+  html[data-win98] .web-toggle:active, html[data-win98] .dv-btn:active,
+  html[data-win98] .ue-toggle:active, html[data-win98] .react-ghost:active {
+    border-color: #404040 #FFFFFF #FFFFFF #404040;
+  }
+  /* Panels are little windows: raised silver frame + navy title-bar gradient. */
+  html[data-win98] .panel {
+    background: var(--bg);
+    border: 2px solid; border-color: #FFFFFF #404040 #404040 #FFFFFF;
+  }
+  html[data-win98] .panel-header {
+    background: linear-gradient(90deg, #000080, #1084D0);
+    color: #FFFFFF; border-bottom: none;
+  }
+  html[data-win98] .panel-header a.file-link { color: #FFFFFF; border-bottom-color: #9CC2E5; }
+  /* Content wells are sunken white, like every 98 text box and list view. */
+  html[data-win98] .md pre, html[data-win98] pre.cmd, html[data-win98] pre.cmd-out,
+  html[data-win98] pre.diff, html[data-win98] pre.mono-block, html[data-win98] pre.raw,
+  html[data-win98] .op-detail {
+    background: var(--panel);
+    border: 2px solid; border-color: #808080 #FFFFFF #FFFFFF #808080;
+  }
+  html[data-win98] .md code { background: var(--panel); border: 1px solid #808080; }
+  html[data-win98] .md pre code { border: none; }
+  /* 1998 had no soft shadows. */
+  html[data-win98] #rx-pop { box-shadow: none; background: var(--bg);
+    border: 2px solid; border-color: #FFFFFF #404040 #404040 #FFFFFF; }
+  html[data-win98] .chip .dot, html[data-win98] .tool-pill .tp-dot { box-shadow: none; }
+  /* Plan/help tables become 98 list views: sunken white body, RAISED column headers —
+     the iconic Explorer detail. Row separators in dialog-face gray. */
+  html[data-win98] table.plan { background: var(--panel);
+    border: 2px solid; border-color: #808080 #FFFFFF #FFFFFF #808080; }
+  html[data-win98] table.plan th { background: var(--bg); color: #000;
+    border: 1px solid; border-color: #FFFFFF #404040 #404040 #FFFFFF; }
+  html[data-win98] table.plan td { border-top: 1px solid #D4D0C8; }
+  /* Chunky classic scrollbars. */
+  html[data-win98] ::-webkit-scrollbar { width: 16px; height: 16px; }
+  html[data-win98] ::-webkit-scrollbar-track { background: #DFDFDF; }
+  html[data-win98] ::-webkit-scrollbar-thumb { background: var(--bg);
+    border: 2px solid; border-color: #FFFFFF #404040 #404040 #FFFFFF; }
+  html[data-win98] ::-webkit-scrollbar-corner { background: #DFDFDF; }
+
   /* User prompts: gold marks the user's voice, at normal weight so an 8-line clamped
      paste reads as text, not a block of emphasis. Only the sigil stays semibold. */
   .user-echo { color: var(--gold); white-space: pre-wrap; margin-top: 14px; }
@@ -487,6 +616,14 @@ public sealed class TranscriptHtmlBuilder
   .web-detail { position: relative; margin-top: 4px; }
   .web-detail[hidden] { display: none; }
   .web-detail > .op-detail { margin-top: 0; }
+  /* Action chips on USER-requested diff cards (Changes-tab clicks): Undo posts to the host,
+     Clear removes the card. Floated right in the header; the collapsible-panel header's
+     right padding keeps them clear of the corner Expand button. */
+  .dv-actions { float: right; display: inline-flex; gap: 6px; }
+  .dv-btn { background: var(--bg); color: var(--dim); border: 1px solid var(--border);
+    border-radius: 6px; padding: 1px 8px; font-size: 11px;
+    font-family: "Segoe UI", sans-serif; cursor: pointer; }
+  .dv-btn:hover { color: var(--fg); border-color: var(--accent); }
   a.file-link { color: var(--sky); text-decoration: none;
     border-bottom: 1px dotted color-mix(in srgb, var(--sky) 55%, transparent); cursor: pointer; }
   a.file-link:hover { color: var(--accent); border-bottom-color: var(--accent); }
@@ -945,6 +1082,21 @@ public sealed class TranscriptHtmlBuilder
     if (!link) return;
     e.preventDefault();
     window.chrome.webview.postMessage('open-file:' + link.getAttribute('data-file'));
+  });
+
+  // Interactive diff-card chips (delegated — survives transcript export, like the toggles).
+  // Clear just deletes the card from the DOM; Undo asks the host, which confirms before
+  // discarding anything. In an exported page Undo is a harmless no-op (no webview bridge).
+  document.addEventListener('click', function (e) {
+    const clear = e.target.closest('.dv-clear');
+    if (clear) {
+      const panel = clear.closest('.panel');
+      if (panel) panel.remove();
+      return;
+    }
+    const undo = e.target.closest('.dv-undo');
+    if (undo && window.chrome && window.chrome.webview)
+      window.chrome.webview.postMessage('undo-file:' + undo.getAttribute('data-file'));
   });
 
   // --- drag hand-off: Chromium owns drags over the transcript surface, so XAML never sees

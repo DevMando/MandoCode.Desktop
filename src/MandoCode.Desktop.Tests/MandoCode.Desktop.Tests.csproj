@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <!-- The classes under test are pure logic with no WinUI dependencies, so we compile their
+       sources directly instead of referencing the WinUI app project (which would drag the
+       Windows App SDK into the test host). If these files ever grow UI dependencies, that's
+       a design regression this project exists to catch. -->
+  <ItemGroup>
+    <Compile Include="..\MandoCode.Desktop\Services\GitQuickStatus.cs" Link="src\GitQuickStatus.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\WorkspaceDeltaTracker.cs" Link="src\WorkspaceDeltaTracker.cs" />
+    <Compile Include="..\..\MandoCode\src\MandoCode\Models\DiffModels.cs" Link="src\DiffModels.cs" />
+  </ItemGroup>
+
+</Project>

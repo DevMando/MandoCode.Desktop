@@ -22,3 +22,6 @@ jobs:
 
       - name: Build
         run: dotnet build src/MandoCode.Desktop/MandoCode.Desktop.csproj -c Release
+
+      - name: Test
+        run: dotnet test src/MandoCode.Desktop.Tests/MandoCode.Desktop.Tests.csproj -c Release --nologo

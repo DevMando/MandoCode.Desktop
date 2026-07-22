@@ -16,6 +16,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <!-- ======= Per-tab header =======
@@ -151,7 +152,9 @@
                   BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1,0,0,0">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
                 <Grid Grid.Row="0" Padding="12,8,6,8" ColumnSpacing="8"
@@ -179,7 +182,18 @@
                     </Button>
                 </Grid>
 
-                <TreeView x:Name="ExplorerTree" Grid.Row="1" SelectionMode="Single"
+                <!-- Files / Changes tab strip. The active tab is semibold + full opacity
+                     (styling flipped in code — WinUI styles have no triggers). -->
+                <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="2" Padding="8,4,8,2">
+                    <Button x:Name="FilesTabButton" Content="Files" Click="FilesTab_Click"
+                            FontSize="12" FontWeight="SemiBold" Padding="8,3"
+                            Background="Transparent" BorderThickness="0"/>
+                    <Button x:Name="ChangesTabButton" Content="Changes" Click="ChangesTab_Click"
+                            FontSize="12" Padding="8,3" Opacity="0.55"
+                            Background="Transparent" BorderThickness="0"/>
+                </StackPanel>
+
+                <TreeView x:Name="ExplorerTree" Grid.Row="2" SelectionMode="Single"
                           CanDragItems="True" CanReorderItems="False" AllowDrop="False"
                           DragItemsStarting="ExplorerTree_DragItemsStarting"
                           Expanding="ExplorerTree_Expanding" ItemInvoked="ExplorerTree_ItemInvoked"
@@ -197,6 +211,7 @@
                                     <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
                                 <FontIcon Glyph="{x:Bind ((local:ExplorerItem)Content).Glyph}"
                                           FontSize="13" VerticalAlignment="Center"
@@ -205,10 +220,16 @@
                                            Text="{x:Bind ((local:ExplorerItem)Content).Name}"
                                            FontSize="13" VerticalAlignment="Center"
                                            TextTrimming="CharacterEllipsis"/>
+                                <!-- Gold dot: this file changed / this folder contains changes.
+                                     OneWay — flags update in place on every git refresh. -->
+                                <Ellipse Grid.Column="2" Width="6" Height="6" VerticalAlignment="Center"
+                                         Fill="{StaticResource MandoGoldBrush}"
+                                         Visibility="{x:Bind ((local:ExplorerItem)Content).DirtyVisibility, Mode=OneWay}"
+                                         ToolTipService.ToolTip="Uncommitted changes"/>
                                 <!-- Tag button: inserts this row's @token into the prompt, same as
                                      dragging it there. Dim at rest, brightens on hover (code-behind —
                                      WinUI styles have no triggers). -->
-                                <Button Grid.Column="2" Click="ExplorerTag_Click"
+                                <Button Grid.Column="3" Click="ExplorerTag_Click"
                                         PointerEntered="ExplorerTag_PointerEntered"
                                         PointerExited="ExplorerTag_PointerExited"
                                         Padding="6,1" Background="Transparent" BorderThickness="0"
@@ -220,6 +241,103 @@
                         </DataTemplate>
                     </TreeView.ItemTemplate>
                 </TreeView>
+
+                <!-- Changes tab: the working tree's current state, fed by the same
+                     git status call as the bottom status strip. Read-only by design —
+                     staging/committing belongs to the agent or a real git client. Rows
+                     tag and drag exactly like file-tree rows; double-click opens. -->
+                <ListView x:Name="ChangesList" Grid.Row="2" Visibility="Collapsed"
+                          SelectionMode="Single" IsItemClickEnabled="False"
+                          CanDragItems="True" CanReorderItems="False" AllowDrop="False"
+                          DragItemsStarting="ChangesList_DragItemsStarting"
+                          DoubleTapped="ChangesList_DoubleTapped"
+                          Padding="4,2,4,6">
+                    <!-- No row entrance/exit animations: this list legitimately rebuilds while
+                         external tools churn files (builds, scripts), and animated rows read
+                         as flicker. Updates apply as instant, still repaints. -->
+                    <ListView.ItemContainerTransitions>
+                        <TransitionCollection/>
+                    </ListView.ItemContainerTransitions>
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="MinHeight" Value="28"/>
+                            <Setter Property="Padding" Value="8,2"/>
+                        </Style>
+                    </ListView.ItemContainerStyle>
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="local:GitChangeItem">
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="14"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{x:Bind Kind}" Foreground="{x:Bind KindBrush}"
+                                           FontFamily="Cascadia Code,Consolas" FontWeight="Bold"
+                                           FontSize="12" VerticalAlignment="Center"
+                                           ToolTipService.ToolTip="{x:Bind KindLabel}"/>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="7">
+                                    <TextBlock Text="{x:Bind Name}" FontSize="13"
+                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Text="{x:Bind Dir}" FontSize="11" Opacity="0.45"
+                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                                <!-- Row actions, view-before-act: ± view diff, ↩ undo, @ tag. -->
+                                <Button Grid.Column="2" Click="ChangesDiff_Click"
+                                        PointerEntered="ExplorerTag_PointerEntered"
+                                        PointerExited="ExplorerTag_PointerExited"
+                                        Padding="6,1" Background="Transparent" BorderThickness="0"
+                                        Opacity="0.45" VerticalAlignment="Center"
+                                        ToolTipService.ToolTip="View diff in the transcript">
+                                    <TextBlock Text="±" FontSize="13" FontFamily="Cascadia Code,Consolas"/>
+                                </Button>
+                                <!-- Undo changes: restores the file to the last commit (asks
+                                     first — this is the app's one destructive button). Restores
+                                     deleted files too. Hidden for untracked/renamed rows. -->
+                                <Button Grid.Column="3" Click="ChangeUndo_Click"
+                                        PointerEntered="ExplorerTag_PointerEntered"
+                                        PointerExited="ExplorerTag_PointerExited"
+                                        Padding="6,1" Background="Transparent" BorderThickness="0"
+                                        Opacity="0.45" VerticalAlignment="Center"
+                                        Visibility="{x:Bind UndoVisibility}"
+                                        ToolTipService.ToolTip="{x:Bind UndoTooltip}">
+                                    <FontIcon Glyph="&#xE7A7;" FontSize="12"/>
+                                </Button>
+                                <Button Grid.Column="4" Click="ExplorerTag_Click"
+                                        PointerEntered="ExplorerTag_PointerEntered"
+                                        PointerExited="ExplorerTag_PointerExited"
+                                        Padding="6,1" Background="Transparent" BorderThickness="0"
+                                        Opacity="0.45" VerticalAlignment="Center"
+                                        ToolTipService.ToolTip="{x:Bind TagTooltip}">
+                                    <TextBlock Text="@" FontSize="13"/>
+                                </Button>
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+
+                <TextBlock x:Name="ChangesEmptyText" Grid.Row="2" Visibility="Collapsed"
+                           Text="No changes — working tree is clean"
+                           FontSize="12" Opacity="0.5" TextWrapping="Wrap"
+                           HorizontalAlignment="Center" Margin="12,24,12,0"/>
+
+                <!-- Commit… never commits by itself: it pre-fills the prompt (like tagging),
+                     the user sends it, the agent writes the message and runs git commit, and
+                     the bottom-bar command approval gates the exact command. One commit path;
+                     the human control is the approval, not a second button. -->
+                <Border x:Name="ChangesFooter" Grid.Row="3" Visibility="Collapsed" Padding="10,8"
+                        BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="0,1,0,0">
+                    <Button x:Name="CommitButton" HorizontalAlignment="Stretch" Click="Commit_Click"
+                            Style="{StaticResource AccentButtonStyle}"
+                            ToolTipService.ToolTip="Ask the agent to commit these changes — you'll approve the exact command before anything runs">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon Glyph="&#xE73E;" FontSize="13"/>
+                            <TextBlock Text="Commit…"/>
+                        </StackPanel>
+                    </Button>
+                </Border>
             </Grid>
         </Grid>
 
@@ -383,7 +501,12 @@
                     <TextBlock x:Name="PlanApprovalTitle" FontWeight="SemiBold" FontSize="13"
                                VerticalAlignment="Center" TextWrapping="Wrap"/>
                 </StackPanel>
-                <StackPanel x:Name="PlanApprovalButtons" Orientation="Horizontal" Spacing="8"/>
+                <!-- Command text for bottom-bar command approvals (collapsed for plan approvals). -->
+                <TextBlock x:Name="PlanApprovalCommand" Visibility="Collapsed" TextWrapping="Wrap"
+                           FontFamily="Cascadia Code,Cascadia Mono,Consolas" FontSize="13"
+                           Foreground="{StaticResource MandoSkyBrush}" Opacity="0.95"/>
+                <!-- Wraps only when the window is too narrow for all options in one row. -->
+                <controls:WrapPanel x:Name="PlanApprovalButtons" HorizontalSpacing="8" VerticalSpacing="8"/>
             </StackPanel>
         </Border>
 
@@ -459,11 +582,38 @@
             </Button>
         </Grid>
 
+        <!-- ======= Status strip =======
+             Slim VS Code-style strip, bottom right: [branch glyph][state dot][branch ↑↓].
+             The glyph is drawn inline (no git-branch glyph exists in the Segoe icon fonts);
+             the dot is the one status light: red = merge conflicts, gold = uncommitted
+             changes, green = clean. Hidden entirely when the folder isn't a git repo. -->
+        <Grid x:Name="StatusStrip" Grid.Row="6" Padding="16,0,16,6" Visibility="Collapsed">
+            <StackPanel Orientation="Horizontal" Spacing="7" HorizontalAlignment="Right"
+                        VerticalAlignment="Center"
+                        ToolTipService.ToolTip="Local git status for this tab's project folder">
+                <Canvas Width="14" Height="14" VerticalAlignment="Center" Opacity="0.7">
+                    <!-- classic branch shape: main line with two nodes, side node joined by a curve -->
+                    <Ellipse Canvas.Left="1.5" Canvas.Top="0.5" Width="4" Height="4"
+                             Stroke="{StaticResource MandoDimBrush}" StrokeThickness="1.2"/>
+                    <Ellipse Canvas.Left="1.5" Canvas.Top="9.5" Width="4" Height="4"
+                             Stroke="{StaticResource MandoDimBrush}" StrokeThickness="1.2"/>
+                    <Ellipse Canvas.Left="8.5" Canvas.Top="0.5" Width="4" Height="4"
+                             Stroke="{StaticResource MandoDimBrush}" StrokeThickness="1.2"/>
+                    <Path Stroke="{StaticResource MandoDimBrush}" StrokeThickness="1.2"
+                          Data="M 3.5,4.5 L 3.5,9.5 M 10.5,4.5 C 10.5,8 3.5,6.5 3.5,9.5"/>
+                </Canvas>
+                <Ellipse x:Name="BranchDot" Width="7" Height="7" VerticalAlignment="Center"
+                         Fill="{StaticResource MandoGreenBrush}"/>
+                <TextBlock x:Name="BranchText" FontSize="12" Opacity="0.8" VerticalAlignment="Center"
+                           FontFamily="Cascadia Code,Consolas"/>
+            </StackPanel>
+        </Grid>
+
         <!-- ======= Approval overlay — this tab only.
              Each tab owns its WinUiApprovalService, ApprovalPromptGate and McpApprovalGate,
              so two agents can sit at an approval prompt simultaneously without one blocking
              the other's overlay from ever rendering. ======= -->
-        <Grid x:Name="ApprovalOverlay" Grid.RowSpan="6" Visibility="Collapsed"
+        <Grid x:Name="ApprovalOverlay" Grid.RowSpan="7" Visibility="Collapsed"
               Background="#B0000000">
             <Border x:Name="ApprovalCard" MaxWidth="860" MaxHeight="640" Margin="24" Padding="20"
                     HorizontalAlignment="Center" VerticalAlignment="Center"

@@ -25,12 +25,14 @@ public sealed class ShellRunner
         _html = html;
     }
 
-    public async Task RunAsync(string command)
+    /// <summary>Returns (Failed, Output) so the caller can tell the MODEL what the user ran —
+    /// `!` commands render only in the transcript, which the model never sees.</summary>
+    public async Task<(bool Failed, string Output)> RunAsync(string command)
     {
         if (string.IsNullOrWhiteSpace(command))
         {
             _transcript.Append(_html.Warn("No command given. Usage: !<command>"));
-            return;
+            return (true, "");
         }
 
         var output = new StringBuilder();
@@ -99,10 +101,12 @@ public sealed class ShellRunner
             if (text.Length == 0) text = "(no output)";
 
             _transcript.Append(_html.CommandOutputCard(command, text, failed));
+            return (failed, text);
         }
         catch (Exception ex)
         {
             _transcript.Append(_html.Error($"Failed to run command: {ex.Message}"));
+            return (true, ex.Message);
         }
     }
 }
