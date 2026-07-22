@@ -177,7 +177,27 @@ public sealed partial class MainWindow : Window
 
         // The first agent. Its whole service graph — AIService, approvals, transcript, token
         // tracking — belongs to it alone, so opening a second tab can't disturb it.
-        CreateChatTab();
+        // Reopen the previous workspace shape (tabs, roots, models, active tab). Folders
+        // that no longer exist are skipped; no saved shape (or nothing usable) means the
+        // classic single default tab.
+        var shape = WorkspaceState.TryLoad();
+        if (shape != null)
+        {
+            foreach (var t in shape.Tabs.Where(t => Directory.Exists(t.ProjectRoot)))
+                CreateChatTab(t.ProjectRoot, t.Title, t.Model, t.Key);
+            if (_tabs.Count == 0) CreateChatTab();
+            else SelectTab(_tabs[Math.Clamp(shape.ActiveIndex, 0, _tabs.Count - 1)]);
+        }
+        else
+        {
+            CreateChatTab();
+        }
+
+        // Journals whose sessions no longer exist (tabs closed during a crash, pruned
+        // folders) have nothing to replay into — clean them up.
+        TranscriptJournal.Sweep(_tabs.Select(t => t.View.Session.PersistKey));
+        ConversationLog.Sweep(_tabs.Select(t => t.View.Session.PersistKey));
+        SessionHistoryStore.Sweep(_tabs.Select(t => t.View.Session.PersistKey));
 
         // Size the window; defer WebView2 + harness init until the tree is loaded.
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1180, 840));
@@ -193,6 +213,7 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void MainWindow_Closed(object sender, WindowEventArgs args)
     {
+        SaveWorkspace();   // capture the shape BEFORE teardown starts mutating state
         foreach (var tab in _tabs) tab.View.Shutdown();
         _terminal?.ShutDown();   // kill any ConPTY shells so no processes leak
 
@@ -380,8 +401,40 @@ public sealed partial class MainWindow : Window
     {
         if (_initialized) return;
         _initialized = true;
-        _ = _tabs[0].View.InitializeAsync();
+        // Restored workspaces can open with several tabs — initialize them all (each owns
+        // its WebView2 + harness, same cost as if the user had opened them by hand).
+        foreach (var entry in _tabs) _ = InitTabAsync(entry);
         InitBgPreview();
+    }
+
+    private async Task InitTabAsync(ChatTabEntry entry)
+    {
+        await entry.View.InitializeAsync();
+        // Best-effort per-tab model restore: if the saved model is gone (Ollama not running,
+        // cloud model renamed), the tab simply keeps the default and says so in its header.
+        var desired = entry.RestoreModel;
+        if (!string.IsNullOrEmpty(desired) && desired != entry.View.Session.Controller.ModelName)
+        {
+            await Task.Run(() => entry.View.Session.Controller.SelectModelAsync(desired));
+            entry.View.UpdateHeader();
+        }
+
+        // Memory comes back only after the model has settled — selecting a model clears
+        // history, so this order is what keeps the restored memory alive.
+        await entry.View.RestoreConversationMemoryAsync();
+    }
+
+    /// <summary>Writes the current workspace shape (tabs + active) to disk. Called on close
+    /// and after any structural change, so even a crash loses at most the latest tweak.</summary>
+    private void SaveWorkspace()
+    {
+        var tabs = _tabs.Select(t => new WorkspaceTabState(
+            t.View.Session.Title,
+            t.View.Session.ProjectRoot.ProjectRoot,
+            t.View.Session.Controller.ModelName,
+            t.View.Session.PersistKey)).ToList();
+        var active = _selected == null ? 0 : Math.Max(0, _tabs.IndexOf(_selected));
+        WorkspaceState.Save(new WorkspaceShape(tabs, active));
     }
 
     // ============================================================
@@ -500,6 +553,10 @@ public sealed partial class MainWindow : Window
         public required TextBlock Label { get; init; }
         public required Ellipse Badge { get; init; }
         public required ChatTabView View { get; init; }
+
+        /// <summary>Model to select once this tab's harness is initialized — set only for
+        /// tabs recreated from a saved workspace. Best-effort: unavailable model = default.</summary>
+        public string? RestoreModel { get; init; }
     }
 
     private readonly List<ChatTabEntry> _tabs = new();
@@ -517,11 +574,13 @@ public sealed partial class MainWindow : Window
     {
         var entry = CreateChatTab();
         _ = entry.View.InitializeAsync();
+        SaveWorkspace();
     }
 
-    private ChatTabEntry CreateChatTab()
+    private ChatTabEntry CreateChatTab(string? projectRoot = null, string? title = null, string? restoreModel = null, string? persistKey = null)
     {
-        var session = _sessions.CreateSession();
+        var session = _sessions.CreateSession(projectRoot, persistKey);
+        if (!string.IsNullOrWhiteSpace(title)) session.Title = title;
         var view = new ChatTabView(this, session, _html) { Visibility = Visibility.Collapsed };
 
         view.SetupRequested += () => SwitchPage("settings");
@@ -537,12 +596,13 @@ public sealed partial class MainWindow : Window
         {
             var tab = _tabs.FirstOrDefault(t => ReferenceEquals(t.View, v));
             if (tab != null) tab.Label.Text = v.Session.Title;
+            SaveWorkspace();   // renames, folder switches, and model switches all land here
         };
 
         TabHost.Children.Add(view);
 
         var (header, label, badge) = BuildTabHeader(session.Title);
-        var entry = new ChatTabEntry { Header = header, Label = label, Badge = badge, View = view };
+        var entry = new ChatTabEntry { Header = header, Label = label, Badge = badge, View = view, RestoreModel = restoreModel };
         _tabs.Add(entry);
         TabStrip.Children.Add(header);
         WireHeader(entry);
@@ -1017,15 +1077,20 @@ public sealed partial class MainWindow : Window
         entry.View.Shutdown();
         TabHost.Children.Remove(entry.View);
         _sessions.CloseSession(entry.View.Session);
+        TranscriptJournal.Delete(entry.View.Session.PersistKey);   // closed tab = conversation gone
+        ConversationLog.Delete(entry.View.Session.PersistKey);
+        SessionHistoryStore.Delete(entry.View.Session.PersistKey);
 
         if (!ReferenceEquals(_selected, entry))
         {
             RefreshTabStrip();
+            SaveWorkspace();
             return;
         }
 
         _selected = null;
         SelectTab(_tabs[Math.Min(index, _tabs.Count - 1)]);
+        SaveWorkspace();
     }
 
     private void RefreshTabStrip()

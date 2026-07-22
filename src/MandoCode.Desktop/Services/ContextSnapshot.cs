@@ -31,10 +31,16 @@ public sealed class ContextSnapshot
     /// <summary>Conversation length (messages, excluding the system prompt).</summary>
     public required int MessageCount { get; init; }
 
+    /// <summary>Project folder the conversation happened in, when known — lets the panel
+    /// group snapshots by project now that they survive across launches.</summary>
+    public string? ProjectRoot { get; init; }
+
     // ---- display helpers for the snapshots panel ----
 
     /// <summary>Card title: the user's name if given, else the model that had the conversation.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
     public string DisplayTitle => string.IsNullOrWhiteSpace(Name) ? OriginModel : Name!;
 
+    [System.Text.Json.Serialization.JsonIgnore]
     public string TimeLabel => CapturedAt.LocalDateTime.ToString("MMM d · h:mm tt");
 }

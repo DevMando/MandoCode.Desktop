@@ -47,10 +47,10 @@ public sealed class SessionManager
     /// Opens a new agent. It inherits the active tab's project folder — a new tab is almost always
     /// "another agent on what I'm already working on" — and the canonical default model.
     /// </summary>
-    public AgentSession CreateSession(string? projectRoot = null)
+    public AgentSession CreateSession(string? projectRoot = null, string? persistKey = null)
     {
         var root = projectRoot ?? Active?.ProjectRoot.ProjectRoot ?? _initialProjectRoot;
-        var session = new AgentSession(_globals, _configs, _mcp, root);
+        var session = new AgentSession(_globals, _configs, _mcp, root, persistKey);
         session.Title = NextAgentName();
 
         _sessions.Add(session);

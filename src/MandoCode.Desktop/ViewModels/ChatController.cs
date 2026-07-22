@@ -71,6 +71,16 @@ public sealed partial class ChatController
     /// away, the oldest facts are the most likely to be stale anyway.</summary>
     private readonly List<string> _pendingWorkspaceNotes = new();
 
+    /// <summary>Set by AgentSession: receives ("u"/"a", text) for every conversational turn,
+    /// feeding the per-session ConversationLog that re-briefs the model after a restart.
+    /// Only real dialogue is logged — /commands and !shell lines are not conversation.</summary>
+    public Action<string, string>? ConversationLogger { get; set; }
+
+    /// <summary>Arms a restored previous-session conversation to ride the next send as
+    /// imported background — the automatic counterpart of importing a snapshot, used by
+    /// session restore (tier 3).</summary>
+    public void ArmRestoredConversation(string context) => _armedContexts.Add(context);
+
     public void NoteWorkspaceEvent(string note)
     {
         if (_pendingWorkspaceNotes.Count >= 30) _pendingWorkspaceNotes.RemoveAt(0);
@@ -386,6 +396,8 @@ public sealed partial class ChatController
                 return;
             }
 
+            ConversationLogger?.Invoke("u", input);
+
             // Plan heuristic BEFORE @file expansion so attachments don't inflate it.
             var needsPlanning = _taskPlanner.RequiresPlanning(input);
             var processedInput = ProcessFileReferences(input);
@@ -500,6 +512,7 @@ public sealed partial class ChatController
                     {
                         segments.Add(segment);
                         _transcript.Append(_html.AssistantCard(segment));
+                        ConversationLogger?.Invoke("a", segment);
                     }
                 } while (await enumerator.MoveNextAsync());
 
@@ -839,7 +852,10 @@ public sealed partial class ChatController
             case TaskProgressType.StepCompleted:
                 PlanProgressChanged?.Invoke(progressEvent.CurrentStep, progressEvent.TotalSteps, true);
                 if (!string.IsNullOrEmpty(progressEvent.Message))
+                {
                     _transcript.Append(_html.AssistantCard(progressEvent.Message));
+                    ConversationLogger?.Invoke("a", progressEvent.Message!);
+                }
                 _transcript.Append(_html.Success($"Step {progressEvent.CurrentStep} completed."));
                 break;
 
@@ -1231,6 +1247,10 @@ public sealed partial class ChatController
         // model of their choice) after the switch; if they ignore the offer, the buffer is discarded.
         var previousModel = _config.GetEffectiveModelName();
         _pending = await BufferConversationAsync(previousModel);
+        // Full-fidelity carry: grab the verbatim history too (tool calls included), so the
+        // user can choose "keep memory" — continue the SAME conversation on the new model —
+        // instead of (or in addition to having the option of) a summarized snapshot.
+        _pendingCarryJson = _pending == null ? null : _ai.ExportHistoryJson();
 
         _config.ModelName = modelTag;
         _config.ModelPath = null;
@@ -1261,7 +1281,7 @@ public sealed partial class ChatController
         // conversation to clear. Switching an empty chat has nothing to salvage, so stay quiet.
         if (_pending != null)
         {
-            _transcript.Append(_html.StatusChip("Context cleared", "create a snapshot?", ""));
+            _transcript.Append(_html.StatusChip("Context cleared", "keep memory, or snapshot it?", ""));
             SnapshotOfferChanged?.Invoke();
         }
 
@@ -1303,6 +1323,7 @@ public sealed partial class ChatController
     /// without switching models or clearing it. Shows the create card, or notes there's nothing to save.</summary>
     public async Task OfferManualSnapshotAsync()
     {
+        _pendingCarryJson = null;   // nothing was cleared — "keep memory" doesn't apply here
         _pending = await BufferConversationAsync(ModelName);
         if (_pending == null)
         {
@@ -1331,7 +1352,7 @@ public sealed partial class ChatController
             if (string.IsNullOrWhiteSpace(recap))
                 return "The model returned an empty recap.";
 
-            _snapshots.Add(pending.OriginModel, summarizerModel, recap, pending.MessageCount, name);
+            _snapshots.Add(pending.OriginModel, summarizerModel, recap, pending.MessageCount, name, ProjectRootPath);
             _pending = null;
             SnapshotOfferChanged?.Invoke();
             var label = string.IsNullOrWhiteSpace(name) ? $"summarized by {summarizerModel}" : $"\"{name.Trim()}\"";
@@ -1350,7 +1371,43 @@ public sealed partial class ChatController
     {
         if (_pending == null) return;
         _pending = null;
+        _pendingCarryJson = null;
         SnapshotOfferChanged?.Invoke();
+    }
+
+    /// <summary>Verbatim pre-switch history (AIService export JSON), held alongside
+    /// <see cref="_pending"/> only for model switches — never for manual snapshot offers,
+    /// where nothing was cleared. Same lifetime as the offer: consumed, dismissed, or
+    /// replaced by the next switch.</summary>
+    private string? _pendingCarryJson;
+
+    /// <summary>Whether the current offer supports "keep memory" (model switches only).</summary>
+    public bool CanCarryMemory => _pendingCarryJson != null;
+
+    /// <summary>
+    /// "Keep memory" on the model-switch offer: re-imports the pre-switch conversation
+    /// VERBATIM into the new model — full fidelity, tool calls included; the same
+    /// conversation simply continues under new management. On failure the offer stays up,
+    /// so the summarized-snapshot path remains available as the fallback.
+    /// </summary>
+    public bool TryCarryMemoryAcrossSwitch()
+    {
+        var json = _pendingCarryJson;
+        if (json == null) return false;
+
+        var restored = _ai.TryRestoreHistoryJson(json);
+        if (restored == 0)
+        {
+            _transcript.Append(_html.Warn(
+                "Couldn't carry the conversation into the new model — you can still save it as a snapshot."));
+            return false;
+        }
+
+        _pendingCarryJson = null;
+        _pending = null;   // offer consumed — the conversation lives on, nothing to salvage
+        _transcript.Append(_html.StatusChip("Memory carried", $"{restored} messages continue here", "ok"));
+        SnapshotOfferChanged?.Invoke();
+        return true;
     }
 
     /// <summary>Arms a snapshot's recap so it rides along (invisibly) with this agent's next message.</summary>

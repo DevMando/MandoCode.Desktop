@@ -60,6 +60,19 @@ public sealed class TranscriptHtmlBuilder
     public string Error(string text) => $"<div class=\"line error\">{E(text)}</div>";
     public string Dim(string text) => $"<div class=\"line dim\">{E(text)}</div>";
 
+    /// <summary>True for blocks that describe LIVE session state (status chips: connection,
+    /// model ready, MCP counts, pending offers) rather than conversation history. Session
+    /// restore replays journaled transcripts — replaying a dead process's state pills next
+    /// to the new session's real ones ("MCP connected" twice, stale "ready") reads as
+    /// duplicate/conflicting status, so replay skips them. Journals still CONTAIN them:
+    /// capture stays dumb and faithful; the judgment lives at replay.</summary>
+    public static bool IsEphemeralStatus(string blockHtml) =>
+        blockHtml.StartsWith("<div class=\"chip-row\"", StringComparison.Ordinal)
+        // Boot/progress narration — true only while it was happening. ("Project root
+        // changed to: X" is deliberately NOT here: that's a real event, kept as history.)
+        || blockHtml.Contains(">Rebuilding the AI session for the new project…<", StringComparison.Ordinal)
+        || blockHtml.Contains(">✓ Ready.<", StringComparison.Ordinal);
+
     /// <summary>A compact status pill — a colored state dot, a bold primary value, and an
     /// optional dim qualifier. The dot replaces status emoji: crisp and theme-aware.
     /// <paramref name="state"/> is "ok", "warn", "err", or "" (neutral).</summary>
