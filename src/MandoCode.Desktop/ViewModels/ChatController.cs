@@ -64,6 +64,29 @@ public sealed partial class ChatController
     public void RemoveReaction(string cardId, string emoji) =>
         _pendingReactions.RemoveAll(r => r.CardId == cardId && r.Emoji == emoji);
 
+    /// <summary>Workspace events the model can't see happen (the user discarding its edits
+    /// via the undo button, files changing outside the app, external branch switches). Same
+    /// ride-along mechanism as reactions: folded into the next message's preamble so the
+    /// model's picture of the working tree stays true. Capped — if the queue somehow runs
+    /// away, the oldest facts are the most likely to be stale anyway.</summary>
+    private readonly List<string> _pendingWorkspaceNotes = new();
+
+    public void NoteWorkspaceEvent(string note)
+    {
+        if (_pendingWorkspaceNotes.Count >= 30) _pendingWorkspaceNotes.RemoveAt(0);
+        _pendingWorkspaceNotes.Add(note);
+    }
+
+    /// <summary>Queues a note describing a shell command the USER ran (`!cmd` / /command),
+    /// output capped so a build log can't flood the preamble.</summary>
+    private void NoteShellCommand(string cmd, bool failed, string output)
+    {
+        if (string.IsNullOrWhiteSpace(cmd)) return;
+        var snippet = output.Length > 400 ? output[..400] + "… [truncated]" : output;
+        NoteWorkspaceEvent(
+            $"The user ran a shell command themselves: `{cmd}` ({(failed ? "FAILED" : "succeeded")}). Output:\n{snippet}");
+    }
+
     private CancellationTokenSource? _requestCts;
     private bool _isProcessing;
 
@@ -333,10 +356,14 @@ public sealed partial class ChatController
         {
             _transcript.Append(_html.UserEcho(input));
 
-            // Shell escape: !<cmd>
+            // Shell escape: !<cmd>. The card renders only in the transcript, which the model
+            // never sees — so queue a workspace note too, or a user-run `git commit` / build
+            // is invisible to the agent (it would have to re-discover the state itself).
             if (input.TrimStart().StartsWith('!'))
             {
-                await _shell.RunAsync(input.TrimStart()[1..].Trim());
+                var cmd = input.TrimStart()[1..].Trim();
+                var (failed, output) = await _shell.RunAsync(cmd);
+                NoteShellCommand(cmd, failed, output);
                 return;
             }
 
@@ -389,6 +416,20 @@ public sealed partial class ChatController
                     lines +
                     "\n\n[Current request:]\n" + processedInput;
                 _pendingReactions.Clear();
+            }
+
+            // Workspace changes the model didn't make and can't see. Framed as facts (not
+            // instructions) with an explicit staleness warning, so the model re-reads rather
+            // than trusting its memory of file contents.
+            if (_pendingWorkspaceNotes.Count > 0)
+            {
+                var notes = string.Join("\n", _pendingWorkspaceNotes.Select(n => "- " + n));
+                processedInput =
+                    "[Workspace changes since your last turn, made outside this conversation. " +
+                    "Your memory of affected file contents may be stale — re-read before relying on it:]\n" +
+                    notes +
+                    "\n\n[Current request:]\n" + processedInput;
+                _pendingWorkspaceNotes.Clear();
             }
 
             if (needsPlanning)
@@ -924,8 +965,11 @@ public sealed partial class ChatController
             case "music-vol":        HandleMusicVolume(rawArgs); return;
 
             case "command":
-                await _shell.RunAsync(rawArgs);
+            {
+                var (failed, output) = await _shell.RunAsync(rawArgs);
+                NoteShellCommand(rawArgs, failed, output);
                 return;
+            }
 
             case "skills":
                 ShowSkills();

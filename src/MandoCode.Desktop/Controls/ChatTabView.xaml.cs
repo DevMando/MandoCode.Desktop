@@ -208,6 +208,8 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
                     HandleReaction(msg["unreact:".Length..], add: false);
                 else if (msg == "drag-enter")
                     ShowDropOverlay();   // a drag crossed onto the WebView surface — see DropOverlay
+                else if (msg != null && msg.StartsWith("undo-file:", StringComparison.Ordinal))
+                    UndoFileFromCard(msg["undo-file:".Length..]);   // interactive diff card's Undo chip
             };
 
             // Serve bundled web assets (highlight.js) to the transcript document.
@@ -309,6 +311,7 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         if (_shutDown) return;
         _shutDown = true;
         _webViewReady = false;
+        StopExplorerWatcher();
 
         // Detach BEFORE cancelling. A cancelled turn unwinds through the harness and writes its
         // last blocks to the transcript; still-attached handlers would drive those into a
@@ -609,6 +612,8 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         SendLabel.Text = processing ? "Stop" : "Send";
         ModelButton.IsEnabled = !processing;   // no model switch mid-turn
 
+        RefreshBranchChip();
+
         HeaderChanged?.Invoke(this);
     }
 
@@ -617,7 +622,208 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         BusyPanel.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         BusyRing.IsActive = busy;
         if (busy) BusyText.Text = string.IsNullOrWhiteSpace(activity) ? "Working..." : activity;
+        else
+        {
+            // Turn just ended: refresh git state and snapshot it as the baseline for
+            // detecting OUTSIDE-the-conversation changes before the next send.
+            _wsTracker.MarkCapturePending();
+            RefreshBranchChip(force: true);
+        }
     }
+
+    // ============================================================
+    // Workspace-change notes for the model
+    // ============================================================
+    // The model only knows what happened inside the conversation. Anything else — the undo
+    // button discarding its edits, files changed in another editor, external branch switches
+    // — is invisible to it and leaves its picture of the working tree stale. The decision
+    // logic lives in WorkspaceDeltaTracker (pure, unit-testable); this class only feeds it:
+    // turn end → MarkCapturePending, git refresh → CaptureBaselineIfPending, watcher touch →
+    // RecordTouch, send → EmitDelta. Notes queue on the controller (same pattern as reactions).
+
+    private GitBranchInfo? _lastGitInfo;
+    private readonly WorkspaceDeltaTracker _wsTracker = new();
+
+    /// <summary>Called at send time: queues notes for whatever changed outside the
+    /// conversation since the last turn ended, then re-baselines.</summary>
+    private void EmitWorkspaceDelta()
+    {
+        foreach (var note in _wsTracker.EmitDelta(_lastGitInfo))
+            _controller.NoteWorkspaceEvent(note);
+    }
+
+    // ============================================================
+    // Git status strip
+    // ============================================================
+
+    private int _branchRefreshSeq;
+    private DateTime _lastBranchRefresh = DateTime.MinValue;
+    private string? _lastGitRoot;
+    private readonly ObservableCollection<GitChangeItem> _changes = new();
+
+    /// <summary>Fire-and-forget refresh of the bottom status strip AND the explorer's Changes
+    /// tab (one git call feeds both). Throttled (UpdateHeader runs on every controller state
+    /// change) except when the root changed; sequence-guarded so an older, slower git call
+    /// can never overwrite a newer result; any failure just hides the strip.</summary>
+    private async void RefreshBranchChip(bool force = false)
+    {
+        var root = _controller.ProjectRootPath;
+        if (root != _lastGitRoot) force = true;   // never show the previous folder's state
+        if (!force && (DateTime.UtcNow - _lastBranchRefresh).TotalSeconds < 2) return;
+        _lastBranchRefresh = DateTime.UtcNow;
+        _lastGitRoot = root;
+
+        var seq = ++_branchRefreshSeq;
+        var info = await Task.Run(() => GitQuickStatus.TryGet(root));
+
+        if (_shutDown || seq != _branchRefreshSeq) return;
+        _lastGitInfo = info;
+        UpdateChangesList(info, root);
+        _wsTracker.CaptureBaselineIfPending(info);
+        if (info == null)
+        {
+            StatusStrip.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        BranchText.Text = info.Branch
+            + (info.Ahead > 0 ? $" ↑{info.Ahead}" : "")
+            + (info.Behind > 0 ? $" ↓{info.Behind}" : "");
+
+        // One status light: conflicts trump dirty trumps clean.
+        var (dotBrush, state) =
+            info.Conflicted ? ("MandoRedBrush", "merge conflicts")
+            : info.Dirty ? ("MandoGoldBrush", "uncommitted changes")
+            : ("MandoGreenBrush", "clean");
+        BranchDot.Fill = Application.Current.Resources[dotBrush] as Brush;
+
+        var foreignRoot = info.RepoRoot.Length > 0 && !string.Equals(
+            Path.TrimEndingDirectorySeparator(info.RepoRoot),
+            Path.TrimEndingDirectorySeparator(root), StringComparison.OrdinalIgnoreCase);
+        ToolTipService.SetToolTip(StatusStrip,
+            (info.Detached ? "Detached HEAD at commit " + info.Branch : "Git branch: " + info.Branch)
+            + " — " + state
+            + (info.Ahead > 0 || info.Behind > 0
+                ? $" ({info.Ahead} ahead, {info.Behind} behind upstream)" : "")
+            // Git found the repo in an ANCESTOR folder — say so, or this reads as a ghost.
+            + (foreignRoot ? $"\nRepository root: {info.RepoRoot} (this folder is inside that repository)" : ""));
+        StatusStrip.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>Rebuilds the Changes tab's rows from a fresh git snapshot (UI thread).</summary>
+    private void UpdateChangesList(GitBranchInfo? info, string root)
+    {
+        if (ChangesList.ItemsSource == null) ChangesList.ItemsSource = _changes;
+
+        // Rebuilding the collection re-realizes every ListView row — a visible flash — so
+        // bail when this snapshot is identical to what's already shown (the common case:
+        // most refreshes confirm state rather than change it). Badges derive from the same
+        // data, so they can't have changed either.
+        var incoming = info?.Changes ?? (IReadOnlyList<GitChangeEntry>)Array.Empty<GitChangeEntry>();
+        if (incoming.Count == _changes.Count)
+        {
+            var identical = true;
+            for (var i = 0; i < incoming.Count; i++)
+            {
+                if (incoming[i].RelPath != _changes[i].RelPath || incoming[i].Kind != _changes[i].Kind)
+                {
+                    identical = false;
+                    break;
+                }
+            }
+            if (identical) return;
+        }
+
+        _changes.Clear();
+        if (info != null)
+        {
+            foreach (var c in info.Changes)
+            {
+                var relNative = c.RelPath.Replace('/', Path.DirectorySeparatorChar);
+                _changes.Add(new GitChangeItem
+                {
+                    Kind = c.Kind,
+                    KindBrush = BrushForKind(c.Kind),
+                    KindLabel = c.Kind switch
+                    {
+                        "!" => "Merge conflict",
+                        "U" => "Untracked (new, not yet added)",
+                        "A" => "Added",
+                        "D" => "Deleted",
+                        "R" => "Renamed",
+                        _ => "Modified",
+                    },
+                    Name = Path.GetFileName(c.RelPath.TrimEnd('/')),
+                    Dir = Path.GetDirectoryName(relNative)?.Replace(Path.DirectorySeparatorChar, '/') ?? "",
+                    FullPath = Path.Combine(root, relNative),
+                    RelPath = c.RelPath,
+                    TagTooltip = $"Tag in prompt — inserts @{c.RelPath}",
+                });
+            }
+        }
+
+        ChangesTabButton.Content = _changes.Count > 0 ? $"Changes ({_changes.Count})" : "Changes";
+        ChangesEmptyText.Visibility = _changesTabActive && _changes.Count == 0
+            ? Visibility.Visible : Visibility.Collapsed;
+        CommitButton.IsEnabled = _changes.Count > 0;
+
+        RebuildDirtySets(info);
+        RefreshExplorerDirtyFlags();
+    }
+
+    // --- dirty badges on the file tree ---
+    // A changed file gets a gold dot; every ancestor folder gets one too, so a collapsed
+    // folder still signals "something inside changed" (VS Code's badge behavior).
+
+    private readonly HashSet<string> _gitDirtyFiles = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _gitDirtyDirs = new(StringComparer.OrdinalIgnoreCase);
+
+    private void RebuildDirtySets(GitBranchInfo? info)
+    {
+        _gitDirtyFiles.Clear();
+        _gitDirtyDirs.Clear();
+        if (info == null) return;
+        foreach (var c in info.Changes)
+        {
+            var rel = c.RelPath.TrimEnd('/');
+            // Untracked directories arrive as one "dir/" entry — that's a dir badge, not a file.
+            if (c.RelPath.EndsWith('/')) _gitDirtyDirs.Add(rel);
+            else _gitDirtyFiles.Add(rel);
+            for (var slash = rel.LastIndexOf('/'); slash > 0; slash = rel.LastIndexOf('/'))
+            {
+                rel = rel[..slash];
+                _gitDirtyDirs.Add(rel);
+            }
+        }
+    }
+
+    /// <summary>Re-flags every REALIZED tree node in place (expansion state survives).
+    /// Nodes created later pick their flag up at creation in LoadChildNodes.</summary>
+    private void RefreshExplorerDirtyFlags()
+    {
+        Walk(ExplorerTree.RootNodes);
+
+        void Walk(IList<TreeViewNode> nodes)
+        {
+            foreach (var node in nodes)
+            {
+                if (node.Content is ExplorerItem item) item.Dirty = IsItemDirty(item);
+                if (node.Children.Count > 0) Walk(node.Children);
+            }
+        }
+    }
+
+    private bool IsItemDirty(ExplorerItem item) =>
+        item.IsDirectory ? _gitDirtyDirs.Contains(item.RelPath) : _gitDirtyFiles.Contains(item.RelPath);
+
+    private static Brush? BrushForKind(string kind) =>
+        Application.Current.Resources[kind switch
+        {
+            "!" or "D" => "MandoRedBrush",
+            "A" or "U" => "MandoGreenBrush",
+            "R" => "MandoSkyBrush",
+            _ => "MandoGoldBrush",
+        }] as Brush;
 
     private void UpdatePlanProgress(int done, int total, bool active)
     {
@@ -714,7 +920,33 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
 
     private void ExplorerButton_Click(object sender, RoutedEventArgs e) => ToggleExplorer(!_explorerOpen);
     private void ExplorerClose_Click(object sender, RoutedEventArgs e) => ToggleExplorer(false);
-    private void ExplorerRefresh_Click(object sender, RoutedEventArgs e) => BuildExplorerRoot();
+
+    private void ExplorerRefresh_Click(object sender, RoutedEventArgs e)
+    {
+        BuildExplorerRoot();
+        RefreshBranchChip(force: true);   // the Changes tab re-reads too
+    }
+
+    // --- Files / Changes tabs ---
+
+    private bool _changesTabActive;
+
+    private void FilesTab_Click(object sender, RoutedEventArgs e) => SetExplorerTab(changes: false);
+    private void ChangesTab_Click(object sender, RoutedEventArgs e) => SetExplorerTab(changes: true);
+
+    private void SetExplorerTab(bool changes)
+    {
+        _changesTabActive = changes;
+        ExplorerTree.Visibility = changes ? Visibility.Collapsed : Visibility.Visible;
+        ChangesList.Visibility = changes ? Visibility.Visible : Visibility.Collapsed;
+        ChangesEmptyText.Visibility = changes && _changes.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        ChangesFooter.Visibility = changes ? Visibility.Visible : Visibility.Collapsed;
+        CommitButton.IsEnabled = _changes.Count > 0;
+        FilesTabButton.FontWeight = changes ? Microsoft.UI.Text.FontWeights.Normal : Microsoft.UI.Text.FontWeights.SemiBold;
+        ChangesTabButton.FontWeight = changes ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal;
+        FilesTabButton.Opacity = changes ? 0.55 : 1;
+        ChangesTabButton.Opacity = changes ? 1 : 0.55;
+    }
 
     private void ChatRoot_SizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -800,6 +1032,216 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         ToolTipService.SetToolTip(ExplorerRootText, _explorerRoot);
         ExplorerTree.RootNodes.Clear();
         foreach (var node in LoadChildNodes(_explorerRoot)) ExplorerTree.RootNodes.Add(node);
+        StartExplorerWatcher(_explorerRoot);
+    }
+
+    // --- filesystem watcher: the tree follows external creates/deletes/renames on its own ---
+    // Efficiency comes from three choices: (1) only NAME notifications — content writes don't
+    // change tree shape; (2) events debounce into one flush, so a build touching 500 files
+    // costs one pass; (3) a flush re-syncs only REALIZED directory nodes — churn under a
+    // never-expanded folder (node_modules, bin/obj) is a hash lookup and a skip, because
+    // lazy loading will read the truth from disk whenever it's finally expanded.
+
+    private FileSystemWatcher? _fsWatcher;
+    private readonly object _fsLock = new();
+    private readonly HashSet<string> _pendingFsDirs = new(StringComparer.OrdinalIgnoreCase);
+    private bool _fsFlushQueued;
+    private bool _fsSyncAll;   // watcher buffer overflowed — re-sync every realized dir
+
+    private void StartExplorerWatcher(string root)
+    {
+        StopExplorerWatcher();
+        try
+        {
+            _fsWatcher = new FileSystemWatcher(root)
+            {
+                IncludeSubdirectories = true,
+                // LastWrite so EDITS refresh git state (M rows, badges, dirty dot) — name
+                // events alone only cover tree shape. Content writes are routed git-only
+                // below: they can't change the tree, so they never trigger tree syncs.
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite,
+                InternalBufferSize = 64 * 1024,   // max — fewer overflows during big builds
+            };
+            _fsWatcher.Created += (_, e) => QueueFsEvent(e.FullPath);
+            _fsWatcher.Deleted += (_, e) => QueueFsEvent(e.FullPath);
+            _fsWatcher.Renamed += (_, e) => { QueueFsEvent(e.OldFullPath); QueueFsEvent(e.FullPath); };
+            _fsWatcher.Changed += (_, e) => QueueFsEvent(e.FullPath, treeRelevant: false);
+            _fsWatcher.Error += (_, _) => { lock (_fsLock) { _fsSyncAll = true; } QueueFsEvent(root); };
+            _fsWatcher.EnableRaisingEvents = true;
+        }
+        catch
+        {
+            _fsWatcher = null;   // best-effort — the refresh button still exists
+        }
+    }
+
+    private void StopExplorerWatcher()
+    {
+        try { _fsWatcher?.Dispose(); } catch { }
+        _fsWatcher = null;
+    }
+
+    /// <summary>Threadpool-side: coalesce this event's parent directory into the pending set
+    /// and arm one debounced flush. .git churn and content-only writes skip the tree but
+    /// still refresh git state — that's how external edits, branch switches, and commits
+    /// show up without a manual refresh.</summary>
+    private void QueueFsEvent(string fullPath, bool treeRelevant = true)
+    {
+        bool arm;
+        lock (_fsLock)
+        {
+            var rel = ToRelOrNull(fullPath)?.Replace('\\', '/');
+            if (rel == null) return;
+            var isGit = rel.StartsWith(".git", StringComparison.OrdinalIgnoreCase);
+
+            // Our OWN git calls write .git/index (+ transient *.lock files) — reacting to
+            // those would refresh forever: refresh → git status → index event → refresh…
+            // Ignore them; real external actions (checkout, commit) also touch HEAD/refs,
+            // which still get through and trigger the refresh we want.
+            if (isGit && (rel.EndsWith("/index", StringComparison.OrdinalIgnoreCase)
+                       || rel.EndsWith(".lock", StringComparison.OrdinalIgnoreCase)))
+                return;
+
+            if (!isGit && treeRelevant)
+                _pendingFsDirs.Add(Path.GetDirectoryName(fullPath) ?? "");
+
+            // Workspace notes: remember WHICH files were touched while the agent was idle.
+            // Status-snapshot diffing alone misses content edits to files that were ALREADY
+            // dirty/untracked (their status entry doesn't change) — this set fills that gap.
+            // Idle-gated so the agent's own writes never count as external.
+            if (!isGit && !_controller.IsProcessing)
+                _wsTracker.RecordTouch(rel);
+
+            arm = !_fsFlushQueued;
+            _fsFlushQueued = true;
+        }
+        if (arm) _ = FlushFsEventsAsync();
+
+        string? ToRelOrNull(string p)
+        {
+            var root = _explorerRoot;
+            if (root == null) return null;
+            var prefix = Path.TrimEndingDirectorySeparator(root) + Path.DirectorySeparatorChar;
+            return p.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ? p[prefix.Length..] : null;
+        }
+    }
+
+    private async Task FlushFsEventsAsync()
+    {
+        await Task.Delay(800);   // coalesce the burst
+        List<string> dirs;
+        bool syncAll;
+        lock (_fsLock)
+        {
+            syncAll = _fsSyncAll;
+            _fsSyncAll = false;
+            dirs = _pendingFsDirs.ToList();
+            _pendingFsDirs.Clear();
+            _fsFlushQueued = false;
+        }
+        OnUi(() =>
+        {
+            if (_shutDown) return;
+            if (syncAll) SyncAllRealizedDirs();
+            else foreach (var dir in dirs) SyncRealizedDir(dir);
+            RefreshBranchChip(force: true);   // badges, Changes tab, and status strip follow
+        });
+    }
+
+    /// <summary>Re-syncs one directory's children IF that directory is realized in the tree;
+    /// unexpanded directories are skipped (lazy load reads fresh from disk anyway).</summary>
+    private void SyncRealizedDir(string dir)
+    {
+        var list = FindRealizedChildList(dir);
+        if (list != null) SyncDirectoryNode(list, dir);
+    }
+
+    private void SyncAllRealizedDirs()
+    {
+        var root = _explorerRoot;
+        if (root == null) return;
+        SyncDirectoryNode(ExplorerTree.RootNodes, root);
+        Walk(ExplorerTree.RootNodes);
+
+        void Walk(IList<TreeViewNode> nodes)
+        {
+            foreach (var n in nodes)
+            {
+                if (n is { HasUnrealizedChildren: false, Content: ExplorerItem { IsDirectory: true } item })
+                {
+                    SyncDirectoryNode(n.Children, item.FullPath);
+                    Walk(n.Children);
+                }
+            }
+        }
+    }
+
+    private IList<TreeViewNode>? FindRealizedChildList(string dir)
+    {
+        var root = _explorerRoot;
+        if (root == null) return null;
+        if (PathsEqual(dir, root)) return ExplorerTree.RootNodes;
+        return Find(ExplorerTree.RootNodes);
+
+        IList<TreeViewNode>? Find(IList<TreeViewNode> nodes)
+        {
+            foreach (var n in nodes)
+            {
+                if (n.Content is ExplorerItem { IsDirectory: true } item && PathsEqual(item.FullPath, dir))
+                    return n.HasUnrealizedChildren ? null : n.Children;
+                if (n.Children.Count > 0)
+                {
+                    var found = Find(n.Children);
+                    if (found != null) return found;
+                }
+            }
+            return null;
+        }
+
+        static bool PathsEqual(string a, string b) => string.Equals(
+            Path.TrimEndingDirectorySeparator(a), Path.TrimEndingDirectorySeparator(b),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Minimal diff of a realized directory node against disk: remove rows whose
+    /// path vanished, insert new rows at their sorted position. Never rebuilds surviving
+    /// nodes, so expansion state below them is preserved.</summary>
+    private void SyncDirectoryNode(IList<TreeViewNode> children, string dir)
+    {
+        var root = _explorerRoot ?? _controller.ProjectRootPath;
+        string[] dirs, files;
+        try
+        {
+            dirs = Directory.GetDirectories(dir);
+            files = Directory.GetFiles(dir);
+        }
+        catch (Exception) { return; }
+        Array.Sort(dirs, StringComparer.OrdinalIgnoreCase);
+        Array.Sort(files, StringComparer.OrdinalIgnoreCase);
+
+        var desired = new List<(string Path, bool IsDir)>(dirs.Length + files.Length);
+        foreach (var d in dirs) desired.Add((d, true));
+        foreach (var f in files) desired.Add((f, false));
+        var desiredSet = new HashSet<string>(desired.Select(x => x.Path), StringComparer.OrdinalIgnoreCase);
+
+        for (var i = children.Count - 1; i >= 0; i--)
+            if (children[i].Content is ExplorerItem it && !desiredSet.Contains(it.FullPath))
+                children.RemoveAt(i);
+
+        var existing = new HashSet<string>(
+            children.Select(n => (n.Content as ExplorerItem)?.FullPath ?? ""),
+            StringComparer.OrdinalIgnoreCase);
+
+        for (var idx = 0; idx < desired.Count; idx++)
+        {
+            var (path, isDir) = desired[idx];
+            if (existing.Contains(path)) continue;
+            var item = isDir ? ExplorerItem.ForFolder(path, root) : ExplorerItem.ForFile(path, root);
+            item.Dirty = IsItemDirty(item);
+            var node = new TreeViewNode { Content = item };
+            if (isDir) node.HasUnrealizedChildren = true;
+            children.Insert(Math.Min(idx, children.Count), node);
+        }
     }
 
     /// <summary>One directory level, folders first then files, both alphabetical. Unreadable
@@ -818,18 +1260,129 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         Array.Sort(dirs, StringComparer.OrdinalIgnoreCase);
         Array.Sort(files, StringComparer.OrdinalIgnoreCase);
         foreach (var d in dirs)
-            nodes.Add(new TreeViewNode { Content = ExplorerItem.ForFolder(d, root), HasUnrealizedChildren = true });
+        {
+            var item = ExplorerItem.ForFolder(d, root);
+            item.Dirty = IsItemDirty(item);
+            nodes.Add(new TreeViewNode { Content = item, HasUnrealizedChildren = true });
+        }
         foreach (var f in files)
-            nodes.Add(new TreeViewNode { Content = ExplorerItem.ForFile(f, root) });
+        {
+            var item = ExplorerItem.ForFile(f, root);
+            item.Dirty = IsItemDirty(item);
+            nodes.Add(new TreeViewNode { Content = item });
+        }
         return nodes;
     }
 
-    /// <summary>The row's @ button: tags the file/folder in the prompt — identical result to
-    /// dragging the row onto the input box.</summary>
+    /// <summary>The row's @ button — shared by the file tree (TreeViewNode rows) and the
+    /// Changes list (GitChangeItem rows): tags the file/folder in the prompt, identical
+    /// result to dragging the row onto the input box.</summary>
     private void ExplorerTag_Click(object sender, RoutedEventArgs e)
     {
-        if ((sender as FrameworkElement)?.DataContext is TreeViewNode { Content: ExplorerItem item })
-            InsertFileTokens(new[] { item.FullPath });
+        var ctx = (sender as FrameworkElement)?.DataContext;
+        var path = ctx switch
+        {
+            TreeViewNode { Content: ExplorerItem item } => item.FullPath,
+            GitChangeItem change => change.FullPath,
+            _ => null,
+        };
+        if (path != null) InsertFileTokens(new[] { path });
+    }
+
+    private void ChangesList_DragItemsStarting(object sender, DragItemsStartingEventArgs e)
+    {
+        var paths = e.Items.OfType<GitChangeItem>().Select(c => c.FullPath).ToList();
+        if (paths.Count == 0) { e.Cancel = true; return; }
+        e.Data.SetText(string.Join("\n", paths));
+        e.Data.RequestedOperation = DataPackageOperation.Copy;
+    }
+
+    /// <summary>The row's ± button: show this file's diff as a transcript DiffCard. An
+    /// explicit button (not row click) so selecting or starting a drag never spawns a card,
+    /// and no click-vs-double-click disambiguation delay is needed.</summary>
+    private async void ChangesDiff_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not GitChangeItem item || _shutDown) return;
+
+        var root = _controller.ProjectRootPath;
+        var diff = await Task.Run(() => GitQuickStatus.TryGetDiff(root, item.RelPath, untracked: item.Kind == "U"));
+        if (_shutDown) return;
+
+        if (diff == null)
+            _transcript.Append(_html.Warn($"Couldn't get a diff for {item.RelPath}"));
+        else if (diff.Lines.Count == 0)
+            _transcript.Append(_html.Dim($"{item.RelPath}: {diff.Summary}"));
+        else
+            _transcript.Append(_html.DiffCard(item.RelPath, diff.Lines, diff.Summary, interactive: true));
+    }
+
+    /// <summary>Pre-fills the prompt with a commit request — never sends, never commits.
+    /// Caret-aware insert, so tagging files first then clicking Commit… composes naturally
+    /// ("@a.cs @b.cs Commit the current changes…"). The user can edit, then sends; the
+    /// bottom-bar approval gates the actual git command.</summary>
+    private void Commit_Click(object sender, RoutedEventArgs e) =>
+        InsertAtCaret("Commit the current changes with an appropriate message");
+
+    private void ChangeUndo_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is GitChangeItem item)
+            UndoFileFromCard(item.RelPath);
+    }
+
+    /// <summary>Fire-and-forget bridge for non-async call sites (web message handler, row
+    /// button). async void is safe here: ConfirmAndUndoAsync catches nothing fatal — git
+    /// failure is reported to the transcript, not thrown.</summary>
+    private async void UndoFileFromCard(string relPath) => await ConfirmAndUndoAsync(relPath);
+
+    /// <summary>The one destructive action in the app, so it always confirms first —
+    /// whether it came from a Changes row or a diff card's Undo chip.</summary>
+    private async Task ConfirmAndUndoAsync(string relPath)
+    {
+        var dialog = new ContentDialog
+        {
+            Title = "Discard changes?",
+            Content = $"{relPath} will be restored to its state at the last commit. This can't be undone.",
+            PrimaryButtonText = "Discard changes",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = XamlRoot,
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+
+        var root = _controller.ProjectRootPath;
+        var ok = await Task.Run(() => GitQuickStatus.TryUndoChanges(root, relPath));
+        if (_shutDown) return;
+        _transcript.Append(ok
+            ? _html.Success($"Restored {relPath} to its state at the last commit.")
+            : _html.Warn($"Couldn't restore {relPath} — is it still tracked by git?"));
+        if (ok)
+        {
+            // Tell the model explicitly — discarding its work is feedback, not just a file
+            // event — and re-baseline so the generic delta doesn't report it a second time.
+            _controller.NoteWorkspaceEvent(
+                $"The user DISCARDED all uncommitted changes to {relPath} (restored to the last commit). " +
+                "If you changed that file earlier, those changes are gone by the user's choice — don't re-apply them unless asked.");
+            _wsTracker.MarkCapturePending();
+        }
+        RefreshBranchChip(force: true);
+    }
+
+    private void ChangesList_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+    {
+        if ((e.OriginalSource as FrameworkElement)?.DataContext is not GitChangeItem item) return;
+        if (!File.Exists(item.FullPath)) return;   // deleted entries have nothing to open
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = item.FullPath,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            _transcript.Append(_html.Warn($"Couldn't open file: {ex.Message}"));
+        }
     }
 
     private void ExplorerTag_PointerEntered(object sender, PointerRoutedEventArgs e)
@@ -1039,6 +1592,7 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         var text = InputBox.Text;
         if (string.IsNullOrWhiteSpace(text) || _controller.IsProcessing) return;
 
+        EmitWorkspaceDelta();   // queue outside-the-conversation changes before this send
         InputBox.Text = "";
         HideSuggestions();
         UpdateHeader();
@@ -1550,7 +2104,23 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
     /// transcript (the plan stays readable), but it DOES gate input — the turn is awaiting the choice.</summary>
     private void ShowPlanApprovalBar(ApprovalRequest request, Action<string> onChosen)
     {
+        // Windows 98 theme: the bar drops its rounded card look and reads as a silver
+        // dialog strip — square corners, dialog-face background. Rebuilt on every show,
+        // so live theme switches take effect on the next approval.
+        var win98 = ThemeManager.Current.Win98;
+        PlanApprovalBar.CornerRadius = new CornerRadius(win98 ? 0 : 12);
+        PlanApprovalBar.Background = (Brush)Application.Current.Resources[
+            win98 ? "MandoBackgroundBrush" : "MandoPanelBrush"];
+
         PlanApprovalTitle.Text = request.Title;
+
+        // Command approvals ride this bar too: show the command in monospace. The buttons
+        // live in a WrapPanel — one horizontal row whenever it fits, wrapping only when the
+        // window is too narrow for the long "don't ask again" labels.
+        PlanApprovalCommand.Text = string.IsNullOrEmpty(request.CommandText) ? "" : "$ " + request.CommandText;
+        PlanApprovalCommand.Visibility = string.IsNullOrEmpty(request.CommandText)
+            ? Visibility.Collapsed : Visibility.Visible;
+
         PlanApprovalButtons.Children.Clear();
         foreach (var option in request.Options)
         {
@@ -1560,6 +2130,7 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
             content.Children.Add(new TextBlock { Text = option.Label });
 
             var button = new Button { Content = content, Tag = option.Label, Padding = new Thickness(14, 6, 14, 6) };
+            if (win98) button.CornerRadius = new CornerRadius(0);   // square, like every 98 control
             if (option.Kind == ApprovalOptionKind.Proceed)
                 button.Style = (Style)Application.Current.Resources["AccentButtonStyle"];   // primary
             else
@@ -1633,17 +2204,40 @@ public sealed class ModelItem
 
 /// <summary>One row in the file-explorer tree. Folder nodes are created with unrealized
 /// children and lazy-load their contents on first expand (ChatTabView.ExplorerTree_Expanding).</summary>
-public sealed class ExplorerItem
+public sealed class ExplorerItem : System.ComponentModel.INotifyPropertyChanged
 {
     public string Name { get; private init; } = "";
     public string FullPath { get; private init; } = "";
     public bool IsDirectory { get; private init; }
+
+    /// <summary>Root-relative path with forward slashes \u2014 the key used to match this row
+    /// against git change entries.</summary>
+    public string RelPath { get; private init; } = "";
 
     /// <summary>The exact @token the row produces (root-relative, forward slashes, trailing
     /// '/' on folders) \u2014 shown in the tag button's tooltip so hovering teaches the @ syntax.</summary>
     public string Token { get; private init; } = "";
 
     public string TagTooltip => $"Tag in prompt \u2014 inserts {Token}";
+
+    /// <summary>Files: this file has uncommitted changes. Folders: something inside does.
+    /// Mutable + observable so rows already realized in the tree light up in place when a
+    /// git refresh lands (rebuilding the tree would lose expansion state).</summary>
+    public bool Dirty
+    {
+        get => _dirty;
+        set
+        {
+            if (_dirty == value) return;
+            _dirty = value;
+            PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(DirtyVisibility)));
+        }
+    }
+    private bool _dirty;
+
+    public Visibility DirtyVisibility => _dirty ? Visibility.Visible : Visibility.Collapsed;
+
+    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
 
     public string Glyph => IsDirectory ? "\uE8B7" : "\uE8A5";   // folder / document
 
@@ -1652,12 +2246,43 @@ public sealed class ExplorerItem
     public Brush? IconBrush =>
         Application.Current.Resources[IsDirectory ? "MandoGoldBrush" : "MandoDimBrush"] as Brush;
 
-    public static ExplorerItem ForFolder(string path, string root) =>
-        new() { Name = Path.GetFileName(path), FullPath = path, IsDirectory = true, Token = "@" + Rel(path, root) + "/" };
+    public static ExplorerItem ForFolder(string path, string root)
+    {
+        var rel = Rel(path, root);
+        return new() { Name = Path.GetFileName(path), FullPath = path, IsDirectory = true, RelPath = rel, Token = "@" + rel + "/" };
+    }
 
-    public static ExplorerItem ForFile(string path, string root) =>
-        new() { Name = Path.GetFileName(path), FullPath = path, IsDirectory = false, Token = "@" + Rel(path, root) };
+    public static ExplorerItem ForFile(string path, string root)
+    {
+        var rel = Rel(path, root);
+        return new() { Name = Path.GetFileName(path), FullPath = path, IsDirectory = false, RelPath = rel, Token = "@" + rel };
+    }
 
     private static string Rel(string path, string root) =>
         Path.GetRelativePath(root, path).Replace('\\', '/');
+}
+
+/// <summary>One row in the explorer's Changes tab: a working-tree change with its display
+/// letter/color, split name + directory, and the @token its tag button inserts. Built on
+/// the UI thread from a GitQuickStatus snapshot, so it carries ready-made brushes
+/// (same pattern as ModelItem).</summary>
+public sealed class GitChangeItem
+{
+    public string Kind { get; init; } = "";
+    public string KindLabel { get; init; } = "";
+    public Brush? KindBrush { get; init; }
+    public string Name { get; init; } = "";
+    public string Dir { get; init; } = "";
+    public string FullPath { get; init; } = "";
+    public string RelPath { get; init; } = "";
+    public string TagTooltip { get; init; } = "";
+
+    /// <summary>Undo restores from HEAD, so it needs a HEAD side: hidden for untracked rows
+    /// ("undoing" a new file would DELETE it — different action, different UI) and renamed
+    /// rows (a clean rename-undo needs both paths).</summary>
+    public Visibility UndoVisibility => Kind is "M" or "D" or "!" ? Visibility.Visible : Visibility.Collapsed;
+
+    public string UndoTooltip => Kind == "D"
+        ? "Restore this deleted file"
+        : "Undo changes — restore this file to the last commit (asks first)";
 }

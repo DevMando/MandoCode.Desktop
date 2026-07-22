@@ -557,24 +557,14 @@
                                         <TextBlock Text="Shown behind the conversation in every agent tab. The slider fades the image only — text always stays fully readable."
                                                    Opacity="0.6" FontSize="12" TextWrapping="Wrap"/>
 
-                                        <!-- Live preview: theme background + the image at slider opacity,
-                                             with sample chat lines on top to judge readability. -->
-                                        <Border Height="120" CornerRadius="8"
+                                        <!-- Live preview: a REAL miniature transcript (same shell, CSS, and theme
+                                             script as the chat), so it renders exactly what the tabs render —
+                                             background image + opacity, boxed messages, E-Ink dithering, W98 teal,
+                                             and whatever theme features come next. It can never drift again. -->
+                                        <Border Height="260" CornerRadius="8"
                                                 BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1"
                                                 Background="{StaticResource MandoBackgroundBrush}">
-                                            <Grid>
-                                                <Image x:Name="BgPreviewImage" Stretch="UniformToFill" Opacity="0.3"/>
-                                                <StackPanel Padding="14,0" Spacing="2" VerticalAlignment="Center">
-                                                    <TextBlock Text="&gt; how does this look?"
-                                                               Foreground="{StaticResource MandoGoldBrush}"
-                                                               FontWeight="SemiBold" FontSize="13"/>
-                                                    <TextBlock Text="MandoCode"
-                                                               Foreground="{StaticResource MandoGreenBrush}"
-                                                               FontWeight="Bold" FontSize="12"/>
-                                                    <TextBlock Text="Like this — the image fades, the text never does."
-                                                               Foreground="{StaticResource MandoTextBrush}" FontSize="13"/>
-                                                </StackPanel>
-                                            </Grid>
+                                            <WebView2 x:Name="BgPreviewWeb" DefaultBackgroundColor="Transparent"/>
                                         </Border>
 
                                         <StackPanel Orientation="Horizontal" Spacing="8">
@@ -593,6 +583,22 @@
                                                        VerticalAlignment="Bottom" Margin="0,0,0,8" Opacity="0.7"
                                                        FontSize="13" MinWidth="44"/>
                                         </Grid>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Boxed messages -->
+                                <Border Background="{StaticResource MandoPanelBrush}"
+                                        BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1"
+                                        CornerRadius="8" Padding="16">
+                                    <StackPanel Spacing="8">
+                                        <StackPanel Orientation="Horizontal" Spacing="10">
+                                            <FontIcon Glyph="&#xE8A9;" FontSize="16"/>
+                                            <TextBlock Text="Boxed messages" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                        <TextBlock Text="Each prompt and response gets its own card in the conversation — clearer boundaries for long sessions. Off keeps the classic flat terminal look. Works with every theme."
+                                                   Opacity="0.6" FontSize="12" TextWrapping="Wrap"/>
+                                        <ToggleSwitch x:Name="BoxedMessagesToggle" Toggled="BoxedMessages_Toggled"
+                                                      OnContent="Cards" OffContent="Flat"/>
                                     </StackPanel>
                                 </Border>
 

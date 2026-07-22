@@ -160,6 +160,7 @@ public sealed partial class MainWindow : Window
         ApplyWindowOpacity(ThemeManager.WindowOpacity);
         S_BgOpacity.Value = ThemeManager.ChatBackgroundOpacity * 100;
         S_BgOpacityLabel.Text = $"{(int)S_BgOpacity.Value}%";
+        BoxedMessagesToggle.IsOn = ThemeManager.BoxedMessages;
         UpdateBgControls();
         _appearanceReady = true;   // opacity handlers may persist from here on
 
@@ -380,6 +381,71 @@ public sealed partial class MainWindow : Window
         if (_initialized) return;
         _initialized = true;
         _ = _tabs[0].View.InitializeAsync();
+        InitBgPreview();
+    }
+
+    // ============================================================
+    // Appearance-page live preview — a real miniature transcript
+    // ============================================================
+    // Same shell + theme script as the tabs, so it shows EXACTLY what they show (background
+    // image, boxed messages, E-Ink dithering, W98 chrome). Failures never break settings —
+    // the preview is a luxury.
+
+    private bool _previewWebReady;
+
+    private async void InitBgPreview()
+    {
+        try
+        {
+            await BgPreviewWeb.EnsureCoreWebView2Async();
+            var core = BgPreviewWeb.CoreWebView2;
+            core.Settings.AreDefaultContextMenusEnabled = false;
+
+            // Same virtual hosts the tabs map: assets (highlight.js) + userdata (bg image).
+            try
+            {
+                core.SetVirtualHostNameToFolderMapping(
+                    "mandocode.assets",
+                    System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "web"),
+                    Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Allow);
+            }
+            catch { }
+            try
+            {
+                Directory.CreateDirectory(ThemeManager.UserDataFolder);
+                core.SetVirtualHostNameToFolderMapping(
+                    "mandocode.userdata", ThemeManager.UserDataFolder,
+                    Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Allow);
+            }
+            catch { }
+
+            core.NavigationCompleted += (_, _) =>
+            {
+                if (_previewWebReady) return;
+                _previewWebReady = true;
+                _ = SeedBgPreviewAsync();
+            };
+            core.NavigateToString(TranscriptHtmlBuilder.BaseDocument(ThemeManager.Current));
+        }
+        catch { /* no preview — settings still fully functional */ }
+    }
+
+    private async Task SeedBgPreviewAsync()
+    {
+        try
+        {
+            var blocks =
+                _html.UserEcho("how does this look?") +
+                _html.AssistantCard(
+                    "Like this — the image fades, the text never does.\n\n" +
+                    "Inline `code` and a block, to judge every surface:\n\n" +
+                    "```csharp\nvar vibe = \"immaculate\";\n```");
+            await BgPreviewWeb.CoreWebView2.ExecuteScriptAsync(
+                "window.__append(" + JsonSerializer.Serialize(blocks) + ");");
+            await BgPreviewWeb.CoreWebView2.ExecuteScriptAsync(
+                ThemeManager.BuildTranscriptScript(ThemeManager.Current));
+        }
+        catch { }
     }
 
     private void OnUi(Action action)
@@ -410,6 +476,10 @@ public sealed partial class MainWindow : Window
     private void ApplyThemeToAllTabs()
     {
         foreach (var tab in _tabs) tab.View.ApplyTheme();
+        // The appearance preview is a transcript too — it re-themes with everyone else.
+        if (_previewWebReady && BgPreviewWeb.CoreWebView2 != null)
+            _ = BgPreviewWeb.CoreWebView2.ExecuteScriptAsync(
+                ThemeManager.BuildTranscriptScript(ThemeManager.Current));
     }
 
     private void CopyToClipboard(string text)
@@ -1155,11 +1225,17 @@ public sealed partial class MainWindow : Window
         ApplyThemeToAllTabs();
     }
 
+    private void BoxedMessages_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (!_appearanceReady) return;   // see _appearanceReady — a Save() here wipes settings
+        ThemeManager.SetBoxedMessages(BoxedMessagesToggle.IsOn);
+        ApplyThemeToAllTabs();   // live — existing messages re-skin instantly
+    }
+
     private void BgOpacity_Changed(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
     {
         if (!_appearanceReady) return;   // see _appearanceReady — a Save() here wipes settings
         S_BgOpacityLabel.Text = $"{(int)e.NewValue}%";
-        BgPreviewImage.Opacity = e.NewValue / 100.0;
         ThemeManager.SetChatBackgroundOpacity(e.NewValue / 100.0);
         ApplyThemeToAllTabs();   // live preview while dragging — the script is tiny
     }
@@ -1170,22 +1246,8 @@ public sealed partial class MainWindow : Window
         BgFileLabel.Text = hasImage ? "Image set ✓" : "No image set";
         BgClearButton.IsEnabled = hasImage;
         S_BgOpacity.IsEnabled = hasImage;
-        BgPreviewImage.Opacity = ThemeManager.ChatBackgroundOpacity;
-
-        // Decode from bytes, not from the file URI — a URI-sourced BitmapImage keeps the
-        // file open, and SetChatBackground must be able to overwrite it on the next pick.
-        BitmapImage? bmp = null;
-        if (hasImage)
-        {
-            try
-            {
-                using var ms = new MemoryStream(File.ReadAllBytes(ThemeManager.ChatBackgroundFile!));
-                bmp = new BitmapImage();
-                bmp.SetSource(ms.AsRandomAccessStream());
-            }
-            catch { bmp = null; /* unreadable image — preview just shows the theme colors */ }
-        }
-        BgPreviewImage.Source = bmp;
+        // The preview WebView renders the image itself (via the userdata host + theme
+        // script), so there is no XAML image to update here anymore.
     }
 
     // WinUI has no Window.Opacity — whole-window translucency is a Win32 layered-window

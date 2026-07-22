@@ -37,6 +37,11 @@ public sealed record UiTheme
     /// no animation. Gated in the WebView via an html[data-crt] attribute.</summary>
     public bool Crt { get; init; }
 
+    /// <summary>When true, the transcript wears Windows-98 chrome: square corners, two-tone
+    /// 3D bevels lit from the top-left, navy title-bar gradients on panels, Tahoma, classic
+    /// chunky scrollbars. Gated in the WebView via an html[data-win98] attribute.</summary>
+    public bool Win98 { get; init; }
+
     public static readonly IReadOnlyList<UiTheme> All = new[]
     {
         // First entry is the default for fresh installs (ThemeManager falls back to All[0]).
@@ -156,6 +161,23 @@ public sealed record UiTheme
         },
         new UiTheme
         {
+            // The whole palette is era-authentic: 3D-face silver surfaces, white sunken
+            // content wells, the 16-color navy/olive/teal-adjacent accents (hyperlink blue
+            // for links), black text. FlatMotion is period-correct — nothing animated in
+            // 1998. The real costume is the data-win98 CSS in TranscriptHtmlBuilder:
+            // square corners, two-tone bevels, and navy title-bar gradients on every panel.
+            Name = "W98 - Y2K",
+            Description = "Silver bevels, navy title bars, teal desktop. Party like it's 1998. 🖥️",
+            IsLight = true,
+            FlatMotion = true,
+            Win98 = true,
+            Background = "#C0C0C0", Panel = "#FFFFFF", Border = "#808080",
+            Text = "#000000", Dim = "#5A5A5A",
+            Accent = "#000080", Gold = "#806000", Sky = "#0000CC",
+            Green = "#008000", Red = "#B00000", DiffAdd = "#008000",
+        },
+        new UiTheme
+        {
             Name = "Paper Light",
             Description = "A clean light theme with royal purple accents.",
             IsLight = true,
@@ -220,6 +242,20 @@ public static class ThemeManager
     /// fades — the slider dims the picture, not the conversation.</summary>
     public static double ChatBackgroundOpacity { get; private set; } = 0.30;
 
+    /// <summary>Boxed messages: each prompt/response renders on its own frosted card in the
+    /// transcript (hard boundaries, easier long-session scanning) instead of the flat
+    /// terminal look. ON by default — cards are the universal chat idiom and the better
+    /// first impression; the flat-density crowd knows where settings live. Theme-agnostic —
+    /// the CSS uses only theme variables. W98 ignores this: its message windows are bespoke.</summary>
+    public static bool BoxedMessages { get; private set; } = true;
+
+    public static void SetBoxedMessages(bool on)
+    {
+        BoxedMessages = on;
+        Save();
+        // Caller re-applies to tabs (same contract as SetChatBackgroundOpacity).
+    }
+
     /// <summary>Raised after a theme is applied so the window can retheme the WebView.</summary>
     public static event Action? ThemeChanged;
 
@@ -244,6 +280,8 @@ public static class ThemeManager
                 var saved = JsonSerializer.Deserialize<UiSettings>(File.ReadAllText(SettingsPath));
                 Current = UiTheme.All.FirstOrDefault(t => t.Name == saved?.Theme) ?? Current;
                 if (saved?.Opacity is > 0) WindowOpacity = Math.Clamp(saved.Opacity, 0.3, 1.0);
+                // Null = setting predates the feature (or fresh file): take the current default.
+                BoxedMessages = saved?.Boxed ?? true;
                 if (saved?.ChatBgOpacity is > 0) ChatBackgroundOpacity = Math.Clamp(saved.ChatBgOpacity, 0.05, 1.0);
                 if (!string.IsNullOrEmpty(saved?.ChatBackground))
                 {
@@ -332,6 +370,7 @@ public static class ThemeManager
                     Opacity = WindowOpacity,
                     ChatBackground = ChatBackgroundFile == null ? null : Path.GetFileName(ChatBackgroundFile),
                     ChatBgOpacity = ChatBackgroundOpacity,
+                    Boxed = BoxedMessages,
                 }));
         }
         catch { /* persistence is best-effort; the setting is still applied */ }
@@ -400,6 +439,12 @@ public static class ThemeManager
         (t.Crt
             ? "document.documentElement.setAttribute('data-crt','1');"
             : "document.documentElement.removeAttribute('data-crt');") +
+        (t.Win98
+            ? "document.documentElement.setAttribute('data-win98','1');"
+            : "document.documentElement.removeAttribute('data-win98');") +
+        (BoxedMessages
+            ? "document.documentElement.setAttribute('data-cards','1');"
+            : "document.documentElement.removeAttribute('data-cards');") +
         "})();";
 
     private static void SetBrush(ResourceDictionary res, string key, string hex) =>
@@ -426,5 +471,8 @@ public static class ThemeManager
         public double Opacity { get; set; } = 1.0;
         public string? ChatBackground { get; set; }      // file name inside UserDataFolder
         public double ChatBgOpacity { get; set; } = 0.30;
+        /// <summary>Nullable on purpose: absent (pre-feature settings file) means "use the
+        /// current default", so changing the default never fights a user's explicit choice.</summary>
+        public bool? Boxed { get; set; }
     }
 }

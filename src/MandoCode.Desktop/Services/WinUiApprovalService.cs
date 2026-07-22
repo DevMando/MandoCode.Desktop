@@ -178,7 +178,10 @@ public sealed class WinUiApprovalService
             Title = "Run this command?",
             CommandText = command,
             ToastSummary = $"Wants to run: {(command.Length > 48 ? command[..48] + "…" : command)}",
-            Options = options
+            Options = options,
+            // Non-covering bottom bar (like plan approval): the transcript stays readable —
+            // often the context right above IS why the agent wants to run this command.
+            BottomBar = true
         };
 
         var (choice, instructions) = await PromptAllowingInstructionCancelAsync(request);
