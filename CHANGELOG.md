@@ -62,8 +62,31 @@ are visible until you actually open a second tab.
   project they were taken in (freshest project first), a search box filters by title/recap/model/
   project, and Import closes the panel and focuses the chat so the "context armed" confirmation is
   the thing you see.
+- **Collapsible project groups, in both panels.** Each project group in Snapshots and History is an
+  `Expander` you can fold — the answer to "10–100 projects." Which groups you've collapsed is
+  remembered across launches (`PanelState` → `panel-state.json`).
+- **Compare view — two agents side by side.** A **Split** button pairs two agents into a resizable
+  side-by-side view. The pair is an explicit, remembered choice (set by the button or the compare
+  bar's pickers, never by clicking a tab): clicking a paired agent's tab shows the split, clicking
+  any other agent shows it normally while the pair waits. The panes are ordinary agent views moved
+  between grid columns via `Grid.SetColumn` — never re-parented — so both WebViews and their live
+  transcripts survive the switch.
+- **AI-named snapshots.** Saving a snapshot without a name now asks the summarizer for a short,
+  descriptive title from the recap; uniqueness against existing titles is then guaranteed in code
+  (`SnapshotNaming`), so two snapshots can't share a name.
+- **Unread badges.** The History and Snapshots rail badges are now unread counts — items newer than
+  the last time you opened that panel — and clear when you open it, rather than showing a running
+  total. The "last seen" marks persist across launches.
+- **Branded app icon** across the exe, taskbar, and window title bar, plus a lightweight
+  unhandled-exception logger (`crash.log`) to speed up diagnosing native/COM failures.
 
 ### Changed
+- **Closing the last agent is allowed.** The app no longer forces at least one agent open — closing
+  the final one leaves an empty state (with the chat background) and a one-click New agent. Settings,
+  MCP, and snapshot Import disable while no agent is open and re-enable when one exists.
+- **"Take snapshot" goes straight to the picker.** The manual capture (tab `⋯` menu) skips the
+  "snapshot available?" notification bar and opens the name + summarizer-model picker directly — a
+  model switch keeps the bar, since snapshotting isn't a foregone conclusion there.
 - **Closing a tab archives it; `/clear` still forgets.** Closing used to delete a conversation's
   journals outright ("closed tab = conversation gone"). Now it files the conversation into the
   History archive instead, so it can be reopened later; only `/clear` (and eviction past the

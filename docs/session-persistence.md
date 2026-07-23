@@ -24,6 +24,8 @@ Each tier ships independently and degrades gracefully into the one below it.
 |------|---------------|-------|-----------|
 | 1 | Workspace shape: tabs, titles, folders, models, active tab | `workspace.json` | Saved on every structural change + close; restored at launch |
 | 1 | Snapshots | `snapshots.json` | Rewritten on add/remove; loaded at construction |
+| 1 | Closed-conversation index (History) | `sessions.json` | Rewritten on close/reopen/delete; points at the retained per-key journals below |
+| 1 | Panel UI prefs: collapsed groups + per-panel "last seen" unread marks | `panel-state.json` | Rewritten on fold/unfold and when a panel is opened |
 | 2 | The visible transcript | `transcripts/<key>.jsonl` | Append-on-write journal of every HTML block; replayed into the WebView on restore |
 | 3 | The model's memory | `histories/<key>.json` | `AIService.ExportHistoryJson()` at every turn end (write-then-rename); `TryRestoreHistoryJson()` on restore |
 | 3 fallback | A plain-text tail of the dialogue | `conversations/<key>.jsonl` | Armed as imported background on the next send when full fidelity can't apply |
@@ -89,8 +91,12 @@ The design rule held: `/clear` still forgets (deletes the files, never archives)
 of *closing* softened from "gone" to "recoverable." A session that never had a real turn is dropped
 on close regardless — there's nothing worth reopening.
 
-The Snapshots panel caught up at the same time: cards **group by project**, a **search** box filters
-them, and Import gets out of the way so the chat's "context armed" confirmation is what you see.
+Both panels grew the same shape at the same time: cards **group by project**, a **search** box
+filters them, and each project group is a **collapsible** `Expander` whose fold state persists
+(`panel-state.json`). Their rail badges became **unread counts** — items newer than the last time
+you opened that panel — which clear on open and whose "last seen" marks also persist. Snapshots
+gained **AI-generated titles** (unique-checked in code) when saved unnamed, and Import now gets out
+of the way so the chat's "context armed" confirmation is what you see.
 
 ## Future building
 
