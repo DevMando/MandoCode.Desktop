@@ -430,7 +430,7 @@
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <TextBox x:Name="SnapshotNameBox" Grid.Column="0" PlaceholderText="Name (optional)"
+                        <TextBox x:Name="SnapshotNameBox" Grid.Column="0" PlaceholderText="Name (blank = AI names it)"
                                  MaxLength="80" VerticalAlignment="Center"/>
                         <ComboBox x:Name="SnapshotModelCombo" Grid.Column="1" HorizontalAlignment="Stretch"
                                   VerticalAlignment="Center"

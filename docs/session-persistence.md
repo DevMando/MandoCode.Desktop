@@ -24,6 +24,8 @@ Each tier ships independently and degrades gracefully into the one below it.
 |------|---------------|-------|-----------|
 | 1 | Workspace shape: tabs, titles, folders, models, active tab | `workspace.json` | Saved on every structural change + close; restored at launch |
 | 1 | Snapshots | `snapshots.json` | Rewritten on add/remove; loaded at construction |
+| 1 | Closed-conversation index (History) | `sessions.json` | Rewritten on close/reopen/delete; points at the retained per-key journals below |
+| 1 | Panel UI prefs: collapsed groups + per-panel "last seen" unread marks | `panel-state.json` | Rewritten on fold/unfold and when a panel is opened |
 | 2 | The visible transcript | `transcripts/<key>.jsonl` | Append-on-write journal of every HTML block; replayed into the WebView on restore |
 | 3 | The model's memory | `histories/<key>.json` | `AIService.ExportHistoryJson()` at every turn end (write-then-rename); `TryRestoreHistoryJson()` on restore |
 | 3 fallback | A plain-text tail of the dialogue | `conversations/<key>.jsonl` | Armed as imported background on the next send when full fidelity can't apply |
@@ -63,18 +65,43 @@ both sides of the concept line:
 was cleared, there is nothing to carry). If the verbatim import fails, the offer stays up and
 the snapshot path remains as salvage.
 
-## Where snapshots are left off (future building)
+## The History archive — reopening closed conversations
 
-Snapshots persist across launches now, they record their project root, and IDs survive — but
-the panel hasn't caught up: **no grouping by project, no search, and the import UX is
-unchanged.** Those are polish items waiting for the snapshot library to grow now that it's
-durable. Nothing broken, just room.
+The per-key journals turned out to support more than restoring the tabs open at close: they back a
+**History panel** that reopens *any* conversation you've closed. This required one deliberate change
+to the retention model.
 
-Other known headroom, in rough order of value:
+Closing a tab used to delete its journals outright — "closed tab = conversation gone." That made
+the memory/knowledge split lopsided: the only way context survived was to still be open at launch.
+Now closing **archives** instead:
 
-- **Session history browser** — the per-key journals already on disk would support a
-  "reopen any past conversation as a new tab" picker (Claude Code's `/resume` equivalent),
-  not just restoring the tabs that were open at close.
+- `SessionArchiveStore` keeps an app-wide index (`sessions.json`) of closed conversations — the
+  cheap metadata (title, project, model, closed-at, turn count, first message), not the heavy
+  parts. The transcript/log/history journals it points at are the same per-key stores a live tab
+  uses; they simply aren't deleted on close anymore.
+- **Reopen** recreates a tab on the archived persist-key and lets the normal restore cascade run —
+  so a reopened conversation replays its transcript and, when the model can take it, rehydrates its
+  full memory. The row leaves the archive (it's live again) and re-files itself on the next close.
+- The archive is capped at the newest 60; evicting a row deletes its journals, so the on-disk
+  stores stay bounded even for someone who never runs `/clear`.
+- The startup orphan sweep now keeps *archived* keys alongside *open* ones — only genuinely
+  orphaned journals (crash leftovers, pruned folders) are swept.
+
+The design rule held: `/clear` still forgets (deletes the files, never archives). Only the meaning
+of *closing* softened from "gone" to "recoverable." A session that never had a real turn is dropped
+on close regardless — there's nothing worth reopening.
+
+Both panels grew the same shape at the same time: cards **group by project**, a **search** box
+filters them, and each project group is a **collapsible** `Expander` whose fold state persists
+(`panel-state.json`). Their rail badges became **unread counts** — items newer than the last time
+you opened that panel — which clear on open and whose "last seen" marks also persist. Snapshots
+gained **AI-generated titles** (unique-checked in code) when saved unnamed, and Import now gets out
+of the way so the chat's "context armed" confirmation is what you see.
+
+## Future building
+
+In rough order of value:
+
 - **Summarize-at-restore upgrade** — the tail-brief fallback could run `HistorySummarizer`
   over the stored dialogue instead of excerpting it, trading an LLM call for better coverage
   of long sessions.

@@ -17,6 +17,9 @@
     <Version>0.1.0</Version>
     <Authors>Armando Fernandez (DevMando)</Authors>
     <Description>MandoCode Desktop — the MandoCode AI coding agent with a native WinUI 3 interface.</Description>
+    <!-- Embedded in the exe → taskbar, Alt-Tab, and Explorer icon. The title-bar icon is set at
+         runtime from the same .ico (MainWindow), which is also copied to the output below. -->
+    <ApplicationIcon>Assets\images\mandocode-desktop.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -28,6 +31,10 @@
          SetVirtualHostNameToFolderMapping. Bundled, never fetched from a CDN,
          so the transcript works fully offline (MandoCode is offline-first). -->
     <Content Include="Assets\web\**">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <!-- The app icon, copied alongside the exe so MainWindow can set the title-bar icon at runtime. -->
+    <Content Include="Assets\images\mandocode-desktop.ico">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>

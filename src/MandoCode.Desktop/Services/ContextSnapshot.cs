@@ -43,4 +43,18 @@ public sealed class ContextSnapshot
 
     [System.Text.Json.Serialization.JsonIgnore]
     public string TimeLabel => CapturedAt.LocalDateTime.ToString("MMM d · h:mm tt");
+
+    /// <summary>Group heading for the panel: the project folder's leaf name, or a stand-in when the
+    /// snapshot predates project tracking (older files) or was taken outside any folder.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string ProjectLabel
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(ProjectRoot)) return "Unknown project";
+            var name = System.IO.Path.GetFileName(
+                ProjectRoot.TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar));
+            return string.IsNullOrEmpty(name) ? ProjectRoot! : name;
+        }
+    }
 }

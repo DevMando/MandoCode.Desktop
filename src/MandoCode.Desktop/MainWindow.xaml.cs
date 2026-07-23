@@ -37,6 +37,35 @@ public sealed record ModelChoice(string Name, bool IsCloud)
     public string Tag => IsCloud ? "cloud · uses tokens" : "local · free";
 }
 
+/// <summary>A project's snapshots, as one group in the (grouped) snapshots panel. Derives from
+/// <see cref="List{T}"/> so a <see cref="Microsoft.UI.Xaml.Data.CollectionViewSource"/> can group
+/// on it directly — the ListView's group-header template binds to <see cref="Project"/> and
+/// <see cref="Count"/>.</summary>
+public sealed class SnapshotGroup : List<Services.ContextSnapshot>
+{
+    public SnapshotGroup(string project, IEnumerable<Services.ContextSnapshot> items) : base(items)
+        => Project = project;
+
+    public string Project { get; }
+
+    /// <summary>Whether the group's Expander is open. Set when the groups are rebuilt (from the
+    /// remembered collapsed-set) and read once via a OneTime x:Bind — the Expander's own
+    /// expand/collapse events keep the remembered set current thereafter.</summary>
+    public bool IsExpanded { get; set; } = true;
+}
+
+/// <summary>A project's closed conversations, as one collapsible group in the History panel —
+/// the archive twin of <see cref="SnapshotGroup"/>.</summary>
+public sealed class HistoryGroup : List<Services.SessionArchiveEntry>
+{
+    public HistoryGroup(string project, IEnumerable<Services.SessionArchiveEntry> items) : base(items)
+        => Project = project;
+
+    public string Project { get; }
+
+    public bool IsExpanded { get; set; } = true;
+}
+
 /// <summary>Row model for diff lines shown in the approval overlay.</summary>
 public sealed class DiffLineVm
 {
@@ -119,20 +148,25 @@ public sealed partial class MainWindow : Window
 {
     private readonly SessionManager _sessions;
     private readonly SnapshotStore _snapshotStore;   // app-wide context snapshots
+    private readonly SessionArchiveStore _archive;   // app-wide index of closed conversations
     private readonly SkillCoordinator _skillCoordinator;   // app-wide global-skills manager
     private readonly ConfigCoordinator _configs;   // owns the app-wide MCP server list (defaults)
     private readonly TranscriptHtmlBuilder _html;   // app-global, stateless formatter
     private readonly Microsoft.UI.Dispatching.DispatcherQueue _dispatcher;
-    private bool _snapshotsPanelOpen;
 
-    // Slide animation state for the snapshots panel. The column width is tweened per-frame off
+    // Snapshots and History share the one docked column left of the content (Grid.Column 1) and are
+    // mutually exclusive — opening one swaps out the other without re-sliding the column.
+    private bool _snapshotsPanelOpen;
+    private bool _historyPanelOpen;
+
+    // Slide animation state for the docked left column. The width is tweened per-frame off
     // CompositionTarget.Rendering so the panel glides in/out instead of snapping. Width is always
     // held in pixels during and after the tween (never star) so an interrupted open/close can read
     // the current width and continue smoothly from wherever it is.
     private readonly Stopwatch _snapAnimClock = new();
     private EventHandler<object>? _snapAnimHandler;
     private double _snapAnimFrom, _snapAnimTo;
-    private bool _snapAnimHideOnDone;
+    private FrameworkElement? _snapAnimHide;   // panel to collapse when a close tween completes
     private const double SnapAnimDurationMs = 220;
 
     /// <summary>
@@ -170,10 +204,19 @@ public sealed partial class MainWindow : Window
         _html = services.GetRequiredService<TranscriptHtmlBuilder>();
         _sessions = services.GetRequiredService<SessionManager>();
         _snapshotStore = services.GetRequiredService<SnapshotStore>();
+        _archive = services.GetRequiredService<SessionArchiveStore>();
         _skillCoordinator = services.GetRequiredService<SkillCoordinator>();
         _configs = services.GetRequiredService<ConfigCoordinator>();
         // Changed can fire on a background thread (a capture during a model switch).
         _snapshotStore.Changed += () => OnUi(OnSnapshotsChanged);
+        _archive.Changed += () => OnUi(OnArchiveChanged);
+
+        // Remembered fold state + "last seen" watermarks for both panels (persisted UI preference).
+        var panelState = PanelState.Load();
+        foreach (var p in panelState.CollapsedSnapshotGroups) _collapsedSnapshotGroups.Add(p);
+        foreach (var p in panelState.CollapsedHistoryGroups) _collapsedHistoryGroups.Add(p);
+        _snapshotsSeenAt = panelState.SnapshotsSeenAt;
+        _historySeenAt = panelState.HistorySeenAt;
 
         // The first agent. Its whole service graph — AIService, approvals, transcript, token
         // tracking — belongs to it alone, so opening a second tab can't disturb it.
@@ -194,13 +237,23 @@ public sealed partial class MainWindow : Window
         }
 
         // Journals whose sessions no longer exist (tabs closed during a crash, pruned
-        // folders) have nothing to replay into — clean them up.
-        TranscriptJournal.Sweep(_tabs.Select(t => t.View.Session.PersistKey));
-        ConversationLog.Sweep(_tabs.Select(t => t.View.Session.PersistKey));
-        SessionHistoryStore.Sweep(_tabs.Select(t => t.View.Session.PersistKey));
+        // folders) have nothing to replay into — clean them up. Archived (closed-but-recoverable)
+        // sessions are kept: their files back the History panel, so their keys join the keep-set.
+        var liveKeys = _tabs.Select(t => t.View.Session.PersistKey).Concat(_archive.Keys).ToList();
+        TranscriptJournal.Sweep(liveKeys);
+        ConversationLog.Sweep(liveKeys);
+        SessionHistoryStore.Sweep(liveKeys);
 
         // Size the window; defer WebView2 + harness init until the tree is loaded.
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1180, 840));
+        // Title-bar icon. The exe already embeds the same .ico (taskbar/Alt-Tab/Explorer via
+        // <ApplicationIcon>); this sets the little glyph in the window's own title bar. Best-effort.
+        try
+        {
+            var icon = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "images", "mandocode-desktop.ico");
+            if (File.Exists(icon)) AppWindow.SetIcon(icon);
+        }
+        catch { /* a missing/locked icon must never stop the window from opening */ }
         Root.Loaded += Root_Loaded;
         Closed += MainWindow_Closed;
 
@@ -405,6 +458,11 @@ public sealed partial class MainWindow : Window
         // its WebView2 + harness, same cost as if the user had opened them by hand).
         foreach (var entry in _tabs) _ = InitTabAsync(entry);
         InitBgPreview();
+
+        // Both stores load from disk at construction; reflect their counts on the rail at launch,
+        // before the user opens either panel.
+        RefreshSnapshotsBadge();
+        RefreshHistoryBadge();
     }
 
     private async Task InitTabAsync(ChatTabEntry entry)
@@ -608,6 +666,8 @@ public sealed partial class MainWindow : Window
         WireHeader(entry);
 
         SelectTab(entry);
+        if (_snapshotsPanelOpen) PopulateSnapshots();   // an agent exists now → re-enable Import
+        if (HasComparePair) RefreshSplitCombos();       // include the new agent in the pane pickers
         return entry;
     }
 
@@ -633,6 +693,10 @@ public sealed partial class MainWindow : Window
 
     private void SwitchPage(string page)
     {
+        // Settings and MCP act on the selected agent — with none open there's nothing to edit, so
+        // fall back to the (empty) chat. Skills and Appearance are app-global and stay reachable.
+        if ((page == "settings" || page == "mcp") && _sessions.Active == null) page = "chat";
+
         _currentPage = page;
         var showingChat = page == "chat";
 
@@ -648,11 +712,15 @@ public sealed partial class MainWindow : Window
         else if (page == "skills") SlideInPage(SkillsPage, SkillsPageTransform);
         else if (page == "appearance") SlideInPage(AppearancePage, AppearancePageTransform);
 
-        // Every agent view stays loaded; only the selected one shows, and only on the chat page.
-        // Collapsing rather than removing is what keeps each WebView2's transcript alive.
-        foreach (var tab in _tabs)
-            tab.View.Visibility = showingChat && ReferenceEquals(tab, _selected)
-                ? Visibility.Visible : Visibility.Collapsed;
+        // Every agent view stays loaded; only the visible one(s) show, and only on the chat page.
+        // Collapsing rather than removing is what keeps each WebView2's transcript alive. In split
+        // mode two views show at once (the compare pair, _compareA left / _compareB right).
+        ApplyPaneLayout();
+
+        // The empty-state background shows only on the chat page with no agents left.
+        EmptyAgentsState.Visibility = showingChat && _tabs.Count == 0
+            ? Visibility.Visible : Visibility.Collapsed;
+        _ = RefreshEmptyBackgroundAsync();
 
         RefreshNavIcons();
         // Re-evaluate the approval toast for the new page — leaving the chat can newly "hide" the
@@ -726,7 +794,13 @@ public sealed partial class MainWindow : Window
         NavSkillsIcon.Foreground = _currentPage == "skills" ? accent : normal;
         NavAppearanceIcon.Foreground = _currentPage == "appearance" ? accent : normal;
         NavSnapshotsIcon.Foreground = _snapshotsPanelOpen ? accent : normal;
+        NavHistoryIcon.Foreground = _historyPanelOpen ? accent : normal;
         NavTerminalIcon.Foreground = _terminalOpen ? accent : normal;
+
+        // Settings and MCP act on the selected agent — disable them while none is open.
+        var hasAgent = _sessions.Active != null;
+        NavSettings.IsEnabled = hasAgent;
+        NavMcp.IsEnabled = hasAgent;
         ToolTipService.SetToolTip(NavChat, approvalPending ? "Agents — approval waiting" : "Agents");
     }
 
@@ -737,42 +811,59 @@ public sealed partial class MainWindow : Window
 
     private void NavSnapshots_Click(object sender, RoutedEventArgs e)
     {
-        if (_snapshotsPanelOpen) CloseSnapshots();
+        if (_snapshotsPanelOpen) CloseLeftPanel();
         else OpenSnapshots();
     }
 
-    private void CloseSnapshots_Click(object sender, RoutedEventArgs e) => CloseSnapshots();
+    private void CloseSnapshots_Click(object sender, RoutedEventArgs e) => CloseLeftPanel();
 
     private void OpenSnapshots()
     {
-        _snapshotsPanelOpen = true;
-        SnapshotsPanel.Visibility = Visibility.Visible;
+        MarkSnapshotsSeen();   // opening the panel IS reading it — clear the unread badge
         PopulateSnapshots();
+        ShowLeftPanel(SnapshotsPanel, snapshots: true);
+    }
+
+    /// <summary>Shows one of the two docked panels (Snapshots/History), swapping if the other was
+    /// already up (the column stays out — only the contents change) and sliding it in otherwise.</summary>
+    private void ShowLeftPanel(Border panel, bool snapshots)
+    {
+        bool wasOpen = _snapshotsPanelOpen || _historyPanelOpen;
+        _snapshotsPanelOpen = snapshots;
+        _historyPanelOpen = !snapshots;
+        SnapshotsPanel.Visibility = snapshots ? Visibility.Visible : Visibility.Collapsed;
+        HistoryPanel.Visibility = snapshots ? Visibility.Collapsed : Visibility.Visible;
         RefreshNavIcons();
+        if (wasOpen) return;   // column already at width — contents swapped, no re-slide
+
         // Target ~37% of the content area (everything right of the 48px rail), matching the old
         // 0.6* / 1* split. Computed in pixels at open time so the tween can drive the column.
         double target = Math.Max(320, (Root.ActualWidth - 48) * 0.375);
-        AnimateSnapshotsColumn(target, hideOnDone: false);
+        AnimateLeftColumn(target, hideOnDone: null);
     }
 
-    private void CloseSnapshots()
+    private void CloseLeftPanel()
     {
+        var toHide = _snapshotsPanelOpen ? (FrameworkElement)SnapshotsPanel
+                   : _historyPanelOpen ? HistoryPanel : null;
         _snapshotsPanelOpen = false;
+        _historyPanelOpen = false;
         RefreshNavIcons();
-        AnimateSnapshotsColumn(0, hideOnDone: true);
+        AnimateLeftColumn(0, hideOnDone: toHide);
     }
 
-    /// <summary>Tweens the snapshots column width to <paramref name="toPx"/> with an ease-out curve,
+    /// <summary>Tweens the docked column width to <paramref name="toPx"/> with an ease-out curve,
     /// gliding the panel open or closed. Re-entrant: a click mid-slide retargets from the current
-    /// width rather than restarting from the edge.</summary>
-    private void AnimateSnapshotsColumn(double toPx, bool hideOnDone)
+    /// width rather than restarting from the edge. <paramref name="hideOnDone"/>, when set, is
+    /// collapsed once a close tween lands.</summary>
+    private void AnimateLeftColumn(double toPx, FrameworkElement? hideOnDone)
     {
         // Drop any in-flight tween so rapid toggles can't stack Rendering handlers.
         if (_snapAnimHandler != null) CompositionTarget.Rendering -= _snapAnimHandler;
 
         _snapAnimFrom = SnapshotsColumn.Width.IsAbsolute ? SnapshotsColumn.Width.Value : 0;
         _snapAnimTo = toPx;
-        _snapAnimHideOnDone = hideOnDone;
+        _snapAnimHide = hideOnDone;
         _snapAnimClock.Restart();
 
         _snapAnimHandler = (_, _) =>
@@ -787,7 +878,7 @@ public sealed partial class MainWindow : Window
                 CompositionTarget.Rendering -= _snapAnimHandler;
                 _snapAnimHandler = null;
                 _snapAnimClock.Stop();
-                if (_snapAnimHideOnDone) SnapshotsPanel.Visibility = Visibility.Collapsed;
+                if (_snapAnimHide != null) _snapAnimHide.Visibility = Visibility.Collapsed;
             }
         };
         CompositionTarget.Rendering += _snapAnimHandler;
@@ -795,35 +886,133 @@ public sealed partial class MainWindow : Window
 
     private void OnSnapshotsChanged()
     {
-        RefreshSnapshotsBadge();
-        if (_snapshotsPanelOpen) PopulateSnapshots();
+        // A change while you're looking at the panel is already seen; otherwise it's a new unread.
+        if (_snapshotsPanelOpen) { MarkSnapshotsSeen(); PopulateSnapshots(); }
+        else RefreshSnapshotsBadge();
     }
+
+    /// <summary>Marks every current snapshot as seen (opening the panel, or a change while it's open),
+    /// clearing the rail badge. Persisted so the badge doesn't re-light on relaunch.</summary>
+    private void MarkSnapshotsSeen()
+    {
+        _snapshotsSeenAt = DateTimeOffset.Now;
+        SavePanelState();
+        RefreshSnapshotsBadge();
+    }
+
+    /// <summary>Current text in the snapshots search box; empty means "show everything".</summary>
+    private string _snapshotFilter = "";
+
+    /// <summary>Project labels whose group is folded shut. Survives repopulation (search, import,
+    /// delete) so a collapse the user made doesn't spring back open on the next keystroke.</summary>
+    private readonly HashSet<string> _collapsedSnapshotGroups = new();
+
+    // "Last opened" watermarks — the rail badges show how many snapshots/closed conversations are
+    // newer than these, i.e. unread since the last visit. Persisted in panel-state.json.
+    private DateTimeOffset? _snapshotsSeenAt;
+    private DateTimeOffset? _historySeenAt;
+
+    /// <summary>Writes both panels' fold state and seen-watermarks to disk (survives relaunch).</summary>
+    private void SavePanelState() => PanelState.Save(new PanelStateShape(
+        _collapsedSnapshotGroups.ToList(), _collapsedHistoryGroups.ToList(),
+        _snapshotsSeenAt, _historySeenAt));
+
+    // The group object is kept in sync (not just the set) so that when the ListView recycles a
+    // container on scroll, the OneTime IsExpanded x:Bind re-reads the correct, current state.
+    private void SnapshotGroup_Expanding(Microsoft.UI.Xaml.Controls.Expander sender, Microsoft.UI.Xaml.Controls.ExpanderExpandingEventArgs args)
+    {
+        if (sender.Tag is not SnapshotGroup g) return;
+        g.IsExpanded = true;
+        _collapsedSnapshotGroups.Remove(g.Project);
+        SavePanelState();
+    }
+
+    private void SnapshotGroup_Collapsed(Microsoft.UI.Xaml.Controls.Expander sender, Microsoft.UI.Xaml.Controls.ExpanderCollapsedEventArgs args)
+    {
+        if (sender.Tag is not SnapshotGroup g) return;
+        g.IsExpanded = false;
+        _collapsedSnapshotGroups.Add(g.Project);
+        SavePanelState();
+    }
+
+    private void SnapshotsSearch_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
+    {
+        // Only react to the user typing — not to programmatic Text changes on repopulate.
+        if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput) return;
+        _snapshotFilter = sender.Text?.Trim() ?? "";
+        PopulateSnapshots();
+    }
+
+    private static bool Matches(ContextSnapshot s, string q) =>
+        s.DisplayTitle.Contains(q, StringComparison.OrdinalIgnoreCase)
+        || s.OriginModel.Contains(q, StringComparison.OrdinalIgnoreCase)
+        || s.SummarizerModel.Contains(q, StringComparison.OrdinalIgnoreCase)
+        || s.ProjectLabel.Contains(q, StringComparison.OrdinalIgnoreCase)
+        || (s.Recap?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false);
 
     private void PopulateSnapshots()
     {
-        var items = _snapshotStore.Items;   // newest-first copy of the shared store
-        SnapshotsList.ItemsSource = items;
-        var empty = items.Count == 0;
-        SnapshotsEmpty.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
-        SnapshotsScroller.Visibility = empty ? Visibility.Collapsed : Visibility.Visible;
+        var all = _snapshotStore.Items;   // newest-first copy of the shared store
+        var storeEmpty = all.Count == 0;
+
+        // The search box only earns its space once there's something to search.
+        SnapshotsSearch.Visibility = storeEmpty ? Visibility.Collapsed : Visibility.Visible;
+
+        // Explain the disabled Import buttons when there's a snapshot but no agent to import into.
+        SnapshotsNoAgentNotice.IsOpen = !storeEmpty && _sessions.Active == null;
+
+        var q = _snapshotFilter;
+        var filtered = string.IsNullOrEmpty(q) ? all : all.Where(s => Matches(s, q)).ToList();
+
+        // Group by project, preserving the store's newest-first order within each group and
+        // ordering the groups by their most-recent snapshot (so the freshest project leads).
+        // Each group carries its remembered expand/collapse state so folding a project sticks
+        // across searches and imports (which both rebuild this list).
+        var groups = filtered
+            .GroupBy(s => s.ProjectLabel)
+            .OrderByDescending(g => g.Max(s => s.CapturedAt))
+            .Select(g => new SnapshotGroup(g.Key, g) { IsExpanded = !_collapsedSnapshotGroups.Contains(g.Key) })
+            .ToList();
+
+        SnapshotsList.ItemsSource = groups;
+
+        var nothingToShow = groups.Count == 0;
+        SnapshotsEmpty.Text = storeEmpty
+            ? "No snapshots yet. When you switch a tab's model — or pick Take snapshot from a tab's ⋯ menu — you'll be offered to save the conversation as a snapshot, summarized by a model you choose."
+            : $"No snapshots match “{q}”.";
+        SnapshotsEmpty.Visibility = nothingToShow ? Visibility.Visible : Visibility.Collapsed;
+        SnapshotsScroller.Visibility = nothingToShow ? Visibility.Collapsed : Visibility.Visible;
         RefreshSnapshotsBadge();
     }
 
     private void RefreshSnapshotsBadge()
     {
-        var n = _snapshotStore.Count;
+        // Unread = snapshots captured after the last visit. Never-visited (null) counts them all.
+        var n = _snapshotsSeenAt is { } seen
+            ? _snapshotStore.Items.Count(s => s.CapturedAt > seen)
+            : _snapshotStore.Count;
         NavSnapshotsBadge.Visibility = n > 0 ? Visibility.Visible : Visibility.Collapsed;
         NavSnapshotsBadgeText.Text = n > 99 ? "99+" : n.ToString();
+    }
+
+    /// <summary>Each Import button disables itself when there's no agent to import into — the action
+    /// arms an agent's next message, so it's meaningless with none open. Re-evaluated on load, and the
+    /// list is repopulated when the agent count crosses zero (so open buttons refresh too).</summary>
+    private void SnapshotImport_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button b) b.IsEnabled = _sessions.Active != null;
     }
 
     private void SnapshotImport_Click(object sender, RoutedEventArgs e)
     {
         if ((sender as FrameworkElement)?.Tag is not ContextSnapshot snap) return;
         var target = _selected?.View;
-        if (target == null) return;
+        if (target == null) return;   // no agent open — nothing to import into (button is disabled too)
 
         target.Session.Controller.ImportContext(snap);   // arms the active agent's next message
         SwitchPage("chat");   // so the "context armed" note is visible in the active tab
+        if (_snapshotsPanelOpen) CloseLeftPanel();   // get out of the way — the chat is where the confirmation shows
+        target.FocusInput();
     }
 
     private void SnapshotDelete_Click(object sender, RoutedEventArgs e)
@@ -831,6 +1020,179 @@ public sealed partial class MainWindow : Window
         if ((sender as FrameworkElement)?.Tag is not ContextSnapshot snap) return;
         _snapshotStore.Remove(snap);
         PopulateSnapshots();
+    }
+
+    // ============================================================
+    // History panel — reopen a closed conversation. Shares the docked column with Snapshots.
+    // ============================================================
+
+    /// <summary>Files a just-closed tab into the archive so it can be reopened later. A session that
+    /// never had a real turn is forgotten instead (deleting its files), same as <c>/clear</c> —
+    /// there's nothing worth reopening, and an empty row would only be noise.</summary>
+    private void ArchiveClosedSession(AgentSession session)
+    {
+        var key = session.PersistKey;
+        var turns = ConversationLog.Load(key);
+        if (turns.Count == 0)
+        {
+            TranscriptJournal.Delete(key);
+            ConversationLog.Delete(key);
+            SessionHistoryStore.Delete(key);
+            return;
+        }
+
+        var preview = turns.FirstOrDefault(t => t.R == "u")?.T?.Trim();
+        if (preview is { Length: > 140 }) preview = preview[..140].TrimEnd() + "…";
+
+        _archive.Add(new SessionArchiveEntry
+        {
+            Key = key,
+            Title = session.Title,
+            ProjectRoot = session.ProjectRoot.ProjectRoot,
+            Model = session.Controller.ModelName,
+            ClosedAt = DateTimeOffset.Now,
+            TurnCount = turns.Count,
+            Preview = preview,
+        });
+    }
+
+    private void OnArchiveChanged()
+    {
+        if (_historyPanelOpen) { MarkHistorySeen(); PopulateHistory(); }
+        else RefreshHistoryBadge();
+    }
+
+    /// <summary>Marks every current archived conversation as seen, clearing the History rail badge.</summary>
+    private void MarkHistorySeen()
+    {
+        _historySeenAt = DateTimeOffset.Now;
+        SavePanelState();
+        RefreshHistoryBadge();
+    }
+
+    private void NavHistory_Click(object sender, RoutedEventArgs e)
+    {
+        if (_historyPanelOpen) CloseLeftPanel();
+        else OpenHistory();
+    }
+
+    private void CloseHistory_Click(object sender, RoutedEventArgs e) => CloseLeftPanel();
+
+    private void OpenHistory()
+    {
+        MarkHistorySeen();   // opening the panel IS reading it — clear the unread badge
+        PopulateHistory();
+        ShowLeftPanel(HistoryPanel, snapshots: false);
+    }
+
+    /// <summary>Current text in the history search box; empty means "show everything".</summary>
+    private string _historyFilter = "";
+
+    /// <summary>Project labels whose History group is folded shut (survives search/reopen/delete).</summary>
+    private readonly HashSet<string> _collapsedHistoryGroups = new();
+
+    private void HistoryGroup_Expanding(Microsoft.UI.Xaml.Controls.Expander sender, Microsoft.UI.Xaml.Controls.ExpanderExpandingEventArgs args)
+    {
+        if (sender.Tag is not HistoryGroup g) return;
+        g.IsExpanded = true;
+        _collapsedHistoryGroups.Remove(g.Project);
+        SavePanelState();
+    }
+
+    private void HistoryGroup_Collapsed(Microsoft.UI.Xaml.Controls.Expander sender, Microsoft.UI.Xaml.Controls.ExpanderCollapsedEventArgs args)
+    {
+        if (sender.Tag is not HistoryGroup g) return;
+        g.IsExpanded = false;
+        _collapsedHistoryGroups.Add(g.Project);
+        SavePanelState();
+    }
+
+    private void HistorySearch_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
+    {
+        if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput) return;
+        _historyFilter = sender.Text?.Trim() ?? "";
+        PopulateHistory();
+    }
+
+    private static bool Matches(SessionArchiveEntry s, string q) =>
+        s.Title.Contains(q, StringComparison.OrdinalIgnoreCase)
+        || s.ProjectLabel.Contains(q, StringComparison.OrdinalIgnoreCase)
+        || (s.Model?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false)
+        || (s.Preview?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false);
+
+    private void PopulateHistory()
+    {
+        var all = _archive.Items;   // newest-first copy
+        var storeEmpty = all.Count == 0;
+        HistorySearch.Visibility = storeEmpty ? Visibility.Collapsed : Visibility.Visible;
+
+        var q = _historyFilter;
+        var filtered = string.IsNullOrEmpty(q) ? all : all.Where(s => Matches(s, q)).ToList();
+
+        // Group by project (freshest project first), newest-first within each, carrying remembered
+        // collapse state — same shape as the Snapshots panel.
+        var groups = filtered
+            .GroupBy(s => s.ProjectLabel)
+            .OrderByDescending(g => g.Max(s => s.ClosedAt))
+            .Select(g => new HistoryGroup(g.Key, g) { IsExpanded = !_collapsedHistoryGroups.Contains(g.Key) })
+            .ToList();
+
+        HistoryList.ItemsSource = groups;
+
+        var nothingToShow = groups.Count == 0;
+        HistoryEmpty.Text = storeEmpty
+            ? "No past conversations yet. Close a tab and it lands here — reopen it any time to pick up where you left off. (Clearing a tab with /clear forgets it for good; closing keeps it.)"
+            : $"No conversations match “{q}”.";
+        HistoryEmpty.Visibility = nothingToShow ? Visibility.Visible : Visibility.Collapsed;
+        HistoryScroller.Visibility = nothingToShow ? Visibility.Collapsed : Visibility.Visible;
+        RefreshHistoryBadge();
+    }
+
+    private void RefreshHistoryBadge()
+    {
+        // Unread = conversations closed after the last visit. Never-visited (null) counts them all.
+        var n = _historySeenAt is { } seen
+            ? _archive.Items.Count(s => s.ClosedAt > seen)
+            : _archive.Count;
+        NavHistoryBadge.Visibility = n > 0 ? Visibility.Visible : Visibility.Collapsed;
+        NavHistoryBadgeText.Text = n > 99 ? "99+" : n.ToString();
+    }
+
+    /// <summary>Reopens an archived conversation as a fresh tab on its original persist-key, so the
+    /// standard restore cascade (transcript replay → memory rehydrate) brings it back. The row
+    /// leaves the archive — it's live again — but its files stay; closing re-archives it.</summary>
+    private void HistoryOpen_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not SessionArchiveEntry entry) return;
+
+        // Defensive: an archived key should never also be open, but if it is, just go there.
+        var existing = _tabs.FirstOrDefault(t =>
+            string.Equals(t.View.Session.PersistKey, entry.Key, StringComparison.OrdinalIgnoreCase));
+        if (existing != null)
+        {
+            _archive.Remove(entry.Key, deleteFiles: false);
+            CloseLeftPanel();
+            SwitchPage("chat");
+            SelectTab(existing);
+            return;
+        }
+
+        // Fall back to the current directory if the original folder is gone — the transcript and
+        // memory still restore; only new file operations would need a live folder.
+        var root = Directory.Exists(entry.ProjectRoot) ? entry.ProjectRoot : Environment.CurrentDirectory;
+        var tab = CreateChatTab(root, entry.Title, entry.Model, entry.Key);   // CreateChatTab selects it
+        _archive.Remove(entry.Key, deleteFiles: false);
+        CloseLeftPanel();
+        SwitchPage("chat");
+        _ = InitTabAsync(tab);   // InitializeAsync replays the transcript; then model + memory restore
+        SaveWorkspace();
+    }
+
+    private void HistoryDelete_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not SessionArchiveEntry entry) return;
+        _archive.Remove(entry.Key, deleteFiles: true);   // explicit forget — files go too
+        PopulateHistory();
     }
 
     /// <summary>"Make Default for New Agents" — snapshot the selected agent's settings to disk.</summary>
@@ -982,9 +1344,8 @@ public sealed partial class MainWindow : Window
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(close);
 
-        // The last remaining agent can't be closed (Settings and MCP need one to act on), so grey
-        // the item rather than leave a dead button. Re-evaluated each time the menu opens.
-        menu.Opening += (_, _) => close.IsEnabled = _tabs.Count > 1;
+        // Closing the last agent is allowed now — it leaves an empty chat (see EnterEmptyState);
+        // Settings/MCP simply disable until a new agent exists.
 
         options.Flyout = menu;
     }
@@ -1020,6 +1381,8 @@ public sealed partial class MainWindow : Window
     /// looking at belonged to the agent you just left.</summary>
     private void SelectTab(ChatTabEntry entry)
     {
+        // Selecting a tab NEVER changes the compare pair — it only changes the active agent. If that
+        // agent is in the pair, ApplyPaneLayout shows the split; otherwise it shows the agent single.
         _selected = entry;
         _sessions.Activate(entry.View.Session);
         RefreshTabStrip();
@@ -1066,9 +1429,6 @@ public sealed partial class MainWindow : Window
         var index = _tabs.IndexOf(entry);
         if (index < 0) return;
 
-        // The last agent stays: Settings and MCP have no agent to act on without one.
-        if (_tabs.Count == 1) return;
-
         _tabs.RemoveAt(index);
         TabStrip.Children.Remove(entry.Header);
 
@@ -1077,12 +1437,22 @@ public sealed partial class MainWindow : Window
         entry.View.Shutdown();
         TabHost.Children.Remove(entry.View);
         _sessions.CloseSession(entry.View.Session);
-        TranscriptJournal.Delete(entry.View.Session.PersistKey);   // closed tab = conversation gone
-        ConversationLog.Delete(entry.View.Session.PersistKey);
-        SessionHistoryStore.Delete(entry.View.Session.PersistKey);
+        ArchiveClosedSession(entry.View.Session);   // closed tab = recoverable from History, not gone
+
+        // Closing the last agent is allowed: you're left with the empty chat background until you
+        // open another. Settings/MCP disable meanwhile (they act on an agent), handled in SwitchPage.
+        if (_tabs.Count == 0)
+        {
+            _selected = null;
+            ValidateSplit();     // nothing left to compare → exits split
+            EnterEmptyState();
+            SaveWorkspace();
+            return;
+        }
 
         if (!ReferenceEquals(_selected, entry))
         {
+            ValidateSplit();     // repair the right pane if that's what closed
             RefreshTabStrip();
             SaveWorkspace();
             return;
@@ -1090,7 +1460,244 @@ public sealed partial class MainWindow : Window
 
         _selected = null;
         SelectTab(_tabs[Math.Min(index, _tabs.Count - 1)]);
+        ValidateSplit();         // the new selection might collide with the right pane
         SaveWorkspace();
+    }
+
+    /// <summary>Shows the "no agents open" background — the chat area with nothing in it. Bounces off
+    /// any full-screen page back to chat (Settings/MCP have no agent to act on now).</summary>
+    private void EnterEmptyState()
+    {
+        RefreshTabStrip();       // empties the toast; disables Settings/MCP via RefreshNavIcons
+        SwitchPage("chat");      // reveals the empty-state panel + its background
+        if (_snapshotsPanelOpen) PopulateSnapshots();   // no agent now → disable Import + show notice
+    }
+
+    // ============================================================
+    // Split / compare view — two agents side by side. The compare PAIR (_compareA left, _compareB
+    // right) is a remembered, explicit choice: set only by the Split button and the compare-bar
+    // pickers, NEVER by clicking a tab. The split is shown whenever the active tab (_selected) is one
+    // of the pair; clicking any other tab shows that agent normally while the pair waits, and
+    // clicking a paired tab brings the split back. Both panes are ordinary tab views moved between
+    // grid columns via ApplyPaneLayout — never reparented, so their WebViews survive.
+    // ============================================================
+
+    private ChatTabEntry? _compareA;   // left pane
+    private ChatTabEntry? _compareB;   // right pane
+    private double _splitLeftFraction = 0.5;   // divider position, preserved across page visits
+    private bool _syncingSplitCombos;
+    private bool _draggingPane;
+
+    /// <summary>A valid, distinct compare pair is configured (both agents still open).</summary>
+    private bool HasComparePair =>
+        _compareA != null && _compareB != null
+        && _tabs.Contains(_compareA) && _tabs.Contains(_compareB)
+        && !ReferenceEquals(_compareA, _compareB);
+
+    /// <summary>The split is actually being shown right now: a pair exists, we're on the chat page,
+    /// and the active tab is one of the two paired agents (clicking any other agent shows it single).</summary>
+    private bool SplitActive =>
+        HasComparePair && _currentPage == "chat" && _selected != null
+        && (ReferenceEquals(_selected, _compareA) || ReferenceEquals(_selected, _compareB));
+
+    private void SplitButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (HasComparePair)
+        {
+            // Toggle: showing the split → turn compare off; pair configured but viewing another
+            // agent → jump back into the split.
+            if (SplitActive) ExitSplit();
+            else if (_compareA != null) SelectTab(_compareA);
+            return;
+        }
+        if (_tabs.Count < 2 || _selected == null) return;   // button is disabled here anyway
+
+        _compareA = _selected;
+        _compareB = _tabs.FirstOrDefault(t => !ReferenceEquals(t, _selected));
+        RefreshSplitCombos();
+        SwitchPage("chat");        // _selected is in the pair → ApplyPaneLayout shows the split
+        RefreshSplitButton();
+    }
+
+    private void ExitSplit_Click(object sender, RoutedEventArgs e) => ExitSplit();
+
+    private void ExitSplit()
+    {
+        _compareA = null;
+        _compareB = null;
+        ApplyPaneLayout();
+        RefreshSplitButton();
+    }
+
+    /// <summary>Places the visible agent view(s) into columns and sizes them. Single view: column 0
+    /// fills (divider + right column collapse to 0). Split: _compareA in column 0, _compareB in
+    /// column 2, divider between. Setting Grid.Column does NOT reparent, so WebViews are untouched.</summary>
+    private void ApplyPaneLayout()
+    {
+        var split = SplitActive;
+        var showingChat = _currentPage == "chat";
+
+        foreach (var tab in _tabs)
+        {
+            bool inPair = ReferenceEquals(tab, _compareA) || ReferenceEquals(tab, _compareB);
+            var visible = showingChat && (split ? inPair : ReferenceEquals(tab, _selected));
+            tab.View.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+            Grid.SetColumn(tab.View, split && ReferenceEquals(tab, _compareB) ? 2 : 0);
+        }
+
+        if (split)
+        {
+            PaneLeftCol.Width = new GridLength(_splitLeftFraction, GridUnitType.Star);
+            PaneRightCol.Width = new GridLength(1 - _splitLeftFraction, GridUnitType.Star);
+            PaneSplitCol.Width = GridLength.Auto;
+            PaneSplitter.Visibility = Visibility.Visible;
+            SplitBar.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            PaneLeftCol.Width = new GridLength(1, GridUnitType.Star);
+            PaneSplitCol.Width = new GridLength(0);
+            PaneRightCol.Width = new GridLength(0);
+            PaneSplitter.Visibility = Visibility.Collapsed;
+            SplitBar.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    /// <summary>Re-fills the two pane pickers and re-selects the sides. Items are plain STRINGS
+    /// (agent titles) selected by INDEX into <see cref="_tabs"/> — deliberately NOT ComboBoxItem
+    /// objects: adding containers directly as items and rebuilding them makes WinUI's ComboBox throw
+    /// COMException 0x80070490 "Element not found" on the next selection. Each combo gets its own
+    /// list instance (a shared ItemsSource across two ComboBoxes is asking for trouble).</summary>
+    private void RefreshSplitCombos()
+    {
+        _syncingSplitCombos = true;
+        SplitLeftCombo.ItemsSource = _tabs.Select(t => t.View.Session.Title).ToList();
+        SplitRightCombo.ItemsSource = _tabs.Select(t => t.View.Session.Title).ToList();
+        SplitLeftCombo.SelectedIndex = _compareA == null ? -1 : _tabs.IndexOf(_compareA);
+        SplitRightCombo.SelectedIndex = _compareB == null ? -1 : _tabs.IndexOf(_compareB);
+        _syncingSplitCombos = false;
+    }
+
+    // Both pickers defer their ENTIRE reaction to the next dispatcher tick. A ComboBox raises
+    // SelectionChanged from inside a layout pass, and the reaction restructures the visual tree
+    // (moves a ChatTabView + its WebView between grid columns) and rebuilds the pickers — both
+    // illegal mid-layout / mid-event and the source of the App-level crash. Off the event, on a
+    // clean tick, they're safe. Picking an agent for one pane that's already the other pane swaps
+    // the two. The chosen agent becomes active, so the split stays on screen.
+    private void SplitLeftCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncingSplitCombos) return;
+        var idx = SplitLeftCombo.SelectedIndex;
+        if (idx < 0 || idx >= _tabs.Count) return;
+        var entry = _tabs[idx];
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!_tabs.Contains(entry) || ReferenceEquals(entry, _compareA)) return;
+            if (ReferenceEquals(entry, _compareB)) _compareB = _compareA;   // swap sides
+            _compareA = entry;
+            RefreshSplitCombos();
+            SelectTab(entry);   // make the left pane active so the split stays shown
+        });
+    }
+
+    private void SplitRightCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncingSplitCombos) return;
+        var idx = SplitRightCombo.SelectedIndex;
+        if (idx < 0 || idx >= _tabs.Count) return;
+        var entry = _tabs[idx];
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!_tabs.Contains(entry) || ReferenceEquals(entry, _compareB)) return;
+            if (ReferenceEquals(entry, _compareA)) _compareA = _compareB;   // swap sides
+            _compareB = entry;
+            RefreshSplitCombos();
+            SelectTab(entry);   // make the right pane active so the split stays shown
+        });
+    }
+
+    /// <summary>Keeps the compare pair valid after the agent set changes. If either paired agent was
+    /// closed the pair is dropped (compare turns off); otherwise the pickers are resynced.</summary>
+    private void ValidateSplit()
+    {
+        if (_compareA == null && _compareB == null) return;   // no compare configured
+        if (!HasComparePair)
+        {
+            _compareA = null;
+            _compareB = null;
+            ApplyPaneLayout();
+            RefreshSplitButton();
+            return;
+        }
+        RefreshSplitCombos();
+        ApplyPaneLayout();
+        RefreshSplitButton();
+    }
+
+    private void RefreshSplitButton()
+    {
+        SplitButton.IsEnabled = HasComparePair || _tabs.Count >= 2;
+        var accent = (SolidColorBrush)Application.Current.Resources["MandoAccentBrush"];
+        var normal = (SolidColorBrush)Application.Current.Resources["MandoDimBrush"];
+        // Accent whenever a compare pair is configured — even while viewing a non-paired agent — so
+        // it reads as "compare is on; click a paired tab (or me) to see it."
+        SplitButtonIcon.Foreground = HasComparePair ? accent : normal;
+    }
+
+    // ---- divider drag: repartition the two panes' star widths by pointer X over TabHost ----
+    private void PaneSplitter_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        _draggingPane = true;
+        ((UIElement)sender).CapturePointer(e.Pointer);
+    }
+
+    private void PaneSplitter_PointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_draggingPane) return;
+        var w = TabHost.ActualWidth;
+        if (w <= 0) return;
+        var x = e.GetCurrentPoint(TabHost).Position.X;
+        _splitLeftFraction = Math.Clamp(x / w, 0.2, 0.8);   // keep both panes usable
+        PaneLeftCol.Width = new GridLength(_splitLeftFraction, GridUnitType.Star);
+        PaneRightCol.Width = new GridLength(1 - _splitLeftFraction, GridUnitType.Star);
+    }
+
+    private void PaneSplitter_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_draggingPane) return;
+        _draggingPane = false;
+        ((UIElement)sender).ReleasePointerCapture(e.Pointer);
+    }
+
+    /// <summary>Paints the custom chat background image behind the empty state, so closing every
+    /// agent leaves the same backdrop you'd see behind a transcript — same file and opacity. Hidden
+    /// when there's no image set, or when an agent is open (its own WebView paints it then). Loaded
+    /// via a StorageFile stream, the reliable path for an arbitrary filesystem image in unpackaged
+    /// WinUI; best-effort, so a missing/locked file just falls back to the flat themed colour.</summary>
+    private async Task RefreshEmptyBackgroundAsync()
+    {
+        var show = _currentPage == "chat" && _tabs.Count == 0;
+        var file = ThemeManager.ChatBackgroundFile;
+        if (!show || string.IsNullOrEmpty(file) || !File.Exists(file))
+        {
+            EmptyBgImage.Visibility = Visibility.Collapsed;
+            EmptyBgImage.Source = null;
+            return;
+        }
+        try
+        {
+            var sf = await Windows.Storage.StorageFile.GetFileFromPathAsync(file);
+            using var stream = await sf.OpenReadAsync();
+            var bmp = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage();
+            await bmp.SetSourceAsync(stream);
+            EmptyBgImage.Source = bmp;
+            EmptyBgImage.Opacity = ThemeManager.ChatBackgroundOpacity;
+            EmptyBgImage.Visibility = Visibility.Visible;
+        }
+        catch
+        {
+            EmptyBgImage.Visibility = Visibility.Collapsed;
+        }
     }
 
     private void RefreshTabStrip()
@@ -1137,6 +1744,7 @@ public sealed partial class MainWindow : Window
         }
 
         RefreshNavIcons();
+        RefreshSplitButton();
         LayoutTabStrip();
     }
 

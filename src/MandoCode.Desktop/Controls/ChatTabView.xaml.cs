@@ -514,6 +514,15 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
             return;
         }
 
+        // A manual "Take snapshot" is an explicit decision — skip the notification bar and open the
+        // name+model picker straight away. Model switches keep stage 1, since there the user may
+        // just want to keep working (or "keep memory") rather than snapshot at all.
+        if (offer.IsManual)
+        {
+            ShowSnapshotPickerCard(offer);
+            return;
+        }
+
         // Stage 1: notification bar. Non-blocking — the user can ignore it and keep prompting.
         // "Keep memory" only appears when a switch actually cleared a conversation.
         SnapshotKeepMemoryButton.Visibility = _controller.CanCarryMemory
@@ -527,16 +536,14 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         SlideSnapshotOfferIn();
     }
 
-    /// <summary>Stage 2: the user accepted the notification, so expand into the full name + model
-    /// picker (reused). It hangs at the top until they create or dismiss.</summary>
-    private void SnapshotNotifyCreate_Click(object sender, RoutedEventArgs e)
+    /// <summary>Stage 2: expand into the full name + model picker. Reached either from the
+    /// notification bar's Create (model switches) or directly for a manual "Take snapshot". Hangs at
+    /// the top until the user creates or dismisses.</summary>
+    private void ShowSnapshotPickerCard(ChatController.PendingSnapshot offer)
     {
-        var offer = _controller.PendingOffer;
-        if (offer == null) return;
-
         SnapshotOfferSubtitle.Text =
             $"{offer.MessageCount} message{(offer.MessageCount == 1 ? "" : "s")} from {offer.OriginModel} — "
-            + "name it (optional), pick a model, and create.";
+            + "name it (or leave blank and the summarizer will), pick a model, and create.";
         SnapshotCreateButton.Content = "Create";
         SnapshotNameBox.Text = "";   // a fresh offer starts unnamed
         // Reset any leftover busy state from a prior, interrupted attempt.
@@ -546,8 +553,15 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         SnapshotOfferContent.IsHitTestVisible = true;
         SnapshotNotifyBar.Visibility = Visibility.Collapsed;
         SnapshotOfferCard.Visibility = Visibility.Visible;
-        SlideSnapshotOfferIn();   // re-drop for the taller card
+        SnapshotOfferRoot.Visibility = Visibility.Visible;
+        SlideSnapshotOfferIn();
         _ = LoadSnapshotModelsAsync(offer.OriginModel);
+    }
+
+    private void SnapshotNotifyCreate_Click(object sender, RoutedEventArgs e)
+    {
+        var offer = _controller.PendingOffer;
+        if (offer != null) ShowSnapshotPickerCard(offer);
     }
 
     /// <summary>Drops the offer down from the top of the transcript with a short fade.</summary>

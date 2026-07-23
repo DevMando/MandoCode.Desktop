@@ -98,17 +98,55 @@ public static class SnapshotEnhancer
         return await SummarizeOneAsync(chat, kernel, ReducePrompt, string.Join("\n\n", partials), ct);
     }
 
+    private const string NamePrompt =
+        "Give this saved conversation a short title so it's recognizable in a list later. 3 to 6 " +
+        "words, Title Case, naming the actual subject (a feature, file, bug, topic, or decision) — " +
+        "not generic filler like \"Coding Session\" or \"Conversation Summary\". Output ONLY the " +
+        "title: no quotes, no trailing punctuation, no explanation.";
+
+    /// <summary>Suggests a short, human-recognizable title for a snapshot from its recap. Best-effort:
+    /// returns null (caller falls back to the origin model as the card title) on any failure or an
+    /// unusable result. <paramref name="avoid"/> is passed to the model to discourage near-duplicates;
+    /// the caller still enforces true uniqueness deterministically — an LLM can't be trusted to.</summary>
+    public static async Task<string?> SuggestNameAsync(
+        string endpoint, string model, string recap, IReadOnlyCollection<string> avoid, CancellationToken ct = default)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(recap)) return null;
+
+            var kernel = Kernel.CreateBuilder()
+                .AddOllamaChatCompletion(modelId: model, endpoint: new Uri(endpoint))
+                .Build();
+            var chat = kernel.GetRequiredService<IChatCompletionService>();
+
+            var instruction = NamePrompt;
+            if (avoid.Count > 0)
+                instruction += " These titles are already taken, so pick something clearly different: "
+                             + string.Join("; ", avoid.Take(40)) + ".";
+
+            // A touch of warmth so titles aren't all phrased alike, but still grounded in the recap.
+            var raw = await SummarizeOneAsync(chat, kernel, instruction, recap, ct, temperature: 0.4f);
+            return SnapshotNaming.Clean(raw);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     /// <summary>One chat round: system instruction + the text to summarize. Stateless — a fresh
     /// history each call, so nothing leaks between chunks.</summary>
     private static async Task<string> SummarizeOneAsync(
-        IChatCompletionService chat, Kernel kernel, string instruction, string text, CancellationToken ct)
+        IChatCompletionService chat, Kernel kernel, string instruction, string text, CancellationToken ct,
+        float temperature = 0.2f)
     {
         var history = new ChatHistory();
         history.AddSystemMessage(instruction);
         history.AddUserMessage(text);
 
-        // Low temperature — a recap should be faithful, not creative.
-        var settings = new OllamaPromptExecutionSettings { Temperature = 0.2f };
+        // Low temperature by default — a recap should be faithful, not creative. Naming nudges higher.
+        var settings = new OllamaPromptExecutionSettings { Temperature = temperature };
 
         var result = await chat.GetChatMessageContentAsync(history, settings, kernel, ct);
         return result.Content?.Trim() ?? "";

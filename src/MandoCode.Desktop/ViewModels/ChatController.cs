@@ -1291,7 +1291,10 @@ public sealed partial class ChatController
     /// <summary>The outgoing conversation buffered on a model switch (or the live one, for a manual
     /// snapshot), held only until the user creates a snapshot from it or ignores the offer. Pure
     /// opt-in: it is NOT auto-saved, and is discarded on the next switch or when the app closes.</summary>
-    public sealed record PendingSnapshot(string OriginModel, string RawHistory, int MessageCount);
+    /// <summary><paramref name="IsManual"/> is true when the offer came from the "Take snapshot" tab
+    /// action rather than a model switch — the user already decided, so the UI can skip the
+    /// "snapshot available?" notification bar and open the name+model picker directly.</summary>
+    public sealed record PendingSnapshot(string OriginModel, string RawHistory, int MessageCount, bool IsManual = false);
 
     private PendingSnapshot? _pending;
 
@@ -1304,14 +1307,14 @@ public sealed partial class ChatController
 
     /// <summary>Buffers the outgoing conversation before a switch clears it. Returns null (nothing
     /// buffered) when there's nothing worth keeping. Never throws — must not block the switch.</summary>
-    private async Task<PendingSnapshot?> BufferConversationAsync(string originModel)
+    private async Task<PendingSnapshot?> BufferConversationAsync(string originModel, bool isManual = false)
     {
         try
         {
             var history = await _ai.GetHistoryAsync();
             if (!HistorySummarizer.HasContent(history)) return null;
             // Full (untruncated) — this is only ever fed to the summarizer, never stored on a snapshot.
-            return new PendingSnapshot(originModel, HistorySummarizer.Full(history), history.Count - 1);
+            return new PendingSnapshot(originModel, HistorySummarizer.Full(history), history.Count - 1, isManual);
         }
         catch
         {
@@ -1324,7 +1327,7 @@ public sealed partial class ChatController
     public async Task OfferManualSnapshotAsync()
     {
         _pendingCarryJson = null;   // nothing was cleared — "keep memory" doesn't apply here
-        _pending = await BufferConversationAsync(ModelName);
+        _pending = await BufferConversationAsync(ModelName, isManual: true);
         if (_pending == null)
         {
             _transcript.Append(_html.StatusChip("Nothing to snapshot", "start a conversation first", "warn"));
@@ -1352,10 +1355,23 @@ public sealed partial class ChatController
             if (string.IsNullOrWhiteSpace(recap))
                 return "The model returned an empty recap.";
 
-            _snapshots.Add(pending.OriginModel, summarizerModel, recap, pending.MessageCount, name, ProjectRootPath);
+            // No name typed → let the model title it from the recap, then GUARANTEE the title is
+            // unique against what's already in the store (the model is told the taken names to
+            // avoid near-misses, but code enforces it). A typed name is kept exactly as entered.
+            var finalName = name?.Trim();
+            if (string.IsNullOrWhiteSpace(finalName))
+            {
+                var taken = _snapshots.Items.Select(s => s.DisplayTitle).ToList();
+                var suggested = await SnapshotEnhancer.SuggestNameAsync(
+                    _config.OllamaEndpoint, summarizerModel, recap, taken);
+                if (!string.IsNullOrWhiteSpace(suggested))
+                    finalName = SnapshotNaming.MakeUnique(suggested!, taken);
+            }
+
+            _snapshots.Add(pending.OriginModel, summarizerModel, recap, pending.MessageCount, finalName, ProjectRootPath);
             _pending = null;
             SnapshotOfferChanged?.Invoke();
-            var label = string.IsNullOrWhiteSpace(name) ? $"summarized by {summarizerModel}" : $"\"{name.Trim()}\"";
+            var label = string.IsNullOrWhiteSpace(finalName) ? $"summarized by {summarizerModel}" : $"\"{finalName}\"";
             _transcript.Append(_html.StatusChip("Snapshot saved", label, "ok"));
             return null;
         }
