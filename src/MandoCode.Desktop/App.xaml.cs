@@ -27,6 +27,22 @@ public partial class App : Application
         // is constructed (see Program.cs in MandoCode for the full rationale).
         AppDomain.CurrentDomain.SetData("REGEX_DEFAULT_MATCH_TIMEOUT", TimeSpan.FromSeconds(10));
 
+        // Record any unhandled exception with its full stack to crash.log, so a UI-thread throw
+        // shows what actually failed instead of only the generated debugger-break in App.g.i.cs.
+        UnhandledException += (_, e) =>
+        {
+            try
+            {
+                var dir = System.IO.Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "MandoCode.Desktop");
+                System.IO.Directory.CreateDirectory(dir);
+                System.IO.File.AppendAllText(System.IO.Path.Combine(dir, "crash.log"),
+                    $"[{DateTimeOffset.Now:O}] {e.Message}\n{e.Exception}\n\n");
+            }
+            catch { /* logging is best-effort — never mask the original failure */ }
+        };
+
         Services = BuildServices();
     }
 
@@ -85,6 +101,11 @@ public partial class App : Application
         // App-wide store of context snapshots taken when a tab switches its model, so any tab can
         // re-import a conversation captured by another. Session-scoped, not persisted.
         services.AddSingleton<SnapshotStore>();
+
+        // App-wide index of closed conversations, so a tab you close can be reopened from the
+        // History panel instead of being lost. Persisted; the journals it points at are the same
+        // per-key stores a live tab uses.
+        services.AddSingleton<SessionArchiveStore>();
 
         // ---- Coordinators + session registry ----
         services.AddSingleton(provider => new ConfigCoordinator(provider.GetRequiredService<MandoCodeConfig>()));

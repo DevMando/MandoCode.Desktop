@@ -21,6 +21,16 @@
     <Compile Include="..\MandoCode.Desktop\Services\GitQuickStatus.cs" Link="src\GitQuickStatus.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\WorkspaceDeltaTracker.cs" Link="src\WorkspaceDeltaTracker.cs" />
     <Compile Include="..\..\MandoCode\src\MandoCode\Models\DiffModels.cs" Link="src\DiffModels.cs" />
+
+    <!-- Session-archive/snapshot display derivations are pure logic (path parsing, placeholders);
+         the store classes come along because the entry types live beside them, but no test
+         instantiates a store (they hit fixed LocalAppData paths). -->
+    <Compile Include="..\MandoCode.Desktop\Services\ContextSnapshot.cs" Link="src\ContextSnapshot.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\SnapshotNaming.cs" Link="src\SnapshotNaming.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\SessionArchiveStore.cs" Link="src\SessionArchiveStore.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\TranscriptJournal.cs" Link="src\TranscriptJournal.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\ConversationLog.cs" Link="src\ConversationLog.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\SessionHistoryStore.cs" Link="src\SessionHistoryStore.cs" />
   </ItemGroup>
 
 </Project>
