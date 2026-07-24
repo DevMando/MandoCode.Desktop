@@ -549,7 +549,7 @@
             </Border>
 
             <TextBox x:Name="InputBox" Grid.Row="1" Grid.Column="0"
-                     PlaceholderText="Ask MandoCode anything… (/ for commands, @file to attach, !cmd for shell)"
+                     PlaceholderText="Message MandoCode…   /commands · @file · !shell"
                      AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="140"
                      AllowDrop="True" DragOver="InputBox_DragOver" Drop="InputBox_Drop"
                      PreviewKeyDown="InputBox_PreviewKeyDown" TextChanged="InputBox_TextChanged"/>

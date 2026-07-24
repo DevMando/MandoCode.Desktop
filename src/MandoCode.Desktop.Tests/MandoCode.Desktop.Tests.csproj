@@ -13,6 +13,15 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
   </ItemGroup>
 
+  <!-- The MandoCode harness is plain net8.0 (no Windows App SDK), so referencing it does NOT
+       pull the WinUI dependency this project exists to avoid. It supplies MandoCodeConfig (for the
+       config-clone tests) and Semantic Kernel's ChatMessageContent (for the HistorySummarizer
+       tests), and DiffModels transitively — which is why the direct DiffModels compile-include
+       below was removed. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\MandoCode\src\MandoCode\MandoCode.csproj" />
+  </ItemGroup>
+
   <!-- The classes under test are pure logic with no WinUI dependencies, so we compile their
        sources directly instead of referencing the WinUI app project (which would drag the
        Windows App SDK into the test host). If these files ever grow UI dependencies, that's
@@ -20,17 +29,33 @@
   <ItemGroup>
     <Compile Include="..\MandoCode.Desktop\Services\GitQuickStatus.cs" Link="src\GitQuickStatus.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\WorkspaceDeltaTracker.cs" Link="src\WorkspaceDeltaTracker.cs" />
-    <Compile Include="..\..\MandoCode\src\MandoCode\Models\DiffModels.cs" Link="src\DiffModels.cs" />
 
     <!-- Session-archive/snapshot display derivations are pure logic (path parsing, placeholders);
          the store classes come along because the entry types live beside them, but no test
-         instantiates a store (they hit fixed LocalAppData paths). -->
+         instantiates a store (they hit fixed LocalAppData paths). ProjectDisplay backs the
+         ProjectLabel/TimeLabel derivations shared by both entry types. -->
+    <Compile Include="..\MandoCode.Desktop\Services\ProjectDisplay.cs" Link="src\ProjectDisplay.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\ContextSnapshot.cs" Link="src\ContextSnapshot.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\SnapshotNaming.cs" Link="src\SnapshotNaming.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\SessionArchiveStore.cs" Link="src\SessionArchiveStore.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\TranscriptJournal.cs" Link="src\TranscriptJournal.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\ConversationLog.cs" Link="src\ConversationLog.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\SessionHistoryStore.cs" Link="src\SessionHistoryStore.cs" />
+
+    <!-- Pure logic extracted from session-coupled coordinators so it can be tested directly. -->
+    <Compile Include="..\MandoCode.Desktop\Services\ConfigCloning.cs" Link="src\ConfigCloning.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\AgentNaming.cs" Link="src\AgentNaming.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\HistorySummarizer.cs" Link="src\HistorySummarizer.cs" />
+    <Compile Include="..\MandoCode.Desktop\ViewModels\RequestPreambleComposer.cs" Link="src\RequestPreambleComposer.cs" />
+
+    <!-- The streamed-response loop and the small WinUI-free collaborators it needs, so it can be
+         driven by a fake IAiService. TranscriptWriter/BusyStateService are pure event emitters;
+         ITranscriptHtml keeps the WinUI-coupled TranscriptHtmlBuilder out of the test host. -->
+    <Compile Include="..\MandoCode.Desktop\Services\IAiService.cs" Link="src\IAiService.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\ITranscriptHtml.cs" Link="src\ITranscriptHtml.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\TranscriptWriter.cs" Link="src\TranscriptWriter.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\BusyStateService.cs" Link="src\BusyStateService.cs" />
+    <Compile Include="..\MandoCode.Desktop\ViewModels\ResponseStreamer.cs" Link="src\ResponseStreamer.cs" />
   </ItemGroup>
 
 </Project>

@@ -113,7 +113,7 @@ public sealed class AgentSession
         Shell = new ShellRunner(ProjectRoot, Transcript, html);
 
         Controller = new ChatController(
-            Ai, Config, Tokens, PlanHandoff, Planner,
+            new AiServiceAdapter(Ai), Config, Tokens, PlanHandoff, Planner,
             mcpManager, McpGate, Skills, FileProvider, ProjectRoot,
             music, updateCheck, Approvals, Transcript, html, Busy, Shell, PromptGate,
             configs, mcp, Snapshots);

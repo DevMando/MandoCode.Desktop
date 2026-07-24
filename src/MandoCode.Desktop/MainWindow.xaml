@@ -1228,7 +1228,7 @@
         </Border>
 
         <!-- ======= MCP server editor modal ======= -->
-        <Grid x:Name="McpEditorOverlay" Grid.ColumnSpan="2" Visibility="Collapsed"
+        <Grid x:Name="McpEditorOverlay" Grid.ColumnSpan="3" Visibility="Collapsed"
               Background="#B0000000">
             <Border Width="560" MaxHeight="700" Padding="24"
                     HorizontalAlignment="Center" VerticalAlignment="Center"

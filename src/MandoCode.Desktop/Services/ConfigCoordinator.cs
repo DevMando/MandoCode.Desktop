@@ -1,5 +1,4 @@
 using System.Reflection;
-using System.Text.Json;
 using MandoCode.Models;
 
 namespace MandoCode.Desktop.Services;
@@ -29,19 +28,6 @@ namespace MandoCode.Desktop.Services;
 /// </summary>
 public sealed class ConfigCoordinator
 {
-    // Mirrors the harness's internal ConfigJsonOptions (MandoCodeConfig.cs) — it isn't visible
-    // across the assembly boundary, and the round-trip has to be symmetric with Load()/Save().
-    private static readonly JsonSerializerOptions ReadOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-        WriteIndented = true
-    };
-
-    private static readonly JsonSerializerOptions WriteOptions = new()
-    {
-        WriteIndented = true
-    };
-
     // Reflected once. Using reflection rather than a hand-written field list means a config key
     // added by the CLI harness is carried by "Make Default" without a change here.
     private static readonly PropertyInfo[] SettableProperties = typeof(MandoCodeConfig)
@@ -61,7 +47,7 @@ public sealed class ConfigCoordinator
     public ConfigCoordinator(MandoCodeConfig defaults) => Defaults = defaults;
 
     /// <summary>A fresh, fully-detached copy of the defaults for a new agent.</summary>
-    public MandoCodeConfig CreateClone() => DeepClone(Defaults);
+    public MandoCodeConfig CreateClone() => ConfigCloning.DeepClone(Defaults);
 
     /// <summary>
     /// "Make Default for New Agents" — snapshots one agent's settings onto the defaults and
@@ -73,7 +59,7 @@ public sealed class ConfigCoordinator
         {
             // Deep-clone first: reflection assigns reference-typed members straight across, and
             // Defaults must not end up sharing the agent's List/Dictionary instances.
-            var snapshot = DeepClone(agentConfig);
+            var snapshot = ConfigCloning.DeepClone(agentConfig);
             foreach (var property in SettableProperties)
                 property.SetValue(Defaults, property.GetValue(snapshot));
 
@@ -108,22 +94,8 @@ public sealed class ConfigCoordinator
             {
                 // One fresh clone per agent — a shared dictionary would let one agent's session
                 // approvals mutate another's.
-                session.Config.McpServers = DeepClone(Defaults).McpServers;
+                session.Config.McpServers = ConfigCloning.DeepClone(Defaults).McpServers;
             }
         }
-    }
-
-    private static MandoCodeConfig DeepClone(MandoCodeConfig source)
-    {
-        var json = JsonSerializer.Serialize(source, WriteOptions);
-        var clone = JsonSerializer.Deserialize<MandoCodeConfig>(json, ReadOptions)
-            ?? throw new InvalidOperationException("Failed to clone MandoCodeConfig.");
-
-        // Mandatory, not cosmetic. System.Text.Json builds McpServers with the default
-        // case-SENSITIVE comparer regardless of the property initializer; ValidateAndClamp
-        // rebuilds it as OrdinalIgnoreCase. Skip this and every MCP server lookup in the clone
-        // silently misses on a casing difference.
-        clone.ValidateAndClamp();
-        return clone;
     }
 }

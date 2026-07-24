@@ -68,7 +68,7 @@
     </PropertyGroup>
     <Error Condition="$(_ChatControllerSource.Contains('_config.Save')) Or $(_WizardsSource.Contains('_config.Save'))"
            Code="MANDO001"
-           Text="ChatController must not call _config.Save() — it holds a per-tab config clone, and Save() writes the shared config file. Mutate ConfigCoordinator.Canonical and call SaveAndFanOutAsync() instead." />
+           Text="ChatController must not call _config.Save() — it holds a per-tab config clone, and Save() writes the shared config file. Mutate ConfigCoordinator.Defaults and call SaveDefaults() (or SaveDefaultsFrom(agentConfig)) instead." />
   </Target>
 
 </Project>
