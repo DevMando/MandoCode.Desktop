@@ -16,7 +16,8 @@ namespace MandoCode.Desktop.ViewModels;
 /// </summary>
 public sealed partial class ChatController
 {
-    private readonly AIService _ai;
+    private readonly IAiService _ai;
+    private readonly ResponseStreamer _streamer;
     private readonly MandoCodeConfig _config;
     private readonly TokenTrackingService _tokenTracker;
     private readonly PlanHandoff _planHandoff;
@@ -74,7 +75,11 @@ public sealed partial class ChatController
     /// <summary>Set by AgentSession: receives ("u"/"a", text) for every conversational turn,
     /// feeding the per-session ConversationLog that re-briefs the model after a restart.
     /// Only real dialogue is logged — /commands and !shell lines are not conversation.</summary>
-    public Action<string, string>? ConversationLogger { get; set; }
+    public Action<string, string>? ConversationLogger
+    {
+        get => _streamer.ConversationLogger;
+        set => _streamer.ConversationLogger = value;
+    }
 
     /// <summary>Arms a restored previous-session conversation to ride the next send as
     /// imported background — the automatic counterpart of importing a snapshot, used by
@@ -137,7 +142,7 @@ public sealed partial class ChatController
     public event Action<string?>? McpEditorRequested;
 
     public ChatController(
-        AIService ai,
+        IAiService ai,
         MandoCodeConfig config,
         TokenTrackingService tokenTracker,
         PlanHandoff planHandoff,
@@ -180,6 +185,13 @@ public sealed partial class ChatController
         _configs = configs;
         _mcp = mcp;
         _snapshots = snapshots;
+
+        // The streamed-response loop, split out so it's testable with a fake IAiService. The 401
+        // sign-in walkthrough is a UI wizard, so it rides in as a callback rather than a direct call.
+        _streamer = new ResponseStreamer(_ai, _transcript, _html, _busy, _tokenTracker, _config)
+        {
+            On401 = OfferCloudSigninAsync
+        };
 
         // ---- Same wiring as App.razor OnInitialized ----
         // Every delegate below is SINGLE-ASSIGNMENT, not multicast. That's safe only because
@@ -402,53 +414,24 @@ public sealed partial class ChatController
             var needsPlanning = _taskPlanner.RequiresPlanning(input);
             var processedInput = ProcessFileReferences(input);
 
-            // Imported snapshots (from "Import" in the Snapshots panel) ride along ONCE, as background
-            // the model already knows — the user's echoed message stays their own text. Multiple
-            // imports accumulate and are all sent together, each kept as a distinct recap.
+            // Fold the invisible ride-alongs (imported recaps, emoji reactions, external workspace
+            // changes) and any planning nudge into the message the model sees. See
+            // RequestPreambleComposer for the exact framing.
+            processedInput = RequestPreambleComposer.Compose(
+                processedInput,
+                _armedContexts,
+                _pendingReactions.Select(r => (r.Emoji, r.Snippet)).ToList(),
+                _pendingWorkspaceNotes,
+                needsPlanning);
+
+            // Ride-alongs are one-shot — clear what we just folded in so it isn't sent twice.
             if (_armedContexts.Count > 0)
             {
-                var noun = _armedContexts.Count == 1 ? "recap" : "recaps";
-                processedInput =
-                    $"[Imported context — {_armedContexts.Count} {noun} from previous conversations. " +
-                    "Treat as background you already have; do not reply to it directly.]\n" +
-                    string.Join("\n\n", _armedContexts) +
-                    "\n\n[Current request:]\n" + processedInput;
                 _armedContexts.Clear();
                 _armedSnapshotIds.Clear();   // a new batch can re-import the same snapshots next time
             }
-
-            // Emoji reactions ride along the same way — factual feedback the model can steer
-            // on, clearly framed as metadata so it's never mistaken for typed text.
-            if (_pendingReactions.Count > 0)
-            {
-                var lines = string.Join("\n", _pendingReactions.Select(r =>
-                    $"- {r.Emoji} on your response beginning: “{r.Snippet}”"));
-                processedInput =
-                    "[The user reacted to earlier responses with emoji — a feedback signal, not text they typed:]\n" +
-                    lines +
-                    "\n\n[Current request:]\n" + processedInput;
-                _pendingReactions.Clear();
-            }
-
-            // Workspace changes the model didn't make and can't see. Framed as facts (not
-            // instructions) with an explicit staleness warning, so the model re-reads rather
-            // than trusting its memory of file contents.
-            if (_pendingWorkspaceNotes.Count > 0)
-            {
-                var notes = string.Join("\n", _pendingWorkspaceNotes.Select(n => "- " + n));
-                processedInput =
-                    "[Workspace changes since your last turn, made outside this conversation. " +
-                    "Your memory of affected file contents may be stale — re-read before relying on it:]\n" +
-                    notes +
-                    "\n\n[Current request:]\n" + processedInput;
-                _pendingWorkspaceNotes.Clear();
-            }
-
-            if (needsPlanning)
-            {
-                processedInput += "\n\n[system: this request looks multi-step. " +
-                                  "Call propose_plan now with the breakdown before doing any work.]";
-            }
+            _pendingReactions.Clear();
+            _pendingWorkspaceNotes.Clear();
 
             await ProcessDirectRequestAsync(processedInput);
         }
@@ -472,95 +455,17 @@ public sealed partial class ChatController
 
     private async Task ProcessDirectRequestAsync(string input)
     {
+        // Reset the per-request operation tracking the function-call event handlers read.
         _recentReadCount = 0;
         _recentReadFiles.Clear();
         _lastOperationType = null;
 
         _requestCts = new CancellationTokenSource();
         var token = _requestCts.Token;
-
         try
         {
-            var receivedFirstChunk = false;
-            var enumerator = _ai.ChatStreamAsync(input, token).GetAsyncEnumerator(token);
-
-            try
-            {
-                _busy.Start("Thinking...");
-
-                if (await enumerator.MoveNextAsync())
-                    receivedFirstChunk = true;
-
-                if (!receivedFirstChunk)
-                {
-                    _busy.Stop();
-                    _transcript.Append(_html.Warn("No response from model. The request may have exceeded the model's context window."));
-                    _transcript.Append(_html.Dim("Try a smaller request, or switch to a model with a larger context window via /config set."));
-                    return;
-                }
-
-                // Each element is one completed chat turn — auto-continuations and
-                // post-approval turns arrive as additional elements. Flush every turn
-                // to the transcript as it completes so its text lands next to the
-                // approval/diff cards it belongs with, instead of every turn coalescing
-                // into a single card after the final one.
-                var segments = new List<string>();
-                do
-                {
-                    var segment = enumerator.Current.Trim();
-                    if (segment.Length > 0)
-                    {
-                        segments.Add(segment);
-                        _transcript.Append(_html.AssistantCard(segment));
-                        ConversationLogger?.Invoke("a", segment);
-                    }
-                } while (await enumerator.MoveNextAsync());
-
-                _busy.Stop();
-
-                if (segments.Count == 0)
-                {
-                    _transcript.Append(_html.Warn("Model returned an empty response. The context may be too large for this model."));
-                    _transcript.Append(_html.Dim("Try a smaller request, or switch to a model with a larger context window."));
-                }
-                else
-                {
-                    var responseText = string.Join("\n\n", segments);
-                    _lastAiResponse = responseText;
-
-                    if (Looks401(responseText))
-                    {
-                        // 401 auto-recovery — same intent as the CLI's TryAutoSigninAfter401Async:
-                        // offer the sign-in walkthrough right here instead of making the user
-                        // type /setup and re-navigate to it.
-                        await OfferCloudSigninAsync();
-                    }
-
-                    if (_config.EnableTokenTracking)
-                    {
-                        var lastOp = _tokenTracker.LastOperation;
-                        if (lastOp != null && !lastOp.IsEstimate)
-                        {
-                            var tps = lastOp.TokensPerSecond.HasValue ? $": {lastOp.TokensPerSecond.Value:0.#} tok/s" : "";
-                            _transcript.Append(_html.TokenSummary(
-                                $"[~{TokenTrackingService.FormatTokenCount(lastOp.PromptTokens)} in, " +
-                                $"{TokenTrackingService.FormatTokenCount(lastOp.CompletionTokens)} out{tps}]"));
-                        }
-                    }
-                }
-            }
-            finally
-            {
-                await enumerator.DisposeAsync();
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            _transcript.Append(_html.Warn("Request cancelled."));
-        }
-        catch (Exception ex)
-        {
-            _transcript.Append(_html.Error($"Error: {ex.Message}"));
+            var response = await _streamer.StreamAsync(input, token);
+            if (!string.IsNullOrEmpty(response)) _lastAiResponse = response;
         }
         finally
         {
@@ -570,10 +475,6 @@ public sealed partial class ChatController
             StateChanged?.Invoke();
         }
     }
-
-    private static bool Looks401(string responseText)
-        => !string.IsNullOrEmpty(responseText)
-           && responseText.Contains("401 Unauthorized", StringComparison.OrdinalIgnoreCase);
 
     // ============================================================
     // @file references (port of ProcessFileReferences)
@@ -1020,7 +921,7 @@ public sealed partial class ChatController
             ("/config", "Adjust settings — guided wizard (/config set <key> <value> inline)"),
             ("/retry", "Retry Ollama connection"),
             ("/learn", "Learn about LLMs and local AI models"),
-            ("/music", "Play lofi/synthwave coding music"),
+            ("/music", "Play coding music (also /music-lofi, /music-synthwave for a specific genre)"),
             ("/music-stop", "Stop music playback"),
             ("/music-pause", "Pause/resume music"),
             ("/music-next", "Skip to next track"),
@@ -1824,7 +1725,12 @@ public sealed partial class ChatController
                     var tools = await client.ListToolsAsync();
                     toolCount = tools.Count.ToString();
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    // Connected but the tool listing failed — degrade to "?" in the UI, but this is
+                    // an unexpected server fault worth a breadcrumb (only hit when the MCP page refreshes).
+                    Services.CrashLog.Write($"MCP ListTools({name})", ex);
+                }
                 status = $"connected · {toolCount} tool(s)";
             }
             else if (_mcpManager.StartupErrors.TryGetValue(name, out var err))

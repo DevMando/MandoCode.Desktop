@@ -63,14 +63,7 @@ public sealed class SessionManager
     /// label just distinguishes agents; the user can rename it. Reuses the lowest free number so
     /// closing "Agent 2" then opening a new one gives "Agent 2" again, not an ever-climbing count.
     /// </summary>
-    private string NextAgentName()
-    {
-        for (var n = 1; ; n++)
-        {
-            var candidate = $"Agent {n}";
-            if (_sessions.All(s => s.Title != candidate)) return candidate;
-        }
-    }
+    private string NextAgentName() => AgentNaming.NextFreeName(_sessions.Select(s => s.Title));
 
     public void Activate(AgentSession session)
     {

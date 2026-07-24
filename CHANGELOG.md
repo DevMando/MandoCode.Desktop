@@ -40,10 +40,9 @@ are visible until you actually open a second tab.
   tab's snapshots. **Import** arms a snapshot so its recap rides along, invisibly, with the *active*
   agent's next message, carrying the context into any model. The store is app-wide, so a snapshot
   taken in one tab imports into a brand-new tab on a capable model. **Take snapshot** (tab options
-  menu) captures on demand without switching. The recap is a deterministic port of the harness's own
-  compaction summary (`HistorySummarizer`), fed by the public `AIService.GetHistoryAsync()` — no
-  submodule change. The full history is stored alongside each snapshot so a richer LLM summary can
-  be generated later without the original conversation still being live.
+  menu) captures on demand without switching. The recap is written by a summarizer model you pick
+  (`SnapshotEnhancer`, a tool-less Ollama kernel that map-reduces over the full history so nothing is
+  truncated), so a snapshot is always born with a real recap — there is no "light"/un-enhanced state.
 - **Per-tab options menu.** The tab's `⋯` menu carries Rename, Take snapshot, Export transcript,
   and Close. It replaces the bare close button — which, on the last remaining agent, was an `X`
   you were not allowed to use; Close is now simply greyed out there.
@@ -77,6 +76,22 @@ are visible until you actually open a second tab.
 - **Unread badges.** The History and Snapshots rail badges are now unread counts — items newer than
   the last time you opened that panel — and clear when you open it, rather than showing a running
   total. The "last seen" marks persist across launches.
+- **Integrated terminal.** A sliding terminal panel (Ctrl+` toggles it, Ctrl+Shift+` maximizes)
+  runs a real shell through ConPTY, rendered with xterm.js inside WebView2 — no new native
+  dependencies. A shell picker (`ShellCatalog`) selects PowerShell/cmd/etc., and the terminal
+  opens in the active agent's project folder.
+- **File explorer with git awareness.** Each agent has a collapsible file tree, kept live by a
+  `FileSystemWatcher`, alongside a **Changes** tab driven by `GitQuickStatus`: a branch chip,
+  per-file add/modify/delete status with dirty badges on files and folders in the tree, inline
+  diff cards, a one-click **commit**, and per-file **undo** (with confirmation). Tree items drag
+  into the input as `@`-references, and paths can be dropped onto the chat.
+- **External-change awareness.** `WorkspaceDeltaTracker` notices when the working tree changed
+  outside the conversation — a commit, a revert, or a branch switch between your turns — and notes
+  it to the agent so its next reply reflects the repo as it actually is, not a stale picture.
+- **Skills page + AI-assisted authoring.** A **Skills** sidebar page lists installed skills
+  (searchable, filterable, enabled per agent), installs new ones from a folder or a zip, and its
+  editor can **generate or refine** a skill body with a model you pick (`SkillAuthor`).
+  `SkillCoordinator` fans skill changes out to every open agent, mirroring `McpCoordinator`.
 - **Branded app icon** across the exe, taskbar, and window title bar, plus a lightweight
   unhandled-exception logger (`crash.log`) to speed up diagnosing native/COM failures.
 
@@ -165,12 +180,6 @@ are visible until you actually open a second tab.
 - Each agent holds a live WebView2 (tens of MB). A retained transcript log would let background
   agents defer creating one until first shown.
 - Agent settings are session-scoped by design and are not restored on launch.
-- **LLM-enhanced snapshots.** The snapshot data model reserves an AI recap (`AiRecap`; the `Tag`
-  flips `Light`→`AI`, and `BestRecap` prefers it), but there is no "Enhance" action yet. A clean
-  LLM summary needs a small public seam on `AIService` — a no-tools completion on a side history —
-  added at the next submodule pin roll; the existing side-channels either fire tools
-  (`ExecutePlanStepAsync`) or would corrupt the live conversation. The panel is already built, so
-  it's a button plus one method once the seam lands.
 - **Summarize-at-restore.** The tail-brief restore fallback still excerpts the stored dialogue
   verbatim rather than running `HistorySummarizer` over it — better coverage of long sessions is a
   follow-up, at the cost of one LLM call on restore.

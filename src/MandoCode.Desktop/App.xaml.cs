@@ -29,19 +29,7 @@ public partial class App : Application
 
         // Record any unhandled exception with its full stack to crash.log, so a UI-thread throw
         // shows what actually failed instead of only the generated debugger-break in App.g.i.cs.
-        UnhandledException += (_, e) =>
-        {
-            try
-            {
-                var dir = System.IO.Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "MandoCode.Desktop");
-                System.IO.Directory.CreateDirectory(dir);
-                System.IO.File.AppendAllText(System.IO.Path.Combine(dir, "crash.log"),
-                    $"[{DateTimeOffset.Now:O}] {e.Message}\n{e.Exception}\n\n");
-            }
-            catch { /* logging is best-effort — never mask the original failure */ }
-        };
+        UnhandledException += (_, e) => CrashLog.Write("UnhandledException", e.Exception);
 
         Services = BuildServices();
     }

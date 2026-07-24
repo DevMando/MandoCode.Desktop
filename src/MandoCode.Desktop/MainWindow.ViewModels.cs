@@ -1,0 +1,145 @@
+using System.Collections.ObjectModel;
+using System.Diagnostics;
+using System.Text.Json;
+using MandoCode.Models;
+using MandoCode.Desktop.Services;
+using MandoCode.Desktop.ViewModels;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.UI;
+using Microsoft.UI.Dispatching;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
+using Microsoft.UI.Xaml.Media.Imaging;
+using Microsoft.UI.Xaml.Shapes;
+using Windows.ApplicationModel.DataTransfer;
+using Windows.System;
+
+namespace MandoCode.Desktop;
+
+/// <summary>Row model for the slash-command suggestions list.</summary>
+public sealed class CommandSuggestion
+{
+    public string Command { get; init; } = "";
+    public string Description { get; init; } = "";
+
+    /// <summary>What accepting the row inserts, when that differs from <see cref="Command"/>
+    /// (e.g. the ":fire:" row inserts 🔥). Null means insert the command itself.</summary>
+    public string? InsertText { get; init; }
+}
+
+/// <summary>Row model for the snapshot summarizer dropdown — a model name plus whether it's a cloud
+/// model (which may spend tokens) or a local one (free).</summary>
+public sealed record ModelChoice(string Name, bool IsCloud)
+{
+    public string Tag => IsCloud ? "cloud · uses tokens" : "local · free";
+}
+
+/// <summary>A project's snapshots, as one group in the (grouped) snapshots panel. Derives from
+/// <see cref="List{T}"/> so a <see cref="Microsoft.UI.Xaml.Data.CollectionViewSource"/> can group
+/// on it directly — the ListView's group-header template binds to <see cref="Project"/> and
+/// <see cref="Count"/>.</summary>
+public sealed class SnapshotGroup : List<Services.ContextSnapshot>
+{
+    public SnapshotGroup(string project, IEnumerable<Services.ContextSnapshot> items) : base(items)
+        => Project = project;
+
+    public string Project { get; }
+
+    /// <summary>Whether the group's Expander is open. Set when the groups are rebuilt (from the
+    /// remembered collapsed-set) and read once via a OneTime x:Bind — the Expander's own
+    /// expand/collapse events keep the remembered set current thereafter.</summary>
+    public bool IsExpanded { get; set; } = true;
+}
+
+/// <summary>A project's closed conversations, as one collapsible group in the History panel —
+/// the archive twin of <see cref="SnapshotGroup"/>.</summary>
+public sealed class HistoryGroup : List<Services.SessionArchiveEntry>
+{
+    public HistoryGroup(string project, IEnumerable<Services.SessionArchiveEntry> items) : base(items)
+        => Project = project;
+
+    public string Project { get; }
+
+    public bool IsExpanded { get; set; } = true;
+}
+
+/// <summary>Row model for diff lines shown in the approval overlay.</summary>
+public sealed class DiffLineVm
+{
+    public string Text { get; init; } = "";
+    public SolidColorBrush Brush { get; init; } = new(Colors.Gray);
+}
+
+/// <summary>Row model for the MCP servers page.</summary>
+public sealed class McpRow
+{
+    public string Name { get; init; } = "";
+    public string Transport { get; init; } = "";
+    public string Status { get; init; } = "";
+    public SolidColorBrush StatusBrush { get; init; } = new(Colors.Gray);
+    /// <summary>Per-server on/off (the config's Disabled flag, inverted). Shared by every agent.</summary>
+    public bool Enabled { get; init; }
+}
+
+/// <summary>A section of the skills list (e.g. "Enabled (12)"). A List subclass so a
+/// CollectionViewSource can group on it directly; the header binds to <see cref="Key"/>.</summary>
+public sealed class SkillRowGroup : List<SkillRow>
+{
+    public string Key { get; }
+    public SkillRowGroup(string key, IEnumerable<SkillRow> items) : base(items) => Key = key;
+}
+
+/// <summary>A section of the MCP servers list (e.g. "Disabled (3)").</summary>
+public sealed class McpRowGroup : List<McpRow>
+{
+    public string Key { get; }
+    public McpRowGroup(string key, IEnumerable<McpRow> items) : base(items) => Key = key;
+}
+
+/// <summary>Row model for the global-skills page. FolderPath rides along so per-row actions
+/// (the enable toggle) can act on the right skill without leaning on list selection.</summary>
+public sealed class SkillRow
+{
+    public string Name { get; init; } = "";
+    public string Description { get; init; } = "";
+    public string Body { get; init; } = "";
+    public string FolderPath { get; init; } = "";
+    public bool Enabled { get; init; }
+
+    // Size of the instructions body — what gets injected into the prompt on load, so it's the cost
+    // that spins a local model up. ~4 chars/token is the usual rough estimate.
+    public int ApproxTokens => (Body.Length + 3) / 4;
+    public bool IsLarge => ApproxTokens >= 2000;
+    public string SizeLabel =>
+        (ApproxTokens >= 1000 ? $"≈{ApproxTokens / 1000.0:0.0}k tok" : $"≈{ApproxTokens} tok")
+        + (IsLarge ? " · large" : "");
+    public SolidColorBrush SizeBrush =>
+        new(ThemeManager.C(IsLarge ? ThemeManager.Current.Gold : ThemeManager.Current.Dim));
+}
+
+/// <summary>Chip model for the MCP editor's tool preview (test results).</summary>
+public sealed class ToolChip
+{
+    public string Name { get; init; } = "";
+    public string Description { get; init; } = "";
+}
+
+/// <summary>Row model for the Appearance tab's theme picker — each card is drawn in
+/// its own theme's colors so the list doubles as a preview.</summary>
+public sealed class ThemeVm
+{
+    public required UiTheme Theme { get; init; }
+    public string Name => Theme.Name;
+    public string Description => Theme.Description;
+    public SolidColorBrush BgBrush => new(ThemeManager.C(Theme.Background));
+    public SolidColorBrush EdgeBrush => new(ThemeManager.C(Theme.Border));
+    public SolidColorBrush FgBrush => new(ThemeManager.C(Theme.Text));
+    public SolidColorBrush DimBrush => new(ThemeManager.C(Theme.Dim));
+    public SolidColorBrush AccentBrush => new(ThemeManager.C(Theme.Accent));
+    public SolidColorBrush GoldBrush => new(ThemeManager.C(Theme.Gold));
+    public SolidColorBrush SkyBrush => new(ThemeManager.C(Theme.Sky));
+    public SolidColorBrush GreenBrush => new(ThemeManager.C(Theme.Green));
+}

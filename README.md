@@ -79,8 +79,8 @@ graph; `SessionManager` owns the set of them. The split matters:
 |---|---|
 | `AIService` (its conversation, its model), `ChatController`, `TaskPlannerService` | The `MandoCodeConfig` on disk — the **defaults** a new agent starts on |
 | `MandoCodeConfig` clone, `ProjectRootAccessor`, `SkillLoader`, `FileAutocompleteProvider` | `McpClientManager` (one set of server processes) |
-| `TokenTrackingService`, `PlanHandoff`, `TranscriptWriter`, `BusyStateService`, `ShellRunner` | `MusicPlayerService`, `ThemeManager`, `TranscriptHtmlBuilder` |
-| `WinUiApprovalService`, `ApprovalPromptGate`, `McpApprovalGate` | `ConfigCoordinator`, `McpCoordinator`, `SessionManager`, `SnapshotStore`, `SessionArchiveStore` |
+| `TokenTrackingService`, `PlanHandoff`, `TranscriptWriter`, `BusyStateService`, `ShellRunner` | `MusicPlayerService`, `ThemeManager` (static), `TranscriptHtmlBuilder`, `SpinnerService` |
+| `WinUiApprovalService`, `ApprovalPromptGate`, `McpApprovalGate` | `ConfigCoordinator`, `McpCoordinator`, `SkillCoordinator`, `SessionManager`, `SnapshotStore`, `SessionArchiveStore`, `UiUpdateCheckService` |
 
 Tabs default to `Agent 1`, `Agent 2`, … (the folder shows in the header); the number reuses the
 lowest free slot, and a rename or folder change never overwrites it. Each tab's `⋯` options menu
@@ -179,7 +179,7 @@ within 24 hours.
   approve / don't-ask-again / deny / new-instructions / cancel-plan semantics)
 - propose_plan flow: plan table, execute/reject/cancel, per-step progress bar,
   step-failure skip/cancel
-- Slash commands with autocomplete: /help /clear /model /config /retry /learn
+- Slash commands with autocomplete: /help /setup /clear /model /config /retry /learn
   /copy /copy-code /skills /force-skill /mcp /mcp tools /mcp remove /mcp-reload
   /music* /command /exit — plus `!cmd` shell escape and `@file` references
 - Token tracking + per-response summaries, per agent
@@ -202,7 +202,14 @@ within 24 hours.
   collapsible groups. Unnamed snapshots get an auto-generated, unique title
 - Rail badges on History and Snapshots are unread counts that clear when you open
   the panel (persisted), not running totals
-- Sidebar: Settings and MCP as full-screen pages, acting on the selected agent
+- Integrated terminal — a sliding panel (Ctrl+` / Ctrl+Shift+` to maximize) running a
+  real shell via ConPTY, rendered with xterm.js in WebView2; a shell picker chooses the
+  shell and it opens in the active agent's project folder
+- Per-agent file explorer with git awareness — a live file tree (FileSystemWatcher) plus a
+  Changes tab (GitQuickStatus): branch chip, add/modify/delete status, dirty badges, inline
+  diff cards, one-click commit and per-file undo; tree items drag into the input as `@`-refs.
+  WorkspaceDeltaTracker notes commits/reverts/branch switches made outside the conversation
+- Sidebar: Settings, MCP, and Skills as full-screen pages, acting on the selected agent
   - Settings — the whole config as a native form (toggles, sliders, number boxes,
     grouped Appearance/Connection/Generation/Behavior/Limits/Integrations); every
     change is validated through the shared ConfigKeySetter, same as the CLI, and
@@ -210,6 +217,9 @@ within 24 hours.
   - MCP — live server list with status/tool counts; add/edit servers in a single
     form modal with a Test button (isolated connection check + tool table preview).
     Servers are one app-wide set; each agent chooses whether to attach their tools
+  - Skills — list installed skills (searchable, filterable, enabled per agent), install
+    from a folder or zip, and an editor that can generate or refine a skill body with a
+    model you pick (`SkillAuthor`); `SkillCoordinator` fans changes to every open agent
 - Guided wizards, built on the approval-overlay select + text primitives:
   - `/setup` — probe/start Ollama, change endpoint, pull a starter model with live
     progress, model picker, cloud-auth check + sign-in walkthrough
@@ -218,7 +228,8 @@ within 24 hours.
 - Branded application icon across the exe, taskbar, and window title bar
 - Update check against this repo's GitHub Releases (24h throttle, fail-silent)
 
-Not ported (yet): matrix easter eggs, terminal theme service (N/A).
+Not ported: matrix easter eggs; the CLI's ANSI terminal-theme service (N/A — the app ships
+its own integrated terminal instead, see above).
 
 ## License
 

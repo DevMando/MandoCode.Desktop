@@ -31,19 +31,10 @@ public sealed class SessionArchiveEntry
     // ---- display helpers for the panel ----
 
     [System.Text.Json.Serialization.JsonIgnore]
-    public string TimeLabel => ClosedAt.LocalDateTime.ToString("MMM d · h:mm tt");
+    public string TimeLabel => ProjectDisplay.TimeLabel(ClosedAt);
 
     [System.Text.Json.Serialization.JsonIgnore]
-    public string ProjectLabel
-    {
-        get
-        {
-            if (string.IsNullOrWhiteSpace(ProjectRoot)) return "Unknown project";
-            var name = Path.GetFileName(
-                ProjectRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-            return string.IsNullOrEmpty(name) ? ProjectRoot : name;
-        }
-    }
+    public string ProjectLabel => ProjectDisplay.ProjectLabel(ProjectRoot);
 
     /// <summary>Card body: the first user message, or an honest stand-in when there wasn't one.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
