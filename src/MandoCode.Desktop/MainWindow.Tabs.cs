@@ -88,7 +88,7 @@ public sealed partial class MainWindow
 
         SelectTab(entry);
         if (_snapshotsPanelOpen) PopulateSnapshots();   // an agent exists now → re-enable Import
-        if (HasComparePair) RefreshSplitCombos();       // include the new agent in the pane pickers
+        if (SplitConfigured) RefreshSplitBar();          // offer the new agent in the pane pickers
         return entry;
     }
 

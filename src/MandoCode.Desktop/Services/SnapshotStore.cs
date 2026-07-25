@@ -93,4 +93,26 @@ public sealed class SnapshotStore
         Persist();
         Changed?.Invoke();
     }
+
+    /// <summary>
+    /// Removes a batch in ONE pass — a single <see cref="Persist"/> and a single
+    /// <see cref="Changed"/> for the whole set. Looping <see cref="Remove"/> would rewrite the
+    /// store file and rebuild the panel once per snapshot, which is what makes deleting a whole
+    /// project group visibly slow. Matched by <see cref="ContextSnapshot.Id"/> (unique per
+    /// snapshot) rather than reference, so a caller holding a deserialized copy still works.
+    /// Returns how many were actually present.
+    /// </summary>
+    public int RemoveAll(IEnumerable<ContextSnapshot> snapshots)
+    {
+        var ids = snapshots.Select(s => s.Id).ToHashSet();
+        if (ids.Count == 0) return 0;
+
+        int removed;
+        lock (_lock) removed = _items.RemoveAll(s => ids.Contains(s.Id));
+        if (removed == 0) return 0;
+
+        Persist();
+        Changed?.Invoke();
+        return removed;
+    }
 }

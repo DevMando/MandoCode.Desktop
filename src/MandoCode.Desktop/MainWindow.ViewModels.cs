@@ -52,6 +52,16 @@ public sealed class SnapshotGroup : List<Services.ContextSnapshot>
     /// remembered collapsed-set) and read once via a OneTime x:Bind — the Expander's own
     /// expand/collapse events keep the remembered set current thereafter.</summary>
     public bool IsExpanded { get; set; } = true;
+
+    /// <summary>Label for the group's "delete everything shown here" button. Computed here rather
+    /// than assembled in XAML so the count is exact; a OneTime binding is always current because the
+    /// groups are rebuilt on every panel populate.</summary>
+    public string DeleteAllLabel => $"Delete all {Count}";
+
+    /// <summary>The group action only earns its space once there's more than one item — with a single
+    /// card, that card's own Delete button already does the same job. Bound as Visibility rather than
+    /// a bool because x:Bind does no implicit bool-to-Visibility conversion.</summary>
+    public Visibility DeleteAllVisibility => Count > 1 ? Visibility.Visible : Visibility.Collapsed;
 }
 
 /// <summary>A project's closed conversations, as one collapsible group in the History panel —
@@ -64,6 +74,26 @@ public sealed class HistoryGroup : List<Services.SessionArchiveEntry>
     public string Project { get; }
 
     public bool IsExpanded { get; set; } = true;
+
+    /// <summary>See <see cref="SnapshotGroup.DeleteAllLabel"/>.</summary>
+    public string DeleteAllLabel => $"Delete all {Count}";
+
+    /// <summary>See <see cref="SnapshotGroup.DeleteAllVisibility"/>.</summary>
+    public Visibility DeleteAllVisibility => Count > 1 ? Visibility.Visible : Visibility.Collapsed;
+}
+
+/// <summary>
+/// x:Bind function-binding helpers. These exist so bool/string→<see cref="Visibility"/> logic can
+/// stay OUT of the persisted service models: `SessionArchiveStore.cs` and friends are compiled into
+/// the WinUI-free test project, so a Visibility property on them would break that build. Cheaper
+/// than a converter registered in resources, and readable at the binding site.
+/// </summary>
+public static class Vis
+{
+    public static Visibility When(bool condition) => condition ? Visibility.Visible : Visibility.Collapsed;
+
+    public static Visibility WhenText(string? text) =>
+        string.IsNullOrEmpty(text) ? Visibility.Collapsed : Visibility.Visible;
 }
 
 /// <summary>Row model for diff lines shown in the approval overlay.</summary>

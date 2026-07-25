@@ -7,8 +7,18 @@ namespace MandoCode.Desktop.Services;
 /// journal (null in files written before journaling existed).</summary>
 public sealed record WorkspaceTabState(string Title, string ProjectRoot, string? Model, string? Key = null);
 
-/// <summary>The workspace's shape: which tabs were open and which was active.</summary>
-public sealed record WorkspaceShape(List<WorkspaceTabState> Tabs, int ActiveIndex);
+/// <summary>The workspace's shape: which tabs were open, which was active, and the split
+/// layout. <paramref name="SplitPanes"/> holds the paned agents' durable persist-keys in
+/// pane order — keys, not indexes, because restore skips tabs whose project folder is gone,
+/// which would shift every index. <paramref name="PaneColumnFractions"/> /
+/// <paramref name="PaneRowFractions"/> are the divider positions. All three are null in files
+/// written before multi-pane split view existed, which restores as "no split configured".</summary>
+public sealed record WorkspaceShape(
+    List<WorkspaceTabState> Tabs,
+    int ActiveIndex,
+    List<string>? SplitPanes = null,
+    List<double>? PaneColumnFractions = null,
+    List<double>? PaneRowFractions = null);
 
 /// <summary>
 /// Persists the workspace SHAPE — open tabs (title, project folder, model) and the active

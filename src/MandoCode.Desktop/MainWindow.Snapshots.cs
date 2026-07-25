@@ -239,4 +239,33 @@ public sealed partial class MainWindow
         PopulateSnapshots();
     }
 
+    /// <summary>Deletes every snapshot in one project group at once. The group holds exactly what the
+    /// panel is SHOWING, so with a search active this deletes only the matches — the prompt says so
+    /// rather than claiming "all". One batched store call, so the panel rebuilds once.</summary>
+    private async void SnapshotDeleteGroup_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not SnapshotGroup group || group.Count == 0) return;
+
+        // Detach before the await: a capture landing mid-dialog repopulates the panel and replaces
+        // the group objects. RemoveAll matches on Id, so a stale copy still removes the right rows.
+        var targets = group.ToList();
+        var project = group.Project;
+        var noun = targets.Count == 1 ? "snapshot" : "snapshots";
+        var scope = string.IsNullOrEmpty(_snapshotFilter) ? "" : $" matching “{_snapshotFilter}”";
+
+        var dialog = new ContentDialog
+        {
+            Title = $"Delete {noun}",
+            Content = $"Delete {targets.Count} {noun}{scope} in “{project}”? This can't be undone.",
+            PrimaryButtonText = $"Delete {targets.Count}",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = Content.XamlRoot,
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+
+        _snapshotStore.RemoveAll(targets);
+        PopulateSnapshots();
+    }
+
 }

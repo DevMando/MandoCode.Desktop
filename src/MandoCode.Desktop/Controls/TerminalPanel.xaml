@@ -23,8 +23,14 @@
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
 
-            <FontIcon Grid.Column="0" Glyph="&#xE756;" FontSize="13" Margin="6,0,10,0"
-                      VerticalAlignment="Center" Foreground="{StaticResource MandoAccentBrush}"/>
+            <!-- The leading glyph mirrors the rail's terminal icon, so clicking it folds the panel
+                 away just like the chevron on the far right. -->
+            <Button Grid.Column="0" x:Name="CollapsePanelButton" Click="HidePanel_Click"
+                    Padding="6,4" Margin="0,0,4,0" Background="Transparent" BorderThickness="0"
+                    VerticalAlignment="Center"
+                    ToolTipService.ToolTip="Hide terminal (Ctrl+`)">
+                <FontIcon Glyph="&#xE756;" FontSize="13" Foreground="{StaticResource MandoAccentBrush}"/>
+            </Button>
 
             <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Auto"
                           VerticalScrollBarVisibility="Disabled" VerticalScrollMode="Disabled">

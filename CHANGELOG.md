@@ -57,6 +57,26 @@ are visible until you actually open a second tab.
   take it, the full memory rehydrates. **Delete** forgets one for good. Search filters by title,
   project, model, or that first message. The archive is app-wide, persisted, and capped at the
   newest 60 — evicting an old row deletes its journals so the on-disk stores stay bounded.
+- **History cards say where you left off, not just how you started.** A card carried only the first
+  thing you said. Since rows are titled by agent name ("Agent 3") unless renamed, that opening line is
+  the only thing identifying a conversation — so rather than replacing it, cards now show both: the
+  opening message as the topic, and a dimmer **last ·** line with your most recent message. Both are
+  the user's own words (symmetric, and your instruction rather than a long formatted reply). The last
+  line is hidden for single-turn conversations, where it would just repeat the first. Existing rows are
+  backfilled from their conversation logs on the first History open — off the UI thread, one write —
+  so old and new cards look the same instead of only new ones carrying the line.
+- **History search now reads the conversations, not just their labels.** The search box previously
+  matched title/project/model and the 140-character preview, so "find where we worked out the divider
+  math" missed unless those words happened to open the conversation — while Snapshots search covered
+  the whole recap, making History the inconsistent one. It now searches each archived conversation's
+  full text and shows the matching line as a quoted snippet on the card, so a hit whose title and
+  preview don't contain the term still explains itself. Metadata matching stays instant and
+  synchronous; the body scan is debounced ~220ms and runs off the UI thread behind
+  `ConversationTextCache` (lazily loaded per session, revalidated on the log's last-write time), so
+  typing never waits on file IO and 60 logs aren't re-read per keystroke. Each scan carries a
+  generation stamp so a slower earlier scan can't overwrite a later keystroke's results, and queries
+  under two characters don't trigger one at all. Matching and snippet extraction live in
+  `Services/ConversationSearch.cs`, kept pure and unit tested (+24 tests).
 - **Snapshots panel — grouping, search, and a cleaner import.** Snapshot cards now group by the
   project they were taken in (freshest project first), a search box filters by title/recap/model/
   project, and Import closes the panel and focuses the chat so the "context armed" confirmation is
@@ -64,12 +84,36 @@ are visible until you actually open a second tab.
 - **Collapsible project groups, in both panels.** Each project group in Snapshots and History is an
   `Expander` you can fold — the answer to "10–100 projects." Which groups you've collapsed is
   remembered across launches (`PanelState` → `panel-state.json`).
-- **Compare view — two agents side by side.** A **Split** button pairs two agents into a resizable
-  side-by-side view. The pair is an explicit, remembered choice (set by the button or the compare
-  bar's pickers, never by clicking a tab): clicking a paired agent's tab shows the split, clicking
-  any other agent shows it normally while the pair waits. The panes are ordinary agent views moved
-  between grid columns via `Grid.SetColumn` — never re-parented — so both WebViews and their live
-  transcripts survive the switch.
+- **Delete a whole project group at once.** Opening a project group in Snapshots or History reveals a
+  **Delete all *n*** button at the top of the group, clearing it in one action instead of a card at a
+  time. It lives in the group's content, not its header, so it only exists while the group is open —
+  never crowding the collapse chevron — and it can state the exact count. A single-item group doesn't
+  get one at all, since that card's own Delete already does the same job. It confirms first, and
+  because a group holds exactly what the panel is *showing*, deleting with a search active removes
+  only the matches, which the prompt says explicitly rather than claiming "all". Backed by batched
+  `RemoveAll` methods on both stores: one store-file write and one panel rebuild for the whole set,
+  where looping the single-item Remove did both once per item.
+- **Split view — 2 to 4 agents at once.** A **Split** button puts two agents side by side in a
+  resizable view; **Add pane** in the split bar, or **Add to split view** on a tab (its `⋯` menu or
+  right-click), grows it to three across or four as a 2×2. **Add pane** is a `SplitButton` — clicking
+  it panes the next agent not yet shown, its chevron picks a specific one from those still available
+  (the same shape as the terminal's shell picker), so a third pane is never an arbitrary guess.
+  Past three, columns alone leave each pane
+  too narrow for a transcript plus an input box, so four wraps instead of shrinking further. Every
+  divider is draggable and repartitions only the two panes either side of it, so adjusting one split
+  never nudges a third pane. The pane set is an explicit, remembered choice (never set by
+  plain-clicking a tab): clicking a paned agent's tab shows the split, clicking any other agent shows
+  it normally while the set waits, and dropping below two panes turns the split off and leaves you on
+  the agent that survived. The set and its divider positions persist across restarts, keyed by each
+  agent's durable persist-key so a project folder that's gone drops one pane rather than shifting all
+  of them. Panes are ordinary agent views moved between grid cells via `Grid.SetColumn`/`Grid.SetRow`
+  — never re-parented — so every WebView and its live transcript survives the switch; the row and
+  column tracks are rebuilt in code per pane count, and track definitions plus dividers are the only
+  things that change. Geometry and divider math live in `Services/PaneLayout.cs`, free of WinUI types
+  and unit tested. The split bar uses chips with `MenuFlyout` pickers rather than `ComboBox`es,
+  which sidesteps the `COMException 0x80070490` that rebuilding ComboBox item containers triggers.
+  Named *split view* rather than *compare* because comparing two models on one prompt is only one of
+  its uses — at three or four panes you're usually watching agents work in parallel, not comparing.
 - **AI-named snapshots.** Saving a snapshot without a name now asks the summarizer for a short,
   descriptive title from the recap; uniqueness against existing titles is then guaranteed in code
   (`SnapshotNaming`), so two snapshots can't share a name.
@@ -79,7 +123,9 @@ are visible until you actually open a second tab.
 - **Integrated terminal.** A sliding terminal panel (Ctrl+` toggles it, Ctrl+Shift+` maximizes)
   runs a real shell through ConPTY, rendered with xterm.js inside WebView2 — no new native
   dependencies. A shell picker (`ShellCatalog`) selects PowerShell/cmd/etc., and the terminal
-  opens in the active agent's project folder.
+  opens in the active agent's project folder. The terminal glyph at the left of the panel's tab
+  strip collapses the panel, matching the chevron on the far right — so the icon that opened the
+  terminal from the rail is also an icon that closes it.
 - **File explorer with git awareness.** Each agent has a collapsible file tree, kept live by a
   `FileSystemWatcher`, alongside a **Changes** tab driven by `GitQuickStatus`: a branch chip,
   per-file add/modify/delete status with dirty badges on files and folders in the tree, inline

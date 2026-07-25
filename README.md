@@ -91,15 +91,38 @@ Closing the **last** agent is allowed: it leaves a clean empty state (showing th
 with a one-click way to start a new agent. Actions that need an agent to act on — the Settings and
 MCP pages, and snapshot Import — disable while none is open, then re-enable when you open one.
 
-### Compare view (two agents side by side)
+### Split view (2–4 agents at once)
 
-The **Split** button pairs two agents into a resizable side-by-side view for comparing what each is
-producing. The pair is an explicit, remembered choice — set only by the Split button and the
-compare-bar pickers, never by clicking a tab. Clicking a paired agent's tab shows the split;
-clicking any other agent shows it normally while the pair waits. The two panes are ordinary agent
-views moved between grid columns with `Grid.SetColumn` — **never re-parented**, so both WebViews (and
-their live transcripts) survive the switch, which is the whole reason the tab surface is built the
-way it is (see below).
+The **Split** button puts two agents side by side in a resizable view, and further panes are added
+from the split bar's **Add pane** button or a tab's **Add to split view** (its `⋯` menu, or
+right-click). **Add pane** is a `SplitButton`: clicking it panes the next agent that isn't shown
+yet, while its chevron lists the agents still available so you can pick a specific one — the same
+shape as the terminal's shell picker. The layout follows the pane count: two side by side, three
+across, four as a 2×2 —
+past three, columns alone leave each pane too narrow for a transcript plus an input box. Every
+divider is draggable, and each one repartitions only the two panes either side of it, so adjusting
+one split never nudges a third pane.
+
+It's called *split view* rather than *compare* because comparing two models on the same prompt is
+only one of the things it's for: with three or four panes open you're usually watching agents work
+in parallel on different folders, not comparing their output.
+
+The pane set is an explicit, remembered choice — never set by plain-clicking a tab. Clicking a paned
+agent's tab shows the split; clicking any other agent shows it normally while the set waits.
+Dropping below two panes turns the split off and leaves you on the agent that survived. The set and
+its divider positions persist across restarts (in `workspace.json`, keyed by each agent's durable
+persist-key so a skipped project folder drops one pane rather than shifting all of them).
+
+Panes are ordinary agent views moved between grid cells with `Grid.SetColumn`/`Grid.SetRow` —
+**never re-parented**, so every WebView (and its live transcript) survives the switch, which is the
+whole reason the tab surface is built the way it is (see below). The row and column tracks are
+rebuilt in code per pane count, interleaving a divider track between adjacent panes; track
+definitions and dividers are the only things that change, so no agent view ever leaves the tree.
+The geometry and divider math live in `Services/PaneLayout.cs`, kept free of WinUI types so they're
+unit tested directly.
+
+The split bar uses chips with `MenuFlyout` pickers rather than `ComboBox`es on purpose: rebuilding
+ComboBox items as containers makes WinUI throw `COMException 0x80070490` on the next selection.
 
 The three approval services are per-agent for **correctness**, not tidiness. Shared, they break
 in ways that are invisible until a second tab exists: `WinUiApprovalService` holds the
@@ -189,13 +212,24 @@ within 24 hours.
   Rename, Take snapshot, Export transcript, Close. The header model opens a
   quick-switch dropdown (cloud first, `cloud`/`local` badges). Closing the last
   agent is allowed and leaves an empty state that shows the chat background
-- Compare view — the **Split** button shows two agents side by side in a resizable
-  split for comparing their output; the compared pair is a remembered, explicit
-  choice, so clicking other tabs navigates without disturbing it
+- Split view — the **Split** button shows two agents side by side, and **Add pane**
+  (or a tab's **Add to split view**) grows that to three across or four as a 2×2, every
+  divider draggable; the pane set is a remembered, explicit choice, so clicking
+  other tabs navigates without disturbing it, and it survives a restart
 - Session history — closing an agent archives its conversation instead of deleting
   it; the **History** panel reopens any past conversation as a new tab (with its
   transcript, and full memory when the model supports it), grouped by project and
   searchable. `/clear` still forgets for good
+- History cards show both ends of a conversation — the opening message (what it was
+  about, since rows are titled by agent name) and a dimmer **last ·** line with your
+  most recent message (whether it's worth resuming)
+- Full-text history search — the search box reads each archived conversation's whole
+  text, not just its title and preview, and quotes the matching line on the card so
+  every hit explains itself. Debounced and off the UI thread behind a per-session
+  cache, so typing never waits on file IO
+- Bulk cleanup — opening a project group of two or more in History or Snapshots
+  reveals a **Delete all *n*** button at the top of it, clearing the whole group
+  after one confirmation, batched into a single store write rather than one per item
 - Context snapshots — save an AI-written recap of a conversation (summarized by a
   model you pick) and Import it into another model or a fresh agent; a global
   left-rail panel lists them, **persisted**, grouped by project, searchable, with

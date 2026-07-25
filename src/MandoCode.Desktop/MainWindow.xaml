@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Window
     x:Class="MandoCode.Desktop.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -181,59 +181,78 @@
                                             </Border>
                                         </StackPanel>
                                     </Expander.Header>
-                                    <ItemsControl ItemsSource="{x:Bind}">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate x:DataType="services:ContextSnapshot">
-                                                <Border Background="{StaticResource MandoBackgroundBrush}" CornerRadius="8"
-                                                        BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1"
-                                                        Padding="12,10" Margin="0,0,0,6">
-                                                    <StackPanel Spacing="6">
-                                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                                            <FontIcon Glyph="&#xE722;" FontSize="13" VerticalAlignment="Center"
-                                                                      Foreground="{StaticResource MandoAccentBrush}"/>
-                                                            <TextBlock Text="{x:Bind DisplayTitle}" FontWeight="SemiBold" FontSize="13"
-                                                                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
-                                                                       ToolTipService.ToolTip="{x:Bind OriginModel}"/>
-                                                            <Border CornerRadius="5" Padding="6,0" VerticalAlignment="Center"
-                                                                    Background="{StaticResource MandoPanelBrush}"
-                                                                    ToolTipService.ToolTip="Model that wrote this recap">
-                                                                <TextBlock Text="{x:Bind SummarizerModel}" FontSize="10" Opacity="0.8"/>
-                                                            </Border>
+                                    <StackPanel>
+                                        <!-- Group action, at the top of the group's CONTENT rather than
+                                             its header: it only exists while the group is open, so it
+                                             never crowds the collapse chevron, and it can carry a real
+                                             label with the exact count instead of a bare icon.
+                                             Hidden for a single-item group — that card's
+                                             own Delete already does the same job. -->
+                                        <Button Click="SnapshotDeleteGroup_Click" Tag="{x:Bind}"
+                                                Visibility="{x:Bind DeleteAllVisibility}"
+                                                HorizontalAlignment="Right" Margin="0,0,0,8" Padding="8,3"
+                                                Background="Transparent" BorderThickness="0"
+                                                ToolTipService.ToolTip="Delete every snapshot shown in this project"
+                                                AutomationProperties.Name="Delete every snapshot shown in this project">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <FontIcon Glyph="&#xE74D;" FontSize="11" Opacity="0.75"/>
+                                                <TextBlock Text="{x:Bind DeleteAllLabel}" FontSize="11" Opacity="0.75"/>
+                                            </StackPanel>
+                                        </Button>
+                                        <ItemsControl ItemsSource="{x:Bind}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="services:ContextSnapshot">
+                                                    <Border Background="{StaticResource MandoBackgroundBrush}" CornerRadius="8"
+                                                            BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1"
+                                                            Padding="12,10" Margin="0,0,0,6">
+                                                        <StackPanel Spacing="6">
+                                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                                <FontIcon Glyph="&#xE722;" FontSize="13" VerticalAlignment="Center"
+                                                                          Foreground="{StaticResource MandoAccentBrush}"/>
+                                                                <TextBlock Text="{x:Bind DisplayTitle}" FontWeight="SemiBold" FontSize="13"
+                                                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                                                           ToolTipService.ToolTip="{x:Bind OriginModel}"/>
+                                                                <Border CornerRadius="5" Padding="6,0" VerticalAlignment="Center"
+                                                                        Background="{StaticResource MandoPanelBrush}"
+                                                                        ToolTipService.ToolTip="Model that wrote this recap">
+                                                                    <TextBlock Text="{x:Bind SummarizerModel}" FontSize="10" Opacity="0.8"/>
+                                                                </Border>
+                                                            </StackPanel>
+                                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                                <FontIcon Glyph="&#xE823;" FontSize="11" Opacity="0.55" VerticalAlignment="Center"/>
+                                                                <TextBlock Text="{x:Bind TimeLabel}" Opacity="0.55" FontSize="11"
+                                                                           VerticalAlignment="Center"/>
+                                                                <TextBlock Text="·" Opacity="0.4" FontSize="11" VerticalAlignment="Center"/>
+                                                                <FontIcon Glyph="&#xE8BD;" FontSize="11" Opacity="0.55" VerticalAlignment="Center"/>
+                                                                <TextBlock Text="{x:Bind MessageCount}" Opacity="0.55" FontSize="11"
+                                                                           VerticalAlignment="Center"/>
+                                                            </StackPanel>
+                                                            <TextBlock Text="{x:Bind Recap}" Opacity="0.75" FontSize="12"
+                                                                       MaxLines="4" TextTrimming="CharacterEllipsis" TextWrapping="Wrap"/>
+                                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                                <Button FontSize="12" Padding="10,4"
+                                                                        Click="SnapshotImport_Click" Tag="{x:Bind}"
+                                                                        Loaded="SnapshotImport_Loaded"
+                                                                        ToolTipService.ToolTip="Carry this recap into the active agent's next message">
+                                                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                                                        <FontIcon Glyph="&#xE896;" FontSize="12"/>
+                                                                        <TextBlock Text="Import"/>
+                                                                    </StackPanel>
+                                                                </Button>
+                                                                <Button FontSize="12" Padding="10,4"
+                                                                        Click="SnapshotDelete_Click" Tag="{x:Bind}">
+                                                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                                                        <FontIcon Glyph="&#xE74D;" FontSize="12"/>
+                                                                        <TextBlock Text="Delete"/>
+                                                                    </StackPanel>
+                                                                </Button>
+                                                            </StackPanel>
                                                         </StackPanel>
-                                                        <StackPanel Orientation="Horizontal" Spacing="6">
-                                                            <FontIcon Glyph="&#xE823;" FontSize="11" Opacity="0.55" VerticalAlignment="Center"/>
-                                                            <TextBlock Text="{x:Bind TimeLabel}" Opacity="0.55" FontSize="11"
-                                                                       VerticalAlignment="Center"/>
-                                                            <TextBlock Text="·" Opacity="0.4" FontSize="11" VerticalAlignment="Center"/>
-                                                            <FontIcon Glyph="&#xE8BD;" FontSize="11" Opacity="0.55" VerticalAlignment="Center"/>
-                                                            <TextBlock Text="{x:Bind MessageCount}" Opacity="0.55" FontSize="11"
-                                                                       VerticalAlignment="Center"/>
-                                                        </StackPanel>
-                                                        <TextBlock Text="{x:Bind Recap}" Opacity="0.75" FontSize="12"
-                                                                   MaxLines="4" TextTrimming="CharacterEllipsis" TextWrapping="Wrap"/>
-                                                        <StackPanel Orientation="Horizontal" Spacing="6">
-                                                            <Button FontSize="12" Padding="10,4"
-                                                                    Click="SnapshotImport_Click" Tag="{x:Bind}"
-                                                                    Loaded="SnapshotImport_Loaded"
-                                                                    ToolTipService.ToolTip="Carry this recap into the active agent's next message">
-                                                                <StackPanel Orientation="Horizontal" Spacing="6">
-                                                                    <FontIcon Glyph="&#xE896;" FontSize="12"/>
-                                                                    <TextBlock Text="Import"/>
-                                                                </StackPanel>
-                                                            </Button>
-                                                            <Button FontSize="12" Padding="10,4"
-                                                                    Click="SnapshotDelete_Click" Tag="{x:Bind}">
-                                                                <StackPanel Orientation="Horizontal" Spacing="6">
-                                                                    <FontIcon Glyph="&#xE74D;" FontSize="12"/>
-                                                                    <TextBlock Text="Delete"/>
-                                                                </StackPanel>
-                                                            </Button>
-                                                        </StackPanel>
-                                                    </StackPanel>
-                                                </Border>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
                                 </Expander>
                             </DataTemplate>
                         </ListView.ItemTemplate>
@@ -310,58 +329,100 @@
                                             </Border>
                                         </StackPanel>
                                     </Expander.Header>
-                                    <ItemsControl ItemsSource="{x:Bind}">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate x:DataType="services:SessionArchiveEntry">
-                                                <Border Background="{StaticResource MandoBackgroundBrush}" CornerRadius="8"
-                                                        BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1"
-                                                        Padding="12,10" Margin="0,0,0,6">
-                                                    <StackPanel Spacing="6">
-                                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                                            <FontIcon Glyph="&#xE8BD;" FontSize="13" VerticalAlignment="Center"
-                                                                      Foreground="{StaticResource MandoAccentBrush}"/>
-                                                            <TextBlock Text="{x:Bind Title}" FontWeight="SemiBold" FontSize="13"
-                                                                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                                                            <Border CornerRadius="5" Padding="6,0" VerticalAlignment="Center"
-                                                                    Background="{StaticResource MandoPanelBrush}"
-                                                                    ToolTipService.ToolTip="Model this conversation ran on">
-                                                                <TextBlock Text="{x:Bind Model}" FontSize="10" Opacity="0.8"/>
+                                    <StackPanel>
+                                        <!-- Group action, at the top of the group's CONTENT rather than
+                                             its header: it only exists while the group is open, so it
+                                             never crowds the collapse chevron, and it can carry a real
+                                             label with the exact count instead of a bare icon.
+                                             Hidden for a single-item group — that card's
+                                             own Delete already does the same job. -->
+                                        <Button Click="HistoryDeleteGroup_Click" Tag="{x:Bind}"
+                                                Visibility="{x:Bind DeleteAllVisibility}"
+                                                HorizontalAlignment="Right" Margin="0,0,0,8" Padding="8,3"
+                                                Background="Transparent" BorderThickness="0"
+                                                ToolTipService.ToolTip="Delete every conversation shown in this project"
+                                                AutomationProperties.Name="Delete every conversation shown in this project">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <FontIcon Glyph="&#xE74D;" FontSize="11" Opacity="0.75"/>
+                                                <TextBlock Text="{x:Bind DeleteAllLabel}" FontSize="11" Opacity="0.75"/>
+                                            </StackPanel>
+                                        </Button>
+                                        <ItemsControl ItemsSource="{x:Bind}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="services:SessionArchiveEntry">
+                                                    <Border Background="{StaticResource MandoBackgroundBrush}" CornerRadius="8"
+                                                            BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1"
+                                                            Padding="12,10" Margin="0,0,0,6">
+                                                        <StackPanel Spacing="6">
+                                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                                <FontIcon Glyph="&#xE8BD;" FontSize="13" VerticalAlignment="Center"
+                                                                          Foreground="{StaticResource MandoAccentBrush}"/>
+                                                                <TextBlock Text="{x:Bind Title}" FontWeight="SemiBold" FontSize="13"
+                                                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                                                <Border CornerRadius="5" Padding="6,0" VerticalAlignment="Center"
+                                                                        Background="{StaticResource MandoPanelBrush}"
+                                                                        ToolTipService.ToolTip="Model this conversation ran on">
+                                                                    <TextBlock Text="{x:Bind Model}" FontSize="10" Opacity="0.8"/>
+                                                                </Border>
+                                                            </StackPanel>
+                                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                                <FontIcon Glyph="&#xE823;" FontSize="11" Opacity="0.55" VerticalAlignment="Center"/>
+                                                                <TextBlock Text="{x:Bind TimeLabel}" Opacity="0.55" FontSize="11"
+                                                                           VerticalAlignment="Center"/>
+                                                                <TextBlock Text="·" Opacity="0.4" FontSize="11" VerticalAlignment="Center"/>
+                                                                <FontIcon Glyph="&#xE8F2;" FontSize="11" Opacity="0.55" VerticalAlignment="Center"/>
+                                                                <TextBlock Text="{x:Bind TurnCount}" Opacity="0.55" FontSize="11"
+                                                                           VerticalAlignment="Center"/>
+                                                            </StackPanel>
+                                                            <TextBlock Text="{x:Bind PreviewOrPlaceholder}" Opacity="0.75" FontSize="12"
+                                                                       MaxLines="3" TextTrimming="CharacterEllipsis" TextWrapping="Wrap"/>
+                                                            <!-- Where the conversation stopped: the user's LAST message, under the
+                                                                 opening line above. Dimmer, because the line above is what identifies
+                                                                 the row. Hidden when there's nothing distinct to show (a single-turn
+                                                                 conversation) and for rows not yet backfilled. -->
+                                                            <StackPanel Orientation="Horizontal" Spacing="6"
+                                                                        Visibility="{x:Bind local:Vis.WhenText(LastMessage)}">
+                                                                <TextBlock Text="last" FontSize="10" Opacity="0.4"
+                                                                           VerticalAlignment="Top" Margin="0,2,0,0"/>
+                                                                <TextBlock Text="{x:Bind LastMessage}" FontSize="11" Opacity="0.55"
+                                                                           MaxLines="2" TextTrimming="CharacterEllipsis"
+                                                                           TextWrapping="Wrap"/>
+                                                            </StackPanel>
+                                                            <!-- Why a full-text search matched this row. Present only when the hit
+                                                                 came from inside the conversation, which the title and preview above
+                                                                 may not contain — an accented rule marks it as quoted from the
+                                                                 transcript rather than more card metadata. -->
+                                                            <Border Visibility="{x:Bind local:Vis.WhenText(MatchSnippet)}"
+                                                                    BorderBrush="{StaticResource MandoAccentBrush}"
+                                                                    BorderThickness="2,0,0,0" Padding="8,1,0,1">
+                                                                <TextBlock Text="{x:Bind MatchSnippet}" FontSize="11" Opacity="0.7"
+                                                                           FontStyle="Italic" MaxLines="2"
+                                                                           TextTrimming="CharacterEllipsis" TextWrapping="Wrap"/>
                                                             </Border>
+                                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                                <Button FontSize="12" Padding="10,4"
+                                                                        Click="HistoryOpen_Click" Tag="{x:Bind}"
+                                                                        ToolTipService.ToolTip="Reopen this conversation as a new tab">
+                                                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                                                        <FontIcon Glyph="&#xE8A7;" FontSize="12"/>
+                                                                        <TextBlock Text="Open"/>
+                                                                    </StackPanel>
+                                                                </Button>
+                                                                <Button FontSize="12" Padding="10,4"
+                                                                        Click="HistoryDelete_Click" Tag="{x:Bind}"
+                                                                        ToolTipService.ToolTip="Forget this conversation (deletes it for good)">
+                                                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                                                        <FontIcon Glyph="&#xE74D;" FontSize="12"/>
+                                                                        <TextBlock Text="Delete"/>
+                                                                    </StackPanel>
+                                                                </Button>
+                                                            </StackPanel>
                                                         </StackPanel>
-                                                        <StackPanel Orientation="Horizontal" Spacing="6">
-                                                            <FontIcon Glyph="&#xE823;" FontSize="11" Opacity="0.55" VerticalAlignment="Center"/>
-                                                            <TextBlock Text="{x:Bind TimeLabel}" Opacity="0.55" FontSize="11"
-                                                                       VerticalAlignment="Center"/>
-                                                            <TextBlock Text="·" Opacity="0.4" FontSize="11" VerticalAlignment="Center"/>
-                                                            <FontIcon Glyph="&#xE8F2;" FontSize="11" Opacity="0.55" VerticalAlignment="Center"/>
-                                                            <TextBlock Text="{x:Bind TurnCount}" Opacity="0.55" FontSize="11"
-                                                                       VerticalAlignment="Center"/>
-                                                        </StackPanel>
-                                                        <TextBlock Text="{x:Bind PreviewOrPlaceholder}" Opacity="0.75" FontSize="12"
-                                                                   MaxLines="3" TextTrimming="CharacterEllipsis" TextWrapping="Wrap"/>
-                                                        <StackPanel Orientation="Horizontal" Spacing="6">
-                                                            <Button FontSize="12" Padding="10,4"
-                                                                    Click="HistoryOpen_Click" Tag="{x:Bind}"
-                                                                    ToolTipService.ToolTip="Reopen this conversation as a new tab">
-                                                                <StackPanel Orientation="Horizontal" Spacing="6">
-                                                                    <FontIcon Glyph="&#xE8A7;" FontSize="12"/>
-                                                                    <TextBlock Text="Open"/>
-                                                                </StackPanel>
-                                                            </Button>
-                                                            <Button FontSize="12" Padding="10,4"
-                                                                    Click="HistoryDelete_Click" Tag="{x:Bind}"
-                                                                    ToolTipService.ToolTip="Forget this conversation (deletes it for good)">
-                                                                <StackPanel Orientation="Horizontal" Spacing="6">
-                                                                    <FontIcon Glyph="&#xE74D;" FontSize="12"/>
-                                                                    <TextBlock Text="Delete"/>
-                                                                </StackPanel>
-                                                            </Button>
-                                                        </StackPanel>
-                                                    </StackPanel>
-                                                </Border>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
                                 </Expander>
                             </DataTemplate>
                         </ListView.ItemTemplate>
@@ -443,10 +504,11 @@
                      scroller, so they never scroll out of reach when many agents are open. -->
                 <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="4"
                             VerticalAlignment="Center" Margin="0,0,0,18">
-                    <!-- Compare two agents side by side. Needs ≥2 agents (disabled otherwise). -->
+                    <!-- Split view: 2–4 agents at once. Needs ≥2 agents (disabled otherwise);
+                         further panes are added from the split bar or a tab's menu. -->
                     <Button x:Name="SplitButton" Click="SplitButton_Click" Padding="10,6"
                             Background="Transparent" BorderThickness="0" VerticalAlignment="Center"
-                            ToolTipService.ToolTip="Compare two agents side by side"
+                            ToolTipService.ToolTip="Split view — show 2 to 4 agents at once"
                             AutomationProperties.Name="Split view">
                         <StackPanel Orientation="Horizontal" Spacing="7">
                             <FontIcon x:Name="SplitButtonIcon" Glyph="&#xE7C4;" FontSize="12"/>
@@ -466,31 +528,73 @@
             </Grid>
         </Border>
 
-        <!-- ======= Compare bar =======
-             Shown only in split mode. Two agent pickers (left/right pane) + Exit. Lives in the top
-             chrome (not TabHost) so the panes below need no extra rows. -->
+        <!-- ======= Split bar =======
+             Shown only in split mode. Left: label + one chip per pane (built by RefreshSplitBar).
+             Right: Add pane / Exit split view, pinned under the toolbar's matching pair.
+             Lives in the top chrome (not TabHost) so the panes below need no extra rows.
+             Chips use MenuFlyout rather than ComboBox on purpose: rebuilding ComboBox items as
+             containers throws COMException 0x80070490 (see MainWindow.Split.cs). -->
+        <!-- Right padding matches the toolbar Border's (10) so the pinned buttons below line up
+             edge-for-edge with Split / New agent above. -->
         <Border x:Name="SplitBar" Visibility="Collapsed" Background="{StaticResource MandoPanelBrush}"
                 BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="0,0,0,1"
-                Padding="14,7">
-            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                <FontIcon Glyph="&#xE7C4;" FontSize="12" Opacity="0.7" VerticalAlignment="Center"/>
-                <TextBlock Text="Compare" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
-                <ComboBox x:Name="SplitLeftCombo" MinWidth="150" VerticalAlignment="Center"
-                          SelectionChanged="SplitLeftCombo_SelectionChanged"
-                          ToolTipService.ToolTip="Agent shown in the left pane"/>
-                <FontIcon Glyph="&#xE76C;" FontSize="11" Opacity="0.5" VerticalAlignment="Center"/>
-                <ComboBox x:Name="SplitRightCombo" MinWidth="150" VerticalAlignment="Center"
-                          SelectionChanged="SplitRightCombo_SelectionChanged"
-                          ToolTipService.ToolTip="Agent shown in the right pane"/>
-                <Button Click="ExitSplit_Click" Padding="10,5" Background="Transparent"
-                        BorderThickness="0" VerticalAlignment="Center"
-                        ToolTipService.ToolTip="Exit compare view" AutomationProperties.Name="Exit compare">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <FontIcon Glyph="&#xE711;" FontSize="11"/>
-                        <TextBlock Text="Exit" FontSize="13"/>
+                Padding="14,7,10,7">
+            <Grid ColumnSpacing="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>      <!-- label + pane chips (scrolls) -->
+                    <ColumnDefinition Width="Auto"/>   <!-- layout hint -->
+                    <ColumnDefinition Width="Auto"/>   <!-- permanent buttons -->
+                </Grid.ColumnDefinitions>
+
+                <!-- Label and chips scroll together, so four chips on a narrow window can never
+                     push the pinned buttons off the bar. -->
+                <ScrollViewer Grid.Column="0" HorizontalScrollBarVisibility="Auto"
+                              VerticalScrollBarVisibility="Disabled" VerticalScrollMode="Disabled"
+                              VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                        <FontIcon Glyph="&#xE7C4;" FontSize="12" Opacity="0.7" VerticalAlignment="Center"/>
+                        <TextBlock Text="Split view" FontWeight="SemiBold" FontSize="13"
+                                   VerticalAlignment="Center"/>
+                        <!-- One chip per pane, in pane order. Rebuilt by RefreshSplitBar. -->
+                        <StackPanel x:Name="PaneChips" Orientation="Horizontal" Spacing="6"
+                                    VerticalAlignment="Center"/>
                     </StackPanel>
-                </Button>
-            </StackPanel>
+                </ScrollViewer>
+
+                <!-- Outside the scroller, so the shape stays readable however many chips there are. -->
+                <TextBlock x:Name="PaneLayoutHint" Grid.Column="1" FontSize="11" Opacity="0.45"
+                           VerticalAlignment="Center"/>
+
+                <!-- PERMANENT buttons, pinned far right directly beneath the toolbar's Split /
+                     New agent pair — same borderless look, same padding, same 4px spacing — and
+                     outside the scroller so they never scroll out of reach. -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4"
+                            VerticalAlignment="Center">
+                    <!-- Primary click panes the next agent that isn't shown yet; the chevron picks
+                         a specific one (same shape as TerminalPanel's NewTerminalButton). -->
+                    <SplitButton x:Name="AddPaneButton" Click="AddPane_Click" Padding="10,6"
+                                 Background="Transparent" BorderThickness="0" VerticalAlignment="Center"
+                                 ToolTipService.ToolTip="Add another agent as a pane (up to 4)"
+                                 AutomationProperties.Name="Add pane">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <FontIcon Glyph="&#xE710;" FontSize="12"/>
+                            <TextBlock Text="Add pane" FontSize="13"/>
+                        </StackPanel>
+                        <SplitButton.Flyout>
+                            <MenuFlyout x:Name="AddPaneMenu" Placement="Bottom"/>
+                        </SplitButton.Flyout>
+                    </SplitButton>
+                    <Button Click="ExitSplit_Click" Padding="10,6" Background="Transparent"
+                            BorderThickness="0" VerticalAlignment="Center"
+                            ToolTipService.ToolTip="Leave split view and show one agent"
+                            AutomationProperties.Name="Exit split view">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <FontIcon Glyph="&#xE711;" FontSize="12"/>
+                            <TextBlock Text="Exit split view" FontSize="13"/>
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Grid>
         </Border>
         </StackPanel>
 
@@ -498,25 +602,19 @@
              Settings and MCP are declared here and take the full area when selected; agent views
              are added at runtime. Exactly one child is Visible; the rest stay loaded and Collapsed. -->
         <Grid x:Name="TabHost" Grid.Row="1">
-                <!-- Three columns for split/compare view: left pane | divider | right pane. In
-                     single view the divider and right column are 0-width, so column 0 (everything's
-                     default) fills — pages and the empty state need no column awareness. Agent views
-                     are moved between columns 0 and 2 via Grid.SetColumn, which does NOT reparent
-                     them, so their WebViews survive the switch. -->
+                <!-- Rows and columns for split view are OWNED BY CODE — MainWindow.Split.cs
+                     rebuilds them per pane count (2 = 1x2, 3 = 1x3, 4 = 2x2), interleaving a divider
+                     track between adjacent panes. Out of split mode it collapses back to the single
+                     */* cell declared here, so pages and the empty state need no grid awareness.
+                     Agent views move between cells via Grid.SetColumn/SetRow, which does NOT
+                     reparent them, so their WebViews survive the switch. Dividers are created and
+                     destroyed as children, which likewise never touches an agent view. -->
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition x:Name="PaneLeftCol" Width="*"/>
-                    <ColumnDefinition x:Name="PaneSplitCol" Width="0"/>
-                    <ColumnDefinition x:Name="PaneRightCol" Width="0"/>
+                    <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
-
-                <!-- Draggable divider between the two panes (↔). Collapsed outside split mode. Sits
-                     in its own column so it never overlaps a pane. -->
-                <controls:ResizeGrip x:Name="PaneSplitter" GripOrientation="Vertical" Grid.Column="1"
-                                     Width="6" Visibility="Collapsed"
-                                     Background="{StaticResource MandoBorderBrush}"
-                                     PointerPressed="PaneSplitter_PointerPressed"
-                                     PointerMoved="PaneSplitter_PointerMoved"
-                                     PointerReleased="PaneSplitter_PointerReleased"/>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
 
                 <!-- ============ EMPTY STATE ============
                      Shown when every agent has been closed — the chat area is just the background
@@ -526,9 +624,13 @@
                 <!-- The custom chat background image, mirrored at the window level for the empty
                      state (in a live tab it lives inside the transcript WebView). Same file and
                      opacity as the transcript; hidden when no image is set or an agent is open. -->
+                <!-- Full-area children span every pane track. Spans beyond the current track count
+                     are clamped by the Grid, so one generous span covers all four layouts. -->
                 <Image x:Name="EmptyBgImage" Visibility="Collapsed" Stretch="UniformToFill"
+                       Grid.ColumnSpan="5" Grid.RowSpan="3"
                        HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
                 <StackPanel x:Name="EmptyAgentsState" Visibility="Collapsed"
+                            Grid.ColumnSpan="5" Grid.RowSpan="3"
                             HorizontalAlignment="Center" VerticalAlignment="Center"
                             Spacing="14" MaxWidth="360">
                     <FontIcon Glyph="&#xE8BD;" FontSize="40" HorizontalAlignment="Center"
@@ -548,7 +650,8 @@
                 </StackPanel>
 
                 <!-- ============ SETTINGS PAGE ============ -->
-                <Grid x:Name="SettingsPage" Visibility="Collapsed" Padding="24,16,24,16" RowSpacing="12">
+                <Grid x:Name="SettingsPage" Visibility="Collapsed" Padding="24,16,24,16" RowSpacing="12"
+                      Grid.ColumnSpan="5" Grid.RowSpan="3">
                     <Grid.RenderTransform>
                         <TranslateTransform x:Name="SettingsPageTransform"/>
                     </Grid.RenderTransform>
@@ -743,7 +846,8 @@
                 <!-- ============ APPEARANCE PAGE ============
                      App-wide (a window property), so it lives on the rail rather than in the
                      per-agent Settings tabs. -->
-                <Grid x:Name="AppearancePage" Visibility="Collapsed" Padding="24,16,24,16" RowSpacing="12">
+                <Grid x:Name="AppearancePage" Visibility="Collapsed" Padding="24,16,24,16" RowSpacing="12"
+                      Grid.ColumnSpan="5" Grid.RowSpan="3">
                     <Grid.RenderTransform>
                         <TranslateTransform x:Name="AppearancePageTransform"/>
                     </Grid.RenderTransform>
@@ -902,7 +1006,8 @@
                 </Grid>
 
                 <!-- ============ MCP PAGE ============ -->
-                <Grid x:Name="McpPage" Visibility="Collapsed" Padding="24,16,24,24" RowSpacing="12">
+                <Grid x:Name="McpPage" Visibility="Collapsed" Padding="24,16,24,24" RowSpacing="12"
+                      Grid.ColumnSpan="5" Grid.RowSpan="3">
                     <Grid.RenderTransform>
                         <TranslateTransform x:Name="McpPageTransform"/>
                     </Grid.RenderTransform>
@@ -1040,7 +1145,8 @@
                 <!-- ============ SKILLS PAGE ============
                      Global (user) skills: folders under ~/.mandocode/skills, one SKILL.md each.
                      App-wide like MCP — one set, shared by every agent — so it lives on the rail. -->
-                <Grid x:Name="SkillsPage" Visibility="Collapsed" Padding="24,16,24,24" RowSpacing="12">
+                <Grid x:Name="SkillsPage" Visibility="Collapsed" Padding="24,16,24,24" RowSpacing="12"
+                      Grid.ColumnSpan="5" Grid.RowSpan="3">
                     <Grid.RenderTransform>
                         <TranslateTransform x:Name="SkillsPageTransform"/>
                     </Grid.RenderTransform>
