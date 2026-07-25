@@ -239,7 +239,16 @@ public sealed partial class MainWindow
             t.View.Session.Controller.ModelName,
             t.View.Session.PersistKey)).ToList();
         var active = _selected == null ? 0 : Math.Max(0, _tabs.IndexOf(_selected));
-        WorkspaceState.Save(new WorkspaceShape(tabs, active));
+
+        // The split layout rides along: paned agents (by persist-key) plus the divider positions.
+        // Null when no split is configured, which restores as plain single view.
+        var panes = SplitConfigured
+            ? _splitPanes.Select(p => p.View.Session.PersistKey).ToList()
+            : null;
+        WorkspaceState.Save(new WorkspaceShape(
+            tabs, active, panes,
+            panes == null ? null : new List<double>(_colFractions),
+            panes == null ? null : new List<double>(_rowFractions)));
     }
 
 }

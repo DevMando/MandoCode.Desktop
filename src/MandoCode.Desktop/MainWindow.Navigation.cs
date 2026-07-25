@@ -64,7 +64,7 @@ public sealed partial class MainWindow
 
         // Every agent view stays loaded; only the visible one(s) show, and only on the chat page.
         // Collapsing rather than removing is what keeps each WebView2's transcript alive. In split
-        // mode two views show at once (the compare pair, _compareA left / _compareB right).
+        // mode 2–4 views show at once (the pane set, _splitPanes, in pane order).
         ApplyPaneLayout();
 
         // The empty-state background shows only on the chat page with no agents left.

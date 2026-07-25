@@ -105,6 +105,9 @@ public sealed partial class MainWindow : Window
                 CreateChatTab(t.ProjectRoot, t.Title, t.Model, t.Key);
             if (_tabs.Count == 0) CreateChatTab();
             else SelectTab(_tabs[Math.Clamp(shape.ActiveIndex, 0, _tabs.Count - 1)]);
+            // After the tabs exist and one is selected — the pane set is matched by persist-key
+            // and only shows if the restored active agent is one of its panes.
+            RestoreSplitLayout(shape);
         }
         else
         {

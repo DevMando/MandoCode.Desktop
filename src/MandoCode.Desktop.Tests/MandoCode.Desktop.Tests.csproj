@@ -40,9 +40,14 @@
     <Compile Include="..\MandoCode.Desktop\Services\SessionArchiveStore.cs" Link="src\SessionArchiveStore.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\TranscriptJournal.cs" Link="src\TranscriptJournal.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\ConversationLog.cs" Link="src\ConversationLog.cs" />
+    <!-- History's full-text matching + snippet extraction. Pure (text in, match out); the file reads
+         and caching live in ConversationTextCache, which is NOT compiled here because it touches
+         LocalAppData. -->
+    <Compile Include="..\MandoCode.Desktop\Services\ConversationSearch.cs" Link="src\ConversationSearch.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\SessionHistoryStore.cs" Link="src\SessionHistoryStore.cs" />
 
     <!-- Pure logic extracted from session-coupled coordinators so it can be tested directly. -->
+    <Compile Include="..\MandoCode.Desktop\Services\PaneLayout.cs" Link="src\PaneLayout.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\ConfigCloning.cs" Link="src\ConfigCloning.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\AgentNaming.cs" Link="src\AgentNaming.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\HistorySummarizer.cs" Link="src\HistorySummarizer.cs" />

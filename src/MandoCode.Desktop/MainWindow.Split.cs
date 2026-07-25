@@ -22,199 +22,524 @@ namespace MandoCode.Desktop;
 public sealed partial class MainWindow
 {
     // ============================================================
-    // Split / compare view — two agents side by side. The compare PAIR (_compareA left, _compareB
-    // right) is a remembered, explicit choice: set only by the Split button and the compare-bar
-    // pickers, NEVER by clicking a tab. The split is shown whenever the active tab (_selected) is one
-    // of the pair; clicking any other tab shows that agent normally while the pair waits, and
-    // clicking a paired tab brings the split back. Both panes are ordinary tab views moved between
-    // grid columns via ApplyPaneLayout — never reparented, so their WebViews survive.
+    // Split view — 2 to 4 agents at once. The PANE SET (_splitPanes, in pane order)
+    // is a remembered, explicit choice: set only by the Split button, the split bar's chips, and the
+    // tab menu's "Add to split view" — NEVER by plain-clicking a tab. The split is shown whenever the
+    // active tab (_selected) is one of the paned agents; clicking any other tab shows that agent
+    // normally while the set waits, and clicking a paned tab brings the split back. Panes are
+    // ordinary tab views moved between grid cells by ApplyPaneLayout — never reparented, so their
+    // WebViews survive.
     // ============================================================
 
-    private ChatTabEntry? _compareA;   // left pane
-    private ChatTabEntry? _compareB;   // right pane
-    private double _splitLeftFraction = 0.5;   // divider position, preserved across page visits
-    private bool _syncingSplitCombos;
-    private bool _draggingPane;
+    // Grid geometry and the divider math live in PaneLayout (pure, unit-tested); this file owns the
+    // visual-tree side — building tracks, creating dividers, moving views between cells.
+    private const int MaxSplitPanes = PaneLayout.MaxPanes;
 
-    /// <summary>A valid, distinct compare pair is configured (both agents still open).</summary>
-    private bool HasComparePair =>
-        _compareA != null && _compareB != null
-        && _tabs.Contains(_compareA) && _tabs.Contains(_compareB)
-        && !ReferenceEquals(_compareA, _compareB);
+    private readonly List<ChatTabEntry> _splitPanes = new();
 
-    /// <summary>The split is actually being shown right now: a pair exists, we're on the chat page,
-    /// and the active tab is one of the two paired agents (clicking any other agent shows it single).</summary>
+    // Divider positions as star fractions — one entry per pane COLUMN and per pane ROW. Reset to
+    // equal when the layout shape changes; otherwise preserved across page visits and restarts.
+    private List<double> _colFractions = new();
+    private List<double> _rowFractions = new();
+
+    // Dividers are rebuilt with the tracks; held so the next rebuild can remove the old ones.
+    private readonly List<Controls.ResizeGrip> _paneGrips = new();
+
+    private bool _syncingSplitBar;
+    private bool _draggingPaneGrip;
+
+    /// <summary>A valid pane set is configured: 2–4 distinct agents, all still open.</summary>
+    private bool SplitConfigured =>
+        _splitPanes.Count >= 2
+        && _splitPanes.Count <= MaxSplitPanes
+        && _splitPanes.All(p => _tabs.Contains(p))
+        && _splitPanes.Distinct().Count() == _splitPanes.Count;
+
+    /// <summary>The split is actually being shown right now: a set exists, we're on the chat page,
+    /// and the active tab is one of the paned agents (clicking any other agent shows it single).</summary>
     private bool SplitActive =>
-        HasComparePair && _currentPage == "chat" && _selected != null
-        && (ReferenceEquals(_selected, _compareA) || ReferenceEquals(_selected, _compareB));
+        SplitConfigured && _currentPage == "chat" && _selected != null
+        && _splitPanes.Any(p => ReferenceEquals(p, _selected));
 
     private void SplitButton_Click(object sender, RoutedEventArgs e)
     {
-        if (HasComparePair)
+        if (SplitConfigured)
         {
-            // Toggle: showing the split → turn compare off; pair configured but viewing another
+            // Toggle: showing the split → turn the split off; set configured but viewing another
             // agent → jump back into the split.
             if (SplitActive) ExitSplit();
-            else if (_compareA != null) SelectTab(_compareA);
+            else SelectTab(_splitPanes[0]);
             return;
         }
         if (_tabs.Count < 2 || _selected == null) return;   // button is disabled here anyway
 
-        _compareA = _selected;
-        _compareB = _tabs.FirstOrDefault(t => !ReferenceEquals(t, _selected));
-        RefreshSplitCombos();
-        SwitchPage("chat");        // _selected is in the pair → ApplyPaneLayout shows the split
+        var other = _tabs.FirstOrDefault(t => !ReferenceEquals(t, _selected));
+        if (other == null) return;
+
+        _splitPanes.Clear();
+        _splitPanes.Add(_selected);
+        _splitPanes.Add(other);
+        ResetPaneFractions();
+        RefreshSplitBar();
+        SwitchPage("chat");        // _selected is in the set → ApplyPaneLayout shows the split
         RefreshSplitButton();
+        SaveWorkspace();
     }
 
     private void ExitSplit_Click(object sender, RoutedEventArgs e) => ExitSplit();
 
     private void ExitSplit()
     {
-        _compareA = null;
-        _compareB = null;
+        _splitPanes.Clear();
+        ResetPaneFractions();
         ApplyPaneLayout();
         RefreshSplitButton();
+        SaveWorkspace();
     }
 
-    /// <summary>Places the visible agent view(s) into columns and sizes them. Single view: column 0
-    /// fills (divider + right column collapse to 0). Split: _compareA in column 0, _compareB in
-    /// column 2, divider between. Setting Grid.Column does NOT reparent, so WebViews are untouched.</summary>
+    /// <summary>Primary click: pane the next agent that isn't shown yet. The chevron's menu
+    /// (built by <see cref="RefreshSplitBar"/>) picks a specific one instead.</summary>
+    private void AddPane_Click(SplitButton sender, SplitButtonClickEventArgs args)
+    {
+        var next = _tabs.FirstOrDefault(t => !_splitPanes.Contains(t));
+        if (next != null) AddPane(next);
+    }
+
+    /// <summary>Appends an agent as a new pane, up to <see cref="MaxSplitPanes"/>. Called by the
+    /// split bar's Add button and by a tab's "Add to split view" — including from single view, where
+    /// the active agent takes the first slot so there's something to compare against.</summary>
+    private void AddPane(ChatTabEntry entry)
+    {
+        if (_splitPanes.Count >= MaxSplitPanes) return;
+        if (_splitPanes.Any(p => ReferenceEquals(p, entry))) return;
+
+        if (_splitPanes.Count == 0)
+        {
+            var partner = _selected != null && !ReferenceEquals(_selected, entry)
+                ? _selected
+                : _tabs.FirstOrDefault(t => !ReferenceEquals(t, entry));
+            if (partner == null) return;   // only one agent open — nothing to compare it with
+            _splitPanes.Add(partner);
+        }
+
+        _splitPanes.Add(entry);
+        ResetPaneFractions();
+        RefreshSplitBar();
+        SelectTab(entry);          // the new pane becomes active, so the split stays on screen
+        RefreshSplitButton();
+        SaveWorkspace();
+    }
+
+    /// <summary>Drops a pane. Falling to a single pane isn't a layout — it turns the split off and
+    /// leaves you on the agent that survived.</summary>
+    private void RemovePane(ChatTabEntry entry)
+    {
+        var idx = _splitPanes.FindIndex(p => ReferenceEquals(p, entry));
+        if (idx < 0) return;
+        _splitPanes.RemoveAt(idx);
+
+        if (_splitPanes.Count < 2)
+        {
+            var survivor = _splitPanes.FirstOrDefault();
+            _splitPanes.Clear();
+            ResetPaneFractions();
+            if (survivor != null) SelectTab(survivor);
+            else ApplyPaneLayout();
+            RefreshSplitButton();
+            SaveWorkspace();
+            return;
+        }
+
+        ResetPaneFractions();
+        RefreshSplitBar();
+        // Closing the pane you were focused on hands the focus to a pane that's still shown.
+        if (ReferenceEquals(_selected, entry))
+            SelectTab(_splitPanes[Math.Min(idx, _splitPanes.Count - 1)]);
+        else
+            ApplyPaneLayout();
+        RefreshSplitButton();
+        SaveWorkspace();
+    }
+
+    /// <summary>Re-points one pane at a different agent. Choosing an agent that already occupies
+    /// another pane swaps the two, which is what the old two-combo bar did.</summary>
+    private void SetPane(int paneIndex, ChatTabEntry entry)
+    {
+        if (paneIndex < 0 || paneIndex >= _splitPanes.Count) return;
+        if (!_tabs.Contains(entry)) return;
+        if (ReferenceEquals(_splitPanes[paneIndex], entry)) return;
+
+        var existing = _splitPanes.FindIndex(p => ReferenceEquals(p, entry));
+        if (existing >= 0) _splitPanes[existing] = _splitPanes[paneIndex];
+        _splitPanes[paneIndex] = entry;
+
+        RefreshSplitBar();
+        SelectTab(entry);   // keep the split on screen
+        RefreshSplitButton();
+        SaveWorkspace();
+    }
+
+    /// <summary>Places the visible agent view(s) into pane cells and sizes the tracks. Single view
+    /// collapses to one */* cell, so pages and the empty state fill it without knowing about panes.
+    /// Setting Grid.Row/Grid.Column does NOT reparent, so WebViews are untouched.</summary>
     private void ApplyPaneLayout()
     {
         var split = SplitActive;
         var showingChat = _currentPage == "chat";
+        int count = split ? _splitPanes.Count : 1;
+        var (rows, cols) = PaneLayout.Shape(count);
+
+        BuildPaneTracks(rows, cols);
 
         foreach (var tab in _tabs)
         {
-            bool inPair = ReferenceEquals(tab, _compareA) || ReferenceEquals(tab, _compareB);
-            var visible = showingChat && (split ? inPair : ReferenceEquals(tab, _selected));
+            int pane = split ? _splitPanes.FindIndex(p => ReferenceEquals(p, tab)) : -1;
+            var visible = showingChat && (split ? pane >= 0 : ReferenceEquals(tab, _selected));
             tab.View.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
-            Grid.SetColumn(tab.View, split && ReferenceEquals(tab, _compareB) ? 2 : 0);
+
+            // Tracks interleave a divider between panes, so pane (r,c) lives at row 2r / column 2c.
+            var (row, col) = pane >= 0 ? PaneLayout.Cell(pane, count) : (0, 0);
+            Grid.SetRow(tab.View, row * 2);
+            Grid.SetColumn(tab.View, col * 2);
         }
 
-        if (split)
+        SplitBar.Visibility = split ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>Rebuilds TabHost's tracks for a pane grid of the given shape and recreates the
+    /// dividers. Track layout is pane, divider, pane, … — 2c-1 columns and 2r-1 rows. Only track
+    /// definitions and divider elements change here; agent views are never removed from the tree,
+    /// so no WebView is torn down.</summary>
+    private void BuildPaneTracks(int rows, int cols)
+    {
+        // Single view must NOT touch the fraction lists: they're the remembered divider positions,
+        // and they have to survive visiting Settings or clicking a non-paned agent and coming back.
+        bool paned = rows * cols > 1;
+        if (paned) EnsureFractions(rows, cols);
+
+        foreach (var grip in _paneGrips) TabHost.Children.Remove(grip);
+        _paneGrips.Clear();
+
+        TabHost.ColumnDefinitions.Clear();
+        for (int c = 0; c < cols; c++)
         {
-            PaneLeftCol.Width = new GridLength(_splitLeftFraction, GridUnitType.Star);
-            PaneRightCol.Width = new GridLength(1 - _splitLeftFraction, GridUnitType.Star);
-            PaneSplitCol.Width = GridLength.Auto;
-            PaneSplitter.Visibility = Visibility.Visible;
-            SplitBar.Visibility = Visibility.Visible;
+            TabHost.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = new GridLength(paned ? _colFractions[c] : 1, GridUnitType.Star)
+            });
+            if (c < cols - 1)
+                TabHost.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        }
+
+        TabHost.RowDefinitions.Clear();
+        for (int r = 0; r < rows; r++)
+        {
+            TabHost.RowDefinitions.Add(new RowDefinition
+            {
+                Height = new GridLength(paned ? _rowFractions[r] : 1, GridUnitType.Star)
+            });
+            if (r < rows - 1)
+                TabHost.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        }
+
+        // A column divider spans every row and vice versa, so the 2×2 keeps a single cross of
+        // dividers rather than four independent stubs.
+        int trackRows = Math.Max(1, rows * 2 - 1);
+        int trackCols = Math.Max(1, cols * 2 - 1);
+        for (int c = 0; c < cols - 1; c++) AddPaneGrip(vertical: true, c, 2 * c + 1, trackRows);
+        for (int r = 0; r < rows - 1; r++) AddPaneGrip(vertical: false, r, 2 * r + 1, trackCols);
+    }
+
+    /// <summary>Creates one divider. <paramref name="index"/> goes in Tag — it's the fraction-list
+    /// slot the drag repartitions.</summary>
+    private void AddPaneGrip(bool vertical, int index, int track, int span)
+    {
+        var grip = new Controls.ResizeGrip
+        {
+            // A Vertical grip bar resizes horizontally (↔) — it's the one that sits between columns.
+            GripOrientation = vertical ? Orientation.Vertical : Orientation.Horizontal,
+            Background = (SolidColorBrush)Application.Current.Resources["MandoBorderBrush"],
+            Tag = index,
+        };
+
+        if (vertical)
+        {
+            grip.Width = 6;
+            grip.VerticalAlignment = VerticalAlignment.Stretch;
+            Grid.SetColumn(grip, track);
+            Grid.SetRow(grip, 0);
+            Grid.SetRowSpan(grip, span);
+            grip.PointerPressed += PaneGrip_PointerPressed;
+            grip.PointerMoved += PaneColumnGrip_PointerMoved;
+            grip.PointerReleased += PaneGrip_PointerReleased;
         }
         else
         {
-            PaneLeftCol.Width = new GridLength(1, GridUnitType.Star);
-            PaneSplitCol.Width = new GridLength(0);
-            PaneRightCol.Width = new GridLength(0);
-            PaneSplitter.Visibility = Visibility.Collapsed;
-            SplitBar.Visibility = Visibility.Collapsed;
+            grip.Height = 6;
+            grip.HorizontalAlignment = HorizontalAlignment.Stretch;
+            Grid.SetRow(grip, track);
+            Grid.SetColumn(grip, 0);
+            Grid.SetColumnSpan(grip, span);
+            grip.PointerPressed += PaneGrip_PointerPressed;
+            grip.PointerMoved += PaneRowGrip_PointerMoved;
+            grip.PointerReleased += PaneGrip_PointerReleased;
         }
+
+        TabHost.Children.Add(grip);
+        _paneGrips.Add(grip);
     }
 
-    /// <summary>Re-fills the two pane pickers and re-selects the sides. Items are plain STRINGS
-    /// (agent titles) selected by INDEX into <see cref="_tabs"/> — deliberately NOT ComboBoxItem
-    /// objects: adding containers directly as items and rebuilding them makes WinUI's ComboBox throw
-    /// COMException 0x80070490 "Element not found" on the next selection. Each combo gets its own
-    /// list instance (a shared ItemsSource across two ComboBoxes is asking for trouble).</summary>
-    private void RefreshSplitCombos()
+    /// <summary>Keeps the fraction lists matching the layout shape. A shape change (pane added or
+    /// removed) resets to equal splits; an unchanged shape keeps whatever the user dragged.</summary>
+    private void EnsureFractions(int rows, int cols)
     {
-        _syncingSplitCombos = true;
-        SplitLeftCombo.ItemsSource = _tabs.Select(t => t.View.Session.Title).ToList();
-        SplitRightCombo.ItemsSource = _tabs.Select(t => t.View.Session.Title).ToList();
-        SplitLeftCombo.SelectedIndex = _compareA == null ? -1 : _tabs.IndexOf(_compareA);
-        SplitRightCombo.SelectedIndex = _compareB == null ? -1 : _tabs.IndexOf(_compareB);
-        _syncingSplitCombos = false;
+        _colFractions = PaneLayout.Fit(_colFractions, cols);
+        _rowFractions = PaneLayout.Fit(_rowFractions, rows);
     }
 
-    // Both pickers defer their ENTIRE reaction to the next dispatcher tick. A ComboBox raises
-    // SelectionChanged from inside a layout pass, and the reaction restructures the visual tree
-    // (moves a ChatTabView + its WebView between grid columns) and rebuilds the pickers — both
-    // illegal mid-layout / mid-event and the source of the App-level crash. Off the event, on a
-    // clean tick, they're safe. Picking an agent for one pane that's already the other pane swaps
-    // the two. The chosen agent becomes active, so the split stays on screen.
-    private void SplitLeftCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void ResetPaneFractions()
     {
-        if (_syncingSplitCombos) return;
-        var idx = SplitLeftCombo.SelectedIndex;
-        if (idx < 0 || idx >= _tabs.Count) return;
-        var entry = _tabs[idx];
-        DispatcherQueue.TryEnqueue(() =>
+        _colFractions.Clear();
+        _rowFractions.Clear();
+    }
+
+    /// <summary>Rebuilds one chip per pane. Each chip's dropdown re-points that pane; its × drops
+    /// the pane. Chips are MenuFlyout-based and deliberately NOT ComboBoxes: adding containers
+    /// directly as ComboBox items and rebuilding them makes WinUI throw COMException 0x80070490
+    /// "Element not found" on the next selection, which is what the old two-picker bar had to work
+    /// around.</summary>
+    private void RefreshSplitBar()
+    {
+        if (_syncingSplitBar) return;
+        _syncingSplitBar = true;
+        try
         {
-            if (!_tabs.Contains(entry) || ReferenceEquals(entry, _compareA)) return;
-            if (ReferenceEquals(entry, _compareB)) _compareB = _compareA;   // swap sides
-            _compareA = entry;
-            RefreshSplitCombos();
-            SelectTab(entry);   // make the left pane active so the split stays shown
-        });
+            PaneChips.Children.Clear();
+            for (int i = 0; i < _splitPanes.Count; i++)
+                PaneChips.Children.Add(BuildPaneChip(i, _splitPanes[i]));
+
+            // Add-pane picker: only agents that aren't already shown — an agent can't occupy two
+            // panes, so listing one would be a no-op. Deferred a tick like every other split
+            // mutation (it restructures the visual tree and rebuilds this bar).
+            AddPaneMenu.Items.Clear();
+            foreach (var tab in _tabs.Where(t => !_splitPanes.Contains(t)))
+            {
+                var target = tab;
+                var item = new MenuFlyoutItem { Text = target.View.Session.Title };
+                item.Click += (_, _) => DispatcherQueue.TryEnqueue(() => AddPane(target));
+                AddPaneMenu.Items.Add(item);
+            }
+
+            AddPaneButton.IsEnabled = _splitPanes.Count < MaxSplitPanes && AddPaneMenu.Items.Count > 0;
+
+            var (rows, cols) = PaneLayout.Shape(_splitPanes.Count);
+            PaneLayoutHint.Text = _splitPanes.Count < 2 ? ""
+                : rows == 1 ? $"{cols} across"
+                : $"{rows}×{cols} grid";
+        }
+        finally { _syncingSplitBar = false; }
     }
 
-    private void SplitRightCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    /// <summary>One pane chip: position, agent name, a picker, and a remove button. Both menu
+    /// actions are deferred to the next dispatcher tick — the reaction restructures the visual tree
+    /// (moves a ChatTabView between grid cells) and rebuilds this bar, neither of which is legal
+    /// from inside a flyout's click handler.</summary>
+    private Border BuildPaneChip(int index, ChatTabEntry pane)
     {
-        if (_syncingSplitCombos) return;
-        var idx = SplitRightCombo.SelectedIndex;
-        if (idx < 0 || idx >= _tabs.Count) return;
-        var entry = _tabs[idx];
-        DispatcherQueue.TryEnqueue(() =>
+        var accent = (SolidColorBrush)Application.Current.Resources["MandoAccentBrush"];
+        var border = (SolidColorBrush)Application.Current.Resources["MandoBorderBrush"];
+        var dim = (SolidColorBrush)Application.Current.Resources["MandoDimBrush"];
+        var isActive = ReferenceEquals(pane, _selected);
+
+        var ordinal = new TextBlock
         {
-            if (!_tabs.Contains(entry) || ReferenceEquals(entry, _compareB)) return;
-            if (ReferenceEquals(entry, _compareA)) _compareA = _compareB;   // swap sides
-            _compareB = entry;
-            RefreshSplitCombos();
-            SelectTab(entry);   // make the right pane active so the split stays shown
-        });
+            Text = (index + 1).ToString(),
+            FontSize = 10,
+            Opacity = 0.5,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        var label = new TextBlock
+        {
+            Text = pane.View.Session.Title,
+            FontSize = 12,
+            MaxWidth = 150,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = isActive ? accent : dim,
+        };
+
+        var picker = new Button
+        {
+            Padding = new Thickness(2),
+            Background = new SolidColorBrush(Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Content = new FontIcon { Glyph = "", FontSize = 9 },   // ChevronDown
+        };
+        ToolTipService.SetToolTip(picker, "Show a different agent in this pane");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(picker, $"Pane {index + 1} agent");
+
+        var menu = new MenuFlyout();
+        foreach (var tab in _tabs)
+        {
+            var target = tab;
+            var item = new MenuFlyoutItem { Text = target.View.Session.Title };
+            if (ReferenceEquals(target, pane))
+                item.Icon = new FontIcon { Glyph = "" };   // check — the current occupant
+            item.Click += (_, _) => DispatcherQueue.TryEnqueue(() => SetPane(index, target));
+            menu.Items.Add(item);
+        }
+        picker.Flyout = menu;
+
+        var remove = new Button
+        {
+            Padding = new Thickness(2),
+            Background = new SolidColorBrush(Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Content = new FontIcon { Glyph = "", FontSize = 9 },   // close
+        };
+        ToolTipService.SetToolTip(remove, "Remove this pane");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(remove, $"Remove pane {index + 1}");
+        remove.Click += (_, _) => DispatcherQueue.TryEnqueue(() => RemovePane(pane));
+
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        row.Children.Add(ordinal);
+        row.Children.Add(label);
+        row.Children.Add(picker);
+        row.Children.Add(remove);
+
+        return new Border
+        {
+            Child = row,
+            Padding = new Thickness(9, 3, 5, 3),
+            CornerRadius = new CornerRadius(12),
+            BorderThickness = new Thickness(1),
+            // The active pane is outlined, matching how the tab strip marks the selected agent.
+            BorderBrush = isActive ? accent : border,
+            Background = new SolidColorBrush(Colors.Transparent),
+        };
     }
 
-    /// <summary>Keeps the compare pair valid after the agent set changes. If either paired agent was
-    /// closed the pair is dropped (compare turns off); otherwise the pickers are resynced.</summary>
+    /// <summary>Keeps the pane set valid after the agent set changes. Panes whose agent was
+    /// closed drop out; falling below two panes turns the split off entirely.</summary>
     private void ValidateSplit()
     {
-        if (_compareA == null && _compareB == null) return;   // no compare configured
-        if (!HasComparePair)
+        if (_splitPanes.Count == 0) return;   // no split configured
+
+        _splitPanes.RemoveAll(p => !_tabs.Contains(p));
+        if (_splitPanes.Count < 2)
         {
-            _compareA = null;
-            _compareB = null;
+            _splitPanes.Clear();
+            ResetPaneFractions();
             ApplyPaneLayout();
             RefreshSplitButton();
             return;
         }
-        RefreshSplitCombos();
+        RefreshSplitBar();
+        ApplyPaneLayout();
+        RefreshSplitButton();
+    }
+
+    /// <summary>Re-establishes a saved pane set once the tabs exist. Panes are matched by
+    /// persist-key, not index, so tabs skipped at restore (project folder gone) simply drop out of
+    /// the set instead of shifting every other pane.</summary>
+    private void RestoreSplitLayout(WorkspaceShape shape)
+    {
+        if (shape.SplitPanes is not { Count: >= 2 }) return;
+
+        _splitPanes.Clear();
+        foreach (var key in shape.SplitPanes)
+        {
+            if (_splitPanes.Count >= MaxSplitPanes) break;
+            var tab = _tabs.FirstOrDefault(t => t.View.Session.PersistKey == key);
+            if (tab != null && !_splitPanes.Contains(tab)) _splitPanes.Add(tab);
+        }
+        if (_splitPanes.Count < 2)
+        {
+            _splitPanes.Clear();
+            return;
+        }
+
+        // Saved divider positions only apply if they still describe this shape.
+        var (rows, cols) = PaneLayout.Shape(_splitPanes.Count);
+        if (shape.PaneColumnFractions is { } cf && cf.Count == cols && cf.Sum() > 0)
+            _colFractions = new List<double>(cf);
+        if (shape.PaneRowFractions is { } rf && rf.Count == rows && rf.Sum() > 0)
+            _rowFractions = new List<double>(rf);
+
+        RefreshSplitBar();
         ApplyPaneLayout();
         RefreshSplitButton();
     }
 
     private void RefreshSplitButton()
     {
-        SplitButton.IsEnabled = HasComparePair || _tabs.Count >= 2;
+        SplitButton.IsEnabled = SplitConfigured || _tabs.Count >= 2;
         var accent = (SolidColorBrush)Application.Current.Resources["MandoAccentBrush"];
         var normal = (SolidColorBrush)Application.Current.Resources["MandoDimBrush"];
-        // Accent whenever a compare pair is configured — even while viewing a non-paired agent — so
-        // it reads as "compare is on; click a paired tab (or me) to see it."
-        SplitButtonIcon.Foreground = HasComparePair ? accent : normal;
+        // Accent whenever a split is configured — even while viewing a non-paned agent — so
+        // it reads as "split view is on; click a paned tab (or me) to see it."
+        SplitButtonIcon.Foreground = SplitConfigured ? accent : normal;
     }
 
-    // ---- divider drag: repartition the two panes' star widths by pointer X over TabHost ----
-    private void PaneSplitter_PointerPressed(object sender, PointerRoutedEventArgs e)
+    // ---- divider drag ----------------------------------------------------------
+    // Each divider repartitions ONLY the two panes either side of it: their combined fraction is
+    // held constant, so dragging one divider never nudges a pane further along the axis.
+
+    private void PaneGrip_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        _draggingPane = true;
+        _draggingPaneGrip = true;
         ((UIElement)sender).CapturePointer(e.Pointer);
     }
 
-    private void PaneSplitter_PointerMoved(object sender, PointerRoutedEventArgs e)
+    private void PaneColumnGrip_PointerMoved(object sender, PointerRoutedEventArgs e)
     {
-        if (!_draggingPane) return;
-        var w = TabHost.ActualWidth;
+        if (!_draggingPaneGrip) return;
+        if (sender is not FrameworkElement { Tag: int i }) return;
+        double w = TabHost.ActualWidth;
         if (w <= 0) return;
-        var x = e.GetCurrentPoint(TabHost).Position.X;
-        _splitLeftFraction = Math.Clamp(x / w, 0.2, 0.8);   // keep both panes usable
-        PaneLeftCol.Width = new GridLength(_splitLeftFraction, GridUnitType.Star);
-        PaneRightCol.Width = new GridLength(1 - _splitLeftFraction, GridUnitType.Star);
+
+        PaneLayout.Repartition(_colFractions, i, e.GetCurrentPoint(TabHost).Position.X / w);
+        ApplyPaneTrackSizes();
     }
 
-    private void PaneSplitter_PointerReleased(object sender, PointerRoutedEventArgs e)
+    private void PaneRowGrip_PointerMoved(object sender, PointerRoutedEventArgs e)
     {
-        if (!_draggingPane) return;
-        _draggingPane = false;
+        if (!_draggingPaneGrip) return;
+        if (sender is not FrameworkElement { Tag: int i }) return;
+        double h = TabHost.ActualHeight;
+        if (h <= 0) return;
+
+        PaneLayout.Repartition(_rowFractions, i, e.GetCurrentPoint(TabHost).Position.Y / h);
+        ApplyPaneTrackSizes();
+    }
+
+    private void PaneGrip_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_draggingPaneGrip) return;
+        _draggingPaneGrip = false;
         ((UIElement)sender).ReleasePointerCapture(e.Pointer);
+        SaveWorkspace();   // divider positions are part of the remembered layout
+    }
+
+    /// <summary>Pushes the current fractions onto the existing tracks — no track rebuild and no
+    /// divider recreation, so it's cheap enough to run on every pointer move.</summary>
+    private void ApplyPaneTrackSizes()
+    {
+        for (int c = 0; c < _colFractions.Count; c++)
+        {
+            int track = c * 2;
+            if (track < TabHost.ColumnDefinitions.Count)
+                TabHost.ColumnDefinitions[track].Width = new GridLength(_colFractions[c], GridUnitType.Star);
+        }
+        for (int r = 0; r < _rowFractions.Count; r++)
+        {
+            int track = r * 2;
+            if (track < TabHost.RowDefinitions.Count)
+                TabHost.RowDefinitions[track].Height = new GridLength(_rowFractions[r], GridUnitType.Star);
+        }
     }
 
     /// <summary>Paints the custom chat background image behind the empty state, so closing every
@@ -293,6 +618,8 @@ public sealed partial class MainWindow
 
         RefreshNavIcons();
         RefreshSplitButton();
+        // Chips outline the active pane and carry agent titles, so they follow selection and renames.
+        if (SplitConfigured) RefreshSplitBar();
         LayoutTabStrip();
     }
 

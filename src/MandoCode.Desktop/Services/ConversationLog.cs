@@ -87,6 +87,19 @@ public static class ConversationLog
         }
     }
 
+    /// <summary>Last write time of a session's log, or null when there isn't one. Used by
+    /// <see cref="ConversationTextCache"/> to revalidate cached text, so a session that was reopened
+    /// and closed again is re-read instead of searched against a stale copy.</summary>
+    public static DateTime? LastWriteUtc(string key)
+    {
+        try
+        {
+            var path = PathFor(key);
+            return File.Exists(path) ? File.GetLastWriteTimeUtc(path) : null;
+        }
+        catch { return null; }
+    }
+
     public static void Delete(string key)
     {
         try

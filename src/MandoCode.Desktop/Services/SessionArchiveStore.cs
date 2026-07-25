@@ -25,8 +25,21 @@ public sealed class SessionArchiveEntry
     /// <summary>User+assistant turns recorded for this session — a cheap "how big was this".</summary>
     public required int TurnCount { get; init; }
 
-    /// <summary>First thing the user said, trimmed — the line that makes a row recognizable.</summary>
+    /// <summary>First thing the user said, trimmed — the line that says what this conversation was
+    /// ABOUT. Paired with <see cref="LastMessage"/>, which says where it stopped.</summary>
     public string? Preview { get; init; }
+
+    /// <summary>
+    /// Last thing the user said, trimmed — "where you left off", the line that answers *should I
+    /// resume this*. The user's turn rather than the agent's: it's symmetric with
+    /// <see cref="Preview"/>, and it's your own instruction rather than a long formatted reply.
+    ///
+    /// Empty string means "computed, nothing worth showing" — a single-turn conversation (where it
+    /// would just repeat <see cref="Preview"/>) or one with no user turns. That's deliberately
+    /// DISTINCT from null, which means "archived before this field existed and still needs
+    /// backfilling"; settable for exactly that backfill.
+    /// </summary>
+    public string? LastMessage { get; set; }
 
     // ---- display helpers for the panel ----
 
@@ -40,6 +53,16 @@ public sealed class SessionArchiveEntry
     [System.Text.Json.Serialization.JsonIgnore]
     public string PreviewOrPlaceholder =>
         string.IsNullOrWhiteSpace(Preview) ? "(no message text captured)" : Preview!;
+
+    /// <summary>
+    /// Why this row matched a full-text search: a window around the hit INSIDE the conversation.
+    /// Set by the History panel on every populate (null when the search matched on metadata alone,
+    /// or when there's no search) and never persisted. A row can match on text the title and preview
+    /// don't contain, so without this the hit would look arbitrary. Mutable and display-only — the
+    /// rest of this type is immutable index data.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? MatchSnippet { get; set; }
 }
 
 /// <summary>
@@ -139,6 +162,60 @@ public sealed class SessionArchiveStore
         if (deleteFiles) DeleteFiles(key);
         Persist();
         Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// One-time migration for rows archived before <see cref="SessionArchiveEntry.LastMessage"/>
+    /// existed, so old and new cards look the same instead of only new ones carrying a last line.
+    /// <paramref name="resolve"/> does the per-session file read and MUST return "" (not null) when
+    /// there's nothing to show, otherwise the row is retried on every launch. Persists once for the
+    /// whole batch. Safe to call from a background thread — <see cref="Changed"/> is documented as
+    /// possibly arriving off the UI thread.
+    /// </summary>
+    public int BackfillLastMessages(Func<SessionArchiveEntry, string?> resolve)
+    {
+        List<SessionArchiveEntry> pending;
+        lock (_lock) pending = _items.Where(e => e.LastMessage == null).ToList();
+        if (pending.Count == 0) return 0;
+
+        var filled = 0;
+        foreach (var entry in pending)
+        {
+            var value = resolve(entry);
+            if (value == null) continue;   // resolve failed outright — leave it for next time
+            entry.LastMessage = value;
+            filled++;
+        }
+        if (filled == 0) return 0;
+
+        Persist();
+        Changed?.Invoke();
+        return filled;
+    }
+
+    /// <summary>
+    /// Removes a batch of rows in ONE pass — a single <see cref="Persist"/> and a single
+    /// <see cref="Changed"/> for the whole set. Looping <see cref="Remove"/> would rewrite the index
+    /// file and rebuild the History panel once per row, which is what makes clearing a whole project
+    /// group visibly slow. Keys not in the index are ignored, so a caller working from a stale group
+    /// snapshot is safe. Returns how many rows actually went.
+    /// </summary>
+    public int RemoveAll(IEnumerable<string> keys, bool deleteFiles)
+    {
+        var targets = new HashSet<string>(keys, StringComparer.OrdinalIgnoreCase);
+        if (targets.Count == 0) return 0;
+
+        int removed;
+        lock (_lock) removed = _items.RemoveAll(e => targets.Contains(e.Key));
+        if (removed == 0) return 0;
+
+        // Files are deleted outside the lock — same order as Remove, and file IO shouldn't block
+        // another thread filing a closed session.
+        if (deleteFiles) foreach (var key in targets) DeleteFiles(key);
+
+        Persist();
+        Changed?.Invoke();
+        return removed;
     }
 
     private static void DeleteFiles(string key)

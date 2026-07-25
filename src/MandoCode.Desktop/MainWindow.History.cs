@@ -9,6 +9,7 @@ using Microsoft.UI;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
@@ -40,8 +41,9 @@ public sealed partial class MainWindow
             return;
         }
 
-        var preview = turns.FirstOrDefault(t => t.R == "u")?.T?.Trim();
-        if (preview is { Length: > 140 }) preview = preview[..140].TrimEnd() + "…";
+        // What it was about (first) and where it stopped (last) — both the user's own words.
+        var said = turns.Where(t => t.R == "u").ToList();
+        var preview = TrimForCard(said.FirstOrDefault()?.T);
 
         _archive.Add(new SessionArchiveEntry
         {
@@ -52,7 +54,30 @@ public sealed partial class MainWindow
             ClosedAt = DateTimeOffset.Now,
             TurnCount = turns.Count,
             Preview = preview,
+            LastMessage = LastMessageFor(said, preview),
         });
+    }
+
+    /// <summary>Card lines are capped at this; shared by the first- and last-message previews so the
+    /// two can't drift apart.</summary>
+    private const int CardPreviewChars = 140;
+
+    private static string? TrimForCard(string? text)
+    {
+        var trimmed = text?.Trim();
+        if (string.IsNullOrEmpty(trimmed)) return null;
+        return trimmed.Length > CardPreviewChars
+            ? trimmed[..CardPreviewChars].TrimEnd() + "…"
+            : trimmed;
+    }
+
+    /// <summary>The "where you left off" line for a set of user turns. Returns "" — meaning
+    /// "computed, nothing to show" — when there are no user turns, or when the last one IS the first
+    /// one, since a single-turn conversation would otherwise print the same quote twice.</summary>
+    private static string LastMessageFor(IReadOnlyList<ConversationTurn> userTurns, string? preview)
+    {
+        var last = TrimForCard(userTurns.LastOrDefault()?.T);
+        return last == null || last == preview ? "" : last;
     }
 
     private void OnArchiveChanged()
@@ -82,6 +107,27 @@ public sealed partial class MainWindow
         MarkHistorySeen();   // opening the panel IS reading it — clear the unread badge
         PopulateHistory();
         ShowLeftPanel(HistoryPanel, snapshots: false);
+        _ = BackfillHistoryLastMessagesAsync();
+    }
+
+    private bool _historyBackfillStarted;
+
+    /// <summary>Fills in <see cref="SessionArchiveEntry.LastMessage"/> for conversations archived
+    /// before it was recorded, so old cards carry the same "where you left off" line as new ones.
+    /// Deferred to the first History open rather than startup (it's up to 60 log reads), run off the
+    /// UI thread, and persisted in one write. The store's Changed event repopulates the panel.</summary>
+    private async Task BackfillHistoryLastMessagesAsync()
+    {
+        if (_historyBackfillStarted) return;
+        _historyBackfillStarted = true;
+
+        await Task.Run(() => _archive.BackfillLastMessages(entry =>
+        {
+            var said = ConversationLog.Load(entry.Key).Where(t => t.R == "u").ToList();
+            // Recompute the first line the same way too: comparing against the STORED preview would
+            // miss a single-turn conversation whose preview was trimmed under an older rule.
+            return LastMessageFor(said, TrimForCard(said.FirstOrDefault()?.T));
+        }));
     }
 
     /// <summary>Current text in the history search box; empty means "show everything".</summary>
@@ -106,18 +152,86 @@ public sealed partial class MainWindow
         SavePanelState();
     }
 
+    // ---- full-text search across archived conversations -------------------------
+    // The metadata match (title/project/model/preview) is instant and stays synchronous. Conversation
+    // BODIES live in per-session log files, so those are scanned off the UI thread behind a debounce
+    // and folded in when they land — typing never waits on file IO.
+
+    private readonly ConversationTextCache _historyText = new();
+    // Fully qualified: both Microsoft.UI.Dispatching and Windows.System are imported here, and both
+    // define DispatcherQueueTimer (same reason MainWindow.Terminal.cs qualifies its timer).
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _historySearchDebounce;
+    private int _historySearchGeneration;
+
+    /// <summary>Persist-key → snippet, for rows whose CONTENT matched the current query. Replaced
+    /// wholesale by each completed scan; never merged, or a stale snippet from a previous query
+    /// would be shown against the new one.</summary>
+    private Dictionary<string, string> _historyContentHits = new(StringComparer.OrdinalIgnoreCase);
+
     private void HistorySearch_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
     {
         if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput) return;
         _historyFilter = sender.Text?.Trim() ?? "";
+
+        // Show metadata hits straight away; content hits widen the list a moment later.
+        _historyContentHits = new(StringComparer.OrdinalIgnoreCase);
+        PopulateHistory();
+        QueueHistoryContentSearch();
+    }
+
+    /// <summary>(Re)arms the debounce. The Tick handler is attached ONCE at creation — re-attaching
+    /// per keystroke would stack handlers and fire one scan per character typed.</summary>
+    private void QueueHistoryContentSearch()
+    {
+        if (_historySearchDebounce == null)
+        {
+            _historySearchDebounce = _dispatcher.CreateTimer();
+            _historySearchDebounce.IsRepeating = false;
+            _historySearchDebounce.Interval = TimeSpan.FromMilliseconds(220);
+            _historySearchDebounce.Tick += (_, _) => _ = RunHistoryContentSearchAsync();
+        }
+
+        _historySearchDebounce.Stop();
+        if (!ConversationSearch.IsSearchable(_historyFilter)) return;
+        _historySearchDebounce.Start();
+    }
+
+    /// <summary>Scans every archived conversation's text for the current query on a background
+    /// thread. Results are stamped with a generation so a slower earlier scan can't overwrite a
+    /// later keystroke's answer.</summary>
+    private async Task RunHistoryContentSearchAsync()
+    {
+        var query = _historyFilter;
+        if (!ConversationSearch.IsSearchable(query)) return;
+
+        var generation = ++_historySearchGeneration;
+        var keys = _archive.Items.Select(e => e.Key).ToList();
+        var cache = _historyText;
+
+        var hits = await Task.Run(() =>
+        {
+            var found = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var key in keys)
+                if (ConversationSearch.Snippet(cache.TextFor(key), query) is { } snippet)
+                    found[key] = snippet;
+            return found;
+        });
+
+        // Superseded — a newer keystroke started its own scan while this one was reading.
+        if (generation != _historySearchGeneration || query != _historyFilter) return;
+
+        _historyContentHits = hits;
         PopulateHistory();
     }
 
-    private static bool Matches(SessionArchiveEntry s, string q) =>
+    /// <summary>Metadata match plus a content hit from the latest completed scan. Not static: the
+    /// content hits are per-window state.</summary>
+    private bool Matches(SessionArchiveEntry s, string q) =>
         s.Title.Contains(q, StringComparison.OrdinalIgnoreCase)
         || s.ProjectLabel.Contains(q, StringComparison.OrdinalIgnoreCase)
         || (s.Model?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false)
-        || (s.Preview?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false);
+        || (s.Preview?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false)
+        || _historyContentHits.ContainsKey(s.Key);
 
     private void PopulateHistory()
     {
@@ -127,6 +241,12 @@ public sealed partial class MainWindow
 
         var q = _historyFilter;
         var filtered = string.IsNullOrEmpty(q) ? all : all.Where(s => Matches(s, q)).ToList();
+
+        // Stamp the snippet onto EVERY row, not just the matches, so a snippet from a previous query
+        // can't linger on a row the new query matched by title. Read once by a OneTime x:Bind —
+        // ItemsSource is reassigned below, so the templates always re-bind.
+        foreach (var entry in all)
+            entry.MatchSnippet = _historyContentHits.TryGetValue(entry.Key, out var snippet) ? snippet : null;
 
         // Group by project (freshest project first), newest-first within each, carrying remembered
         // collapse state — same shape as the Snapshots panel.
@@ -191,6 +311,38 @@ public sealed partial class MainWindow
     {
         if ((sender as FrameworkElement)?.Tag is not SessionArchiveEntry entry) return;
         _archive.Remove(entry.Key, deleteFiles: true);   // explicit forget — files go too
+        _historyText.Forget(new[] { entry.Key });        // its searchable text is gone too
+        PopulateHistory();
+    }
+
+    /// <summary>Deletes every conversation in one project group at once. The group holds exactly what
+    /// the panel is SHOWING, so with a search active this deletes only the matches — the prompt says
+    /// so rather than claiming "all". One batched store call, so the panel rebuilds once.</summary>
+    private async void HistoryDeleteGroup_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not HistoryGroup group || group.Count == 0) return;
+
+        // Detach before the await: an agent closing mid-dialog repopulates the panel and replaces
+        // the group objects. Keys stay valid, and RemoveAll ignores any that are already gone.
+        var keys = group.Select(s => s.Key).ToList();
+        var project = group.Project;
+        var noun = keys.Count == 1 ? "conversation" : "conversations";
+        var scope = string.IsNullOrEmpty(_historyFilter) ? "" : $" matching “{_historyFilter}”";
+
+        var dialog = new ContentDialog
+        {
+            Title = $"Delete {noun}",
+            Content = $"Delete {keys.Count} {noun}{scope} in “{project}”? "
+                      + "Their transcripts and memory are removed from disk and this can't be undone.",
+            PrimaryButtonText = $"Delete {keys.Count}",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = Content.XamlRoot,
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+
+        _archive.RemoveAll(keys, deleteFiles: true);
+        _historyText.Forget(keys);
         PopulateHistory();
     }
 
@@ -325,6 +477,32 @@ public sealed partial class MainWindow
 
         var menu = new MenuFlyout();
 
+        // Right-click anywhere on the tab opens the SAME menu instance rather than a second one
+        // attached as ContextFlyout — one MenuFlyout can't be parented in two places.
+        entry.Header.RightTapped += (_, e) =>
+        {
+            e.Handled = true;
+            menu.ShowAt(entry.Header, new FlyoutShowOptions { Position = e.GetPosition(entry.Header) });
+        };
+
+        // Split-view membership: the one item whose meaning depends on state, so its text and
+        // enabled-ness are refreshed each time the menu opens. Deferred to the next dispatcher tick
+        // like every other split mutation — it restructures the visual tree.
+        var splitItem = new MenuFlyoutItem { Icon = new FontIcon { Glyph = "" } };   // split panes
+        splitItem.Click += (_, _) => DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!_tabs.Contains(entry)) return;
+            if (_splitPanes.Any(p => ReferenceEquals(p, entry))) RemovePane(entry);
+            else AddPane(entry);
+        });
+        menu.Opening += (_, _) =>
+        {
+            var paned = _splitPanes.Any(p => ReferenceEquals(p, entry));
+            splitItem.Text = paned ? "Remove from split view" : "Add to split view";
+            // Adding needs another agent to compare against and a free pane slot.
+            splitItem.IsEnabled = paned || (_tabs.Count >= 2 && _splitPanes.Count < MaxSplitPanes);
+        };
+
         var rename = new MenuFlyoutItem { Text = "Rename…", Icon = new FontIcon { Glyph = "" } };
         rename.Click += (_, _) => _ = RenameTabAsync(entry);
 
@@ -337,6 +515,8 @@ public sealed partial class MainWindow
         var close = new MenuFlyoutItem { Text = "Close agent", Icon = new FontIcon { Glyph = "" } };
         close.Click += (_, _) => CloseTab(entry);
 
+        menu.Items.Add(splitItem);
+        menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(rename);
         menu.Items.Add(snapshot);
         menu.Items.Add(export);
@@ -380,7 +560,7 @@ public sealed partial class MainWindow
     /// looking at belonged to the agent you just left.</summary>
     private void SelectTab(ChatTabEntry entry)
     {
-        // Selecting a tab NEVER changes the compare pair — it only changes the active agent. If that
+        // Selecting a tab NEVER changes the pane set — it only changes the active agent. If that
         // agent is in the pair, ApplyPaneLayout shows the split; otherwise it shows the agent single.
         _selected = entry;
         _sessions.Activate(entry.View.Session);
