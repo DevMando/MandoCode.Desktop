@@ -7,6 +7,22 @@ repo is pinned here as a **git submodule** (`/MandoCode`) and this app project-r
 task planner, plugins, MCP, skills, config, approvals, token tracking). Only the
 user interface is different: WinUI 3 instead of RazorConsole.
 
+## Install (no build needed)
+
+Download the latest `MandoCode.Desktop-*-win-x64.zip` from
+[Releases](https://github.com/DevMando/MandoCode.Desktop/releases), extract it anywhere, and run
+`MandoCode.Desktop.exe`. The zip is fully self-contained — **no .NET install required**.
+
+On first launch the app runs a **guided setup right in the chat**: it finds Ollama (offering to
+install it via winget if it's missing), starts the daemon, and helps you pick a first model — a
+cloud model (best quality, no GPU needed, free ollama.com sign-in) or a local one from a short
+list with size and hardware hints. Re-run the wizard any time by typing `/setup` or with the
+**Run guided setup** button in Settings.
+
+Requirements: Windows 10 (1809+) or Windows 11, with the WebView2 runtime — preinstalled on
+Windows 11 and kept current by Edge on Windows 10. Models are served by
+[Ollama](https://ollama.com); you don't need it installed beforehand, the wizard handles it.
+
 ## Clone & build
 
 ```
@@ -62,7 +78,7 @@ for that changing.
 | Approvals | `DiffApprovalHandler` (Spectre panels) | `Services/WinUiApprovalService.cs` + each agent's own XAML overlay (same labels, bypass state, `DiffApprovalResult` contract) |
 | Transcript | ANSI scrollback + Spectre renderables | WebView2 + `TranscriptHtmlBuilder` (Markdig HTML, themed) |
 | Busy/spinner | `SpinnerService` (ANSI) | `BusyStateService` → ProgressRing |
-| Onboarding | `OnboardingFlow` terminal prompts | `/setup` wizard + Settings page |
+| Onboarding | `OnboardingFlow` terminal prompts | In-chat guided wizard (auto on first launch, `/setup` after) + Settings page |
 | Everything else | `Services/`, `Plugins/`, `Models/` | **reused verbatim via project reference** |
 
 Key seams the harness already provided (unchanged): `AIService.ChatStreamAsync`,
@@ -330,8 +346,11 @@ within 24 hours.
     from a folder or zip, and an editor that can generate or refine a skill body with a
     model you pick (`SkillAuthor`); `SkillCoordinator` fans changes to every open agent
 - Guided wizards, built on the approval-overlay select + text primitives:
-  - `/setup` — probe/start Ollama, change endpoint, pull a starter model with live
-    progress, model picker, cloud-auth check + sign-in walkthrough
+  - First-run setup — fires automatically in the chat on a fresh install: probe/start
+    Ollama (offering a winget install when the CLI is missing), change endpoint, pick a
+    starter model from a curated list (cloud recommended, or local tiers with size and
+    hardware hints), pull it with live progress, cloud-auth check + sign-in walkthrough.
+    Re-run any time via `/setup` or Settings → Run guided setup
   - `/model`, `/force-skill`, `/music-playlist` — pickers
   - 401 auto-recovery — a cloud 401 offers the `ollama signin` walkthrough inline
 - Branded application icon across the exe, taskbar, and window title bar
