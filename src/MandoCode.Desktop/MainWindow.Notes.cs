@@ -1,3 +1,4 @@
+using System.Text;
 using MandoCode.Desktop.Services;
 using MandoCode.Services;   // OllamaSetupHelper — lists models without needing an agent
 using Microsoft.UI.Xaml;
@@ -322,6 +323,7 @@ public sealed partial class MainWindow
         // previous note would be answering about text that's no longer on screen.
         if (!string.Equals(_noteThreadFor, note.Path, StringComparison.OrdinalIgnoreCase))
         {
+            _noteAskCts?.Cancel();
             _noteThread.Clear();
             _noteThreadFor = note.Path;
             NoteAsk.ClearReply();
@@ -336,6 +338,7 @@ public sealed partial class MainWindow
 
     private void ShowNoteBrowse()
     {
+        _noteAskCts?.Cancel();    // the reply strip is about to be cleared; stop streaming into it
         NoteEditor.Close();       // saves and stops watching
         _lastNotePath = null;
         _noteThread.Clear();
@@ -446,7 +449,53 @@ public sealed partial class MainWindow
         _noteAskCts = new CancellationTokenSource();
         var ct = _noteAskCts.Token;
 
-        void OnDelta(string delta) => OnUi(() => NoteAsk.AppendDelta(delta));
+        // Deltas arrive on a background thread, possibly hundreds per second from a small model, and
+        // every repaint re-lays-out the entire reply. Posting per token starves the UI thread, and
+        // even coalesced back-to-back flushes stutter once the reply grows — so batch on a clock:
+        // deltas pile up off-thread, and a timer paints at most ten times a second. 100ms batching is
+        // invisible when reading streaming text; unbounded repainting is a frozen app.
+        var pendingDelta = new StringBuilder();
+        var pumping = false;   // guarded by deltaGate — the producers' view of "timer is running"
+        var deltaGate = new object();
+
+        var flushTimer = _dispatcher.CreateTimer();
+        flushTimer.Interval = TimeSpan.FromMilliseconds(100);
+        flushTimer.Tick += (_, _) =>
+        {
+            string chunk;
+            lock (deltaGate)
+            {
+                chunk = pendingDelta.ToString();
+                pendingDelta.Clear();
+                if (chunk.Length == 0) pumping = false;
+            }
+            if (chunk.Length == 0) { flushTimer.Stop(); return; }   // idle — a new delta restarts it
+            NoteAsk.AppendDelta(chunk);
+        };
+
+        void OnDelta(string delta)
+        {
+            lock (deltaGate)
+            {
+                pendingDelta.Append(delta);
+                if (pumping) return;
+                pumping = true;
+            }
+            OnUi(flushTimer.Start);
+        }
+
+        void FlushDelta()   // final drain on the UI thread, once the stream is over
+        {
+            string chunk;
+            lock (deltaGate)
+            {
+                chunk = pendingDelta.ToString();
+                pendingDelta.Clear();
+                pumping = false;
+            }
+            flushTimer.Stop();
+            if (chunk.Length > 0) NoteAsk.AppendDelta(chunk);
+        }
 
         try
         {
@@ -463,6 +512,7 @@ public sealed partial class MainWindow
                     thread, question, OnDelta, ct);
             }
 
+            FlushDelta();   // drain the tail before reading NoteAsk.Reply below
             NoteAsk.EndReply();
 
             thread.Add(new NoteAssistant.Turn(true, question));
@@ -471,10 +521,12 @@ public sealed partial class MainWindow
         }
         catch (OperationCanceledException)
         {
+            FlushDelta();   // show what had streamed before the stop
             NoteAsk.EndReply(label: "stopped");
         }
         catch (Exception ex)
         {
+            FlushDelta();   // stop the timer — a late tick would paint reply text over the error
             // Ollama down, model pulled away, endpoint wrong: say which, in the strip.
             NoteAsk.EndReply(error: $"{ex.Message}\n\nEndpoint: {endpoint} · model: {model}");
         }
