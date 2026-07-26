@@ -212,6 +212,7 @@
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
                                 <FontIcon Glyph="{x:Bind ((local:ExplorerItem)Content).Glyph}"
                                           FontSize="13" VerticalAlignment="Center"
@@ -226,10 +227,21 @@
                                          Fill="{StaticResource MandoGoldBrush}"
                                          Visibility="{x:Bind ((local:ExplorerItem)Content).DirtyVisibility, Mode=OneWay}"
                                          ToolTipService.ToolTip="Uncommitted changes"/>
+                                <!-- Open button: folders open in Windows File Explorer, files in
+                                     their default app. Double-click can't do this for folders — it
+                                     fights the expand/collapse toggle. -->
+                                <Button Grid.Column="3" Click="ExplorerOpen_Click"
+                                        PointerEntered="ExplorerTag_PointerEntered"
+                                        PointerExited="ExplorerTag_PointerExited"
+                                        Padding="6,1" Background="Transparent" BorderThickness="0"
+                                        Opacity="0.45" VerticalAlignment="Center"
+                                        ToolTipService.ToolTip="{x:Bind ((local:ExplorerItem)Content).OpenTooltip}">
+                                    <FontIcon Glyph="&#xE8A7;" FontSize="12"/>
+                                </Button>
                                 <!-- Tag button: inserts this row's @token into the prompt, same as
                                      dragging it there. Dim at rest, brightens on hover (code-behind —
                                      WinUI styles have no triggers). -->
-                                <Button Grid.Column="3" Click="ExplorerTag_Click"
+                                <Button Grid.Column="4" Click="ExplorerTag_Click"
                                         PointerEntered="ExplorerTag_PointerEntered"
                                         PointerExited="ExplorerTag_PointerExited"
                                         Padding="6,1" Background="Transparent" BorderThickness="0"

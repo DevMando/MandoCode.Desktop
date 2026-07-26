@@ -763,12 +763,25 @@ public sealed partial class ChatTabView
 
     private void ExplorerTree_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
     {
-        // The template's elements inherit the row's TreeViewNode as DataContext.
+        // The template's elements inherit the row's TreeViewNode as DataContext. Files only:
+        // for folders double-click fights the expand/collapse toggle — they open externally
+        // via the row's open button (ExplorerOpen_Click) instead.
         if ((e.OriginalSource as FrameworkElement)?.DataContext is not TreeViewNode node ||
             node.Content is not ExplorerItem { IsDirectory: false } item)
             return;
         if (ShellOpen.Try(item.FullPath) is { } ex)
             _transcript.Append(_html.Warn($"Couldn't open file: {ex.Message}"));
+    }
+
+    /// <summary>The row's open button: folders in Windows File Explorer, files in their
+    /// default app — ShellExecute either way.</summary>
+    private void ExplorerOpen_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not TreeViewNode
+            { Content: ExplorerItem item }) return;
+        if (ShellOpen.Try(item.FullPath) is { } ex)
+            _transcript.Append(_html.Warn(
+                $"Couldn't open {(item.IsDirectory ? "folder" : "file")}: {ex.Message}"));
     }
 
     // ============================================================
