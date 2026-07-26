@@ -82,7 +82,7 @@ public sealed partial class MainWindow
 
     private void OnArchiveChanged()
     {
-        if (_historyPanelOpen) { MarkHistorySeen(); PopulateHistory(); }
+        if (HistoryPanelOpen) { MarkHistorySeen(); PopulateHistory(); }
         else RefreshHistoryBadge();
     }
 
@@ -96,7 +96,7 @@ public sealed partial class MainWindow
 
     private void NavHistory_Click(object sender, RoutedEventArgs e)
     {
-        if (_historyPanelOpen) CloseLeftPanel();
+        if (HistoryPanelOpen) CloseLeftPanel();
         else OpenHistory();
     }
 
@@ -106,7 +106,7 @@ public sealed partial class MainWindow
     {
         MarkHistorySeen();   // opening the panel IS reading it — clear the unread badge
         PopulateHistory();
-        ShowLeftPanel(HistoryPanel, snapshots: false);
+        ShowLeftPanel(LeftPanel.History);
         _ = BackfillHistoryLastMessagesAsync();
     }
 
@@ -649,7 +649,8 @@ public sealed partial class MainWindow
     {
         RefreshTabStrip();       // empties the toast; disables Settings/MCP via RefreshNavIcons
         SwitchPage("chat");      // reveals the empty-state panel + its background
-        if (_snapshotsPanelOpen) PopulateSnapshots();   // no agent now → disable Import + show notice
+        if (SnapshotsPanelOpen) PopulateSnapshots();   // no agent now → disable Import + show notice
+        if (NotesPanelOpen) PopulateNotes();           // no agent now → a new note lands unfiled
     }
 
 }

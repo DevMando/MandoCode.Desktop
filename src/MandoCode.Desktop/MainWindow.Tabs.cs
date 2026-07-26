@@ -87,7 +87,8 @@ public sealed partial class MainWindow
         WireHeader(entry);
 
         SelectTab(entry);
-        if (_snapshotsPanelOpen) PopulateSnapshots();   // an agent exists now → re-enable Import
+        if (SnapshotsPanelOpen) PopulateSnapshots();   // an agent exists now → re-enable Import
+        if (NotesPanelOpen) PopulateNotes();           // a new note would now be filed under this folder
         if (SplitConfigured) RefreshSplitBar();          // offer the new agent in the pane pickers
         return entry;
     }

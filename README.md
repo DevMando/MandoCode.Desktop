@@ -80,7 +80,7 @@ graph; `SessionManager` owns the set of them. The split matters:
 | `AIService` (its conversation, its model), `ChatController`, `TaskPlannerService` | The `MandoCodeConfig` on disk — the **defaults** a new agent starts on |
 | `MandoCodeConfig` clone, `ProjectRootAccessor`, `SkillLoader`, `FileAutocompleteProvider` | `McpClientManager` (one set of server processes) |
 | `TokenTrackingService`, `PlanHandoff`, `TranscriptWriter`, `BusyStateService`, `ShellRunner` | `MusicPlayerService`, `ThemeManager` (static), `TranscriptHtmlBuilder`, `SpinnerService` |
-| `WinUiApprovalService`, `ApprovalPromptGate`, `McpApprovalGate` | `ConfigCoordinator`, `McpCoordinator`, `SkillCoordinator`, `SessionManager`, `SnapshotStore`, `SessionArchiveStore`, `UiUpdateCheckService` |
+| `WinUiApprovalService`, `ApprovalPromptGate`, `McpApprovalGate` | `ConfigCoordinator`, `McpCoordinator`, `SkillCoordinator`, `SessionManager`, `SnapshotStore`, `SessionArchiveStore`, `NoteStore`, `UiUpdateCheckService` |
 
 Tabs default to `Agent 1`, `Agent 2`, … (the folder shows in the header); the number reuses the
 lowest free slot, and a rename or folder change never overwrites it. Each tab's `⋯` options menu
@@ -181,6 +181,67 @@ transcript and — when the model supports it — rehydrates the full memory. `/
 conversation for good; only *closing* softened from "gone" to "recoverable." The archive is capped
 (newest 60); evicting a row deletes its journals so the on-disk stores stay bounded.
 
+### Notes (the jot pad)
+
+The **Notes** rail panel is an always-there scratchpad: plain text files under
+`~\.mandocode\notes`, beside the config file the CLI shares. **New** creates one and opens an editor docked next to the
+chat — autosaved on a 1.2s debounce (plus Ctrl+S, leaving the note, closing the panel, closing the
+window), renameable in place, with **Show in Explorer**.
+
+Notes are **app-wide**, the same call as snapshots and session history. A note is something you want
+to write down *now*, which is often between projects or before an agent is even open, so nothing here
+needs one. What survives of "which project was this about" is a plain **subfolder**: a new note is
+filed under the active agent's folder name when there is one, and sits loose at the top when there
+isn't. Grouping therefore costs no metadata, can't drift, and is corrected by dragging files around
+in Explorer.
+
+**The filesystem is the store** — no index, no JSON, which is also why the pad lives in
+`~\.mandocode` rather than LocalAppData: these are your files, meant to be greppable, syncable, and
+openable in any editor. Discovery walks one folder plus its immediate subfolders (one level only — a
+jot pad with a hierarchy is a filing system, and the search box is a better answer to "where did I
+put it"). In exchange, no row can ever point at a file that isn't there: a note added in Notepad
+shows up, and one deleted outside the app disappears. Search matches note **bodies** and quotes the
+matching line on the card; only search and the assistant see a body truncated, capped at
+`NoteStore.MaxTextBytes` (128 KB).
+
+#### The prompt bar
+
+Both surfaces — the open note and the list — carry a prompt at the bottom. It's chat-shaped, but the
+document above it is your note rather than a transcript, so replies land in the bar's own strip and
+reach a note only through **Insert** (at the cursor, replacing the selection if there is one) or
+**Replace note**. With text selected, the question is about the selection.
+
+The note's text travels **in the message**, taken from the live editor buffer — so the model always
+sees the note as it is right now, including keystrokes autosave hasn't written yet, with nothing to
+fall out of sync. Only the current message carries the note; earlier turns in the thread keep just
+their words, so a long back-and-forth doesn't ship five stale copies. On the list, the question is
+about the pad: every note's title and first line, plus the full text of whatever the search box is
+currently matching, and the bar states what it was given (`12 notes listed · 3 read in full`) because
+a capped read that looks total is the one thing an "ask about all my notes" box must not do.
+
+`Services/NoteAssistant.cs` builds a bare Ollama kernel with **no plugins, filters, or tools** — the
+same shape as `SnapshotEnhancer`. That's the design, not an optimization: with no file tools, "nothing
+writes your note but you" is true by construction rather than by policy, and no approval machinery is
+needed because the only route from a reply into a note is a button you pressed. It also isn't an
+`AIService` agent, because those exist to change your files (the opposite of what a notepad wants)
+and are scoped to a project root the pad deliberately sits outside of. Its model is picked from the
+chip under the prompt, defaults to the app-wide default model, and is remembered; the thread is
+per-note, in memory, and cleared when you switch notes — notes aren't conversations.
+
+The editor is not the only thing that writes these files, and doesn't assume it is. A
+`FileSystemWatcher` compares the file against what the editor last wrote: identical means the write
+was ours; changed-while-clean is adopted silently; changed-while-you-were-typing raises a conflict you
+resolve — *use the version on disk* or *keep what I typed*. A note deleted from under unsaved edits
+offers to save it back. `Services/NoteText.cs` handles the newline round trip, because a WinUI
+`TextBox` normalizes every newline to a bare CR — write that straight back out and a Notepad-authored
+CRLF note becomes one endless line. Both of those are why `NoteStore`, `NoteEntry`, and `NoteText` are
+WinUI-free with an injectable pad root: the tests drive them against real temp folders.
+
+Notes deliberately lack the **Delete all *n*** group button that Snapshots and History carry: those
+are artifacts the app generated, a note is something you wrote by hand, and one button that deletes a
+folder's worth of writing is a different class of risk.
+
+
 ### Why the tab strip isn't a `TabView`
 
 WinUI's `TabView` hosts only the selected item's content, which detaches the previous tab and
@@ -234,6 +295,20 @@ within 24 hours.
   model you pick) and Import it into another model or a fresh agent; a global
   left-rail panel lists them, **persisted**, grouped by project, searchable, with
   collapsible groups. Unnamed snapshots get an auto-generated, unique title
+- Notes — a **Notes** rail panel that jots into the project itself: **New** writes
+  a plain text file under `~\.mandocode\notes` and opens an editor beside the chat
+  (autosave, rename in place, Show in Explorer). App-wide like snapshots, so a note never
+  needs an agent open; new notes are filed under the folder you're working in when there is
+  one, which is what the panel groups by. The filesystem is the store — no index, so a note
+  written in Notepad appears and one deleted outside the app is gone. Searchable across note
+  bodies with the matching line quoted
+- A prompt bar under both notes surfaces — ask about the open note (it's sent the live
+  buffer, so the model always sees what you see) or about the whole pad, with the bar
+  stating what it was given. Replies land in their own strip and reach a note only via
+  **Insert** / **Replace note**; the assistant has no tools at all, so "nothing writes your
+  note but you" is structural. External edits are adopted into the open editor, while an
+  external change landing on unsaved typing raises a conflict you resolve — never a silent
+  overwrite
 - Rail badges on History and Snapshots are unread counts that clear when you open
   the panel (persisted), not running totals
 - Integrated terminal — a sliding panel (Ctrl+` / Ctrl+Shift+` to maximize) running a

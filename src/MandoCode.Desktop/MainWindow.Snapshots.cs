@@ -28,7 +28,7 @@ public sealed partial class MainWindow
 
     private void NavSnapshots_Click(object sender, RoutedEventArgs e)
     {
-        if (_snapshotsPanelOpen) CloseLeftPanel();
+        if (SnapshotsPanelOpen) CloseLeftPanel();
         else OpenSnapshots();
     }
 
@@ -38,18 +38,18 @@ public sealed partial class MainWindow
     {
         MarkSnapshotsSeen();   // opening the panel IS reading it — clear the unread badge
         PopulateSnapshots();
-        ShowLeftPanel(SnapshotsPanel, snapshots: true);
+        ShowLeftPanel(LeftPanel.Snapshots);
     }
 
-    /// <summary>Shows one of the two docked panels (Snapshots/History), swapping if the other was
+    /// <summary>Shows one of the docked panels (Snapshots/History/Notes), swapping if another was
     /// already up (the column stays out — only the contents change) and sliding it in otherwise.</summary>
-    private void ShowLeftPanel(Border panel, bool snapshots)
+    private void ShowLeftPanel(LeftPanel which)
     {
-        bool wasOpen = _snapshotsPanelOpen || _historyPanelOpen;
-        _snapshotsPanelOpen = snapshots;
-        _historyPanelOpen = !snapshots;
-        SnapshotsPanel.Visibility = snapshots ? Visibility.Visible : Visibility.Collapsed;
-        HistoryPanel.Visibility = snapshots ? Visibility.Collapsed : Visibility.Visible;
+        bool wasOpen = _leftPanel != LeftPanel.None;
+        _leftPanel = which;
+        SnapshotsPanel.Visibility = which == LeftPanel.Snapshots ? Visibility.Visible : Visibility.Collapsed;
+        HistoryPanel.Visibility = which == LeftPanel.History ? Visibility.Visible : Visibility.Collapsed;
+        NotesPanel.Visibility = which == LeftPanel.Notes ? Visibility.Visible : Visibility.Collapsed;
         RefreshNavIcons();
         if (wasOpen) return;   // column already at width — contents swapped, no re-slide
 
@@ -61,10 +61,17 @@ public sealed partial class MainWindow
 
     private void CloseLeftPanel()
     {
-        var toHide = _snapshotsPanelOpen ? (FrameworkElement)SnapshotsPanel
-                   : _historyPanelOpen ? HistoryPanel : null;
-        _snapshotsPanelOpen = false;
-        _historyPanelOpen = false;
+        var toHide = _leftPanel switch
+        {
+            LeftPanel.Snapshots => (FrameworkElement)SnapshotsPanel,
+            LeftPanel.History => HistoryPanel,
+            LeftPanel.Notes => NotesPanel,
+            _ => null,
+        };
+        // Leaving the Notes panel commits whatever is in the editor — a jot you can't see is a jot
+        // you'd assume was saved (autosave is on a debounce, so it may not have fired yet).
+        if (_leftPanel == LeftPanel.Notes) NoteEditor.FlushPendingSave();
+        _leftPanel = LeftPanel.None;
         RefreshNavIcons();
         AnimateLeftColumn(0, hideOnDone: toHide);
     }
@@ -104,7 +111,7 @@ public sealed partial class MainWindow
     private void OnSnapshotsChanged()
     {
         // A change while you're looking at the panel is already seen; otherwise it's a new unread.
-        if (_snapshotsPanelOpen) { MarkSnapshotsSeen(); PopulateSnapshots(); }
+        if (SnapshotsPanelOpen) { MarkSnapshotsSeen(); PopulateSnapshots(); }
         else RefreshSnapshotsBadge();
     }
 
@@ -129,10 +136,12 @@ public sealed partial class MainWindow
     private DateTimeOffset? _snapshotsSeenAt;
     private DateTimeOffset? _historySeenAt;
 
-    /// <summary>Writes both panels' fold state and seen-watermarks to disk (survives relaunch).</summary>
+    /// <summary>Writes every panel's fold state, the seen-watermarks, and the Notes panel's open
+    /// note to disk (all survive relaunch).</summary>
     private void SavePanelState() => PanelState.Save(new PanelStateShape(
         _collapsedSnapshotGroups.ToList(), _collapsedHistoryGroups.ToList(),
-        _snapshotsSeenAt, _historySeenAt));
+        _snapshotsSeenAt, _historySeenAt,
+        _collapsedNoteGroups.ToList(), _lastNotePath, _noteModel));
 
     // The group object is kept in sync (not just the set) so that when the ListView recycles a
     // container on scroll, the OneTime IsExpanded x:Bind re-reads the correct, current state.
@@ -228,7 +237,7 @@ public sealed partial class MainWindow
 
         target.Session.Controller.ImportContext(snap);   // arms the active agent's next message
         SwitchPage("chat");   // so the "context armed" note is visible in the active tab
-        if (_snapshotsPanelOpen) CloseLeftPanel();   // get out of the way — the chat is where the confirmation shows
+        if (SnapshotsPanelOpen) CloseLeftPanel();   // get out of the way — the chat is where the confirmation shows
         target.FocusInput();
     }
 

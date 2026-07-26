@@ -140,6 +140,46 @@ are visible until you actually open a second tab.
   `SkillCoordinator` fans skill changes out to every open agent, mirroring `McpCoordinator`.
 - **Branded app icon** across the exe, taskbar, and window title bar, plus a lightweight
   unhandled-exception logger (`crash.log`) to speed up diagnosing native/COM failures.
+- **Notes - a jot pad with a prompt attached.** A **Notes** rail panel for writing things down without
+  leaving the app. **New** creates a plain text file under `~/.mandocode/notes` (beside the config file
+  the CLI shares) and opens an editor docked next to the chat: autosave on a 1.2s debounce plus Ctrl+S,
+  rename in place, Show in Explorer. Notes are **app-wide**, the same call as snapshots and session
+  history - a note is something you want to write down *now*, often between projects or before an agent
+  is even open, so nothing here needs one. What survives of "which project was this about" is a plain
+  SUBFOLDER: a new note is filed under the active agent's folder name when there is one, and sits loose
+  at the top when there isn't. Grouping therefore costs no metadata and cannot drift - you re-file a
+  note by dragging it in Explorer.
+  - **The filesystem is the store.** No notes index, no JSON, which is also why the pad lives in
+    `~/.mandocode` rather than LocalAppData: these are your files, meant to be greppable, syncable, and
+    openable in any editor. Discovery walks one folder plus its immediate subfolders (one level only -
+    a jot pad with a hierarchy is a filing system, and search is the better answer to "where did I put
+    it"). In exchange no row can point at a file that isn't there: a note written in Notepad shows up,
+    one deleted outside the app disappears. Search matches note BODIES and quotes the matching line.
+  - **A prompt bar under both surfaces.** Chat-shaped, but the document above it is your note rather
+    than a transcript: replies land in the bar's own strip and reach a note only through **Insert** (at
+    the cursor, replacing the selection if there is one) or **Replace note**. On an open note the
+    question carries the LIVE editor buffer, so the model always sees the note as it is right now -
+    including keystrokes autosave hasn't written yet - and only the current message carries it, so a
+    long thread doesn't ship stale copies. On the list the question is about the pad: every note's
+    title and first line plus the full text of whatever the search box is matching, with the bar
+    stating what it was given (`12 notes listed - 3 read in full`), because a capped read that looks
+    total is the one thing an "ask about all my notes" box must not do.
+  - **The assistant has no tools, by design.** `NoteAssistant` builds a bare Ollama kernel with no
+    plugins, filters, or tools - the same shape as `SnapshotEnhancer`. With no file access, "nothing
+    writes your note but you" is true by construction rather than by policy, so no approval machinery
+    is needed: the only route from a reply into a note is a button you pressed. Its model comes from
+    the chip under the prompt (defaulting to the app-wide default) and is remembered; the thread is
+    per-note, in memory, and cleared when you switch notes - notes aren't conversations.
+  - **The editor is not the only writer, and doesn't assume it is.** These are plain files, so Notepad,
+    VS Code, a sync client, or git can change one under you. A `FileSystemWatcher` compares the file
+    against what the editor last wrote: identical means the write was ours, changed-while-clean is
+    adopted silently, and changed-while-you-were-typing raises a conflict you resolve - *use the
+    version on disk* or *keep what I typed*. A note deleted from under unsaved edits offers to save it
+    back. No path silently discards typing.
+  - `NoteText` owns the newline round trip: a WinUI `TextBox` normalizes every newline to a bare CR, so
+    writing `Editor.Text` straight back out would turn a Notepad-authored CRLF note into one endless
+    line - and comparing the loaded file text against `Editor.Text` made merely OPENING a note look
+    like an edit, which autosaved untouched files. Both are covered by tests.
 
 ### Changed
 - **Closing the last agent is allowed.** The app no longer forces at least one agent open — closing

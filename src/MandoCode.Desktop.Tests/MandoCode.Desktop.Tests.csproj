@@ -46,6 +46,16 @@
     <Compile Include="..\MandoCode.Desktop\Services\ConversationSearch.cs" Link="src\ConversationSearch.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\SessionHistoryStore.cs" Link="src\SessionHistoryStore.cs" />
 
+    <!-- The jot pad: the file-backed store and the card derivations. Notes are the one feature whose
+         store IS the filesystem (no JSON index), and the store takes its root as a constructor
+         argument rather than hard-coding ~/.mandocode/notes — so the tests drive the real thing
+         against temp folders. -->
+    <Compile Include="..\MandoCode.Desktop\Services\NoteEntry.cs" Link="src\NoteEntry.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\NoteStore.cs" Link="src\NoteStore.cs" />
+    <!-- Newline handling between a note file and the WinUI TextBox that edits it — pulled out of the
+         editor control precisely so it can be pinned down here. -->
+    <Compile Include="..\MandoCode.Desktop\Services\NoteText.cs" Link="src\NoteText.cs" />
+
     <!-- Pure logic extracted from session-coupled coordinators so it can be tested directly. -->
     <Compile Include="..\MandoCode.Desktop\Services\PaneLayout.cs" Link="src\PaneLayout.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\ConfigCloning.cs" Link="src\ConfigCloning.cs" />
