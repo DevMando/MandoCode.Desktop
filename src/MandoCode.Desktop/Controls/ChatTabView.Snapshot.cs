@@ -200,10 +200,11 @@ public sealed partial class ChatTabView
     /// button and the tab's options menu.</summary>
     public async Task ExportTranscriptAsync()
     {
-        if (!CanScript) return;
+        var core = CanScript ? TranscriptView.CoreWebView2 : null;   // captured: see AppendRawAsync
+        if (core == null) return;
         try
         {
-            var json = await TranscriptView.CoreWebView2.ExecuteScriptAsync("document.documentElement.outerHTML");
+            var json = await core.ExecuteScriptAsync("document.documentElement.outerHTML");
             var html = JsonSerializer.Deserialize<string>(json) ?? "";
 
             var picker = new Windows.Storage.Pickers.FileSavePicker();

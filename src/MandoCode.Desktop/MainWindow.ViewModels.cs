@@ -83,6 +83,47 @@ public sealed class HistoryGroup : List<Services.SessionArchiveEntry>
 }
 
 /// <summary>
+/// One note as the panel shows it: the note itself plus the search snippet that explains why it
+/// matched. The snippet depends on the current query, not on the file, so it can't live on
+/// <see cref="Services.NoteEntry"/> (a reading of disk) — same split as History's rows.
+/// </summary>
+public sealed class NoteRow
+{
+    public required Services.NoteEntry Note { get; init; }
+
+    /// <summary>The matching line from the note's body, when the hit came from text the card doesn't
+    /// already show. Empty otherwise — <see cref="Vis.WhenText"/> hides the quote block.</summary>
+    public string MatchSnippet { get; init; } = "";
+
+    // Proxies, so the card template reads like the other two panels' cards.
+    public string Title => Note.Title;
+    public string FileName => Note.FileName;
+    public string Preview => Note.Preview;
+    public string TimeLabel => Note.TimeLabel;
+    public string SizeLabel => Note.SizeLabel;
+
+    /// <summary>An empty note has no preview line to show; the placeholder keeps the card from
+    /// collapsing into a bare title and says what it is.</summary>
+    public string PreviewOrPlaceholder =>
+        string.IsNullOrWhiteSpace(Preview) ? "(empty — nothing written yet)" : Preview;
+}
+
+/// <summary>A project's notes, as one collapsible group in the Notes panel — the third of the
+/// grouped-by-project panels, alongside <see cref="SnapshotGroup"/> and <see cref="HistoryGroup"/>.
+///
+/// Deliberately WITHOUT the "Delete all n" group action those two carry. A snapshot or an archived
+/// conversation is a derived artifact the app made; a note is something the user wrote by hand, and
+/// one button that deletes a folder's worth of writing is a different class of risk.</summary>
+public sealed class NoteGroup : List<NoteRow>
+{
+    public NoteGroup(string project, IEnumerable<NoteRow> items) : base(items) => Project = project;
+
+    public string Project { get; }
+
+    public bool IsExpanded { get; set; } = true;
+}
+
+/// <summary>
 /// x:Bind function-binding helpers. These exist so bool/string→<see cref="Visibility"/> logic can
 /// stay OUT of the persisted service models: `SessionArchiveStore.cs` and friends are compiled into
 /// the WinUI-free test project, so a Visibility property on them would break that build. Cheaper

@@ -29,10 +29,16 @@ public sealed partial class MainWindow : Window
     private readonly TranscriptHtmlBuilder _html;   // app-global, stateless formatter
     private readonly Microsoft.UI.Dispatching.DispatcherQueue _dispatcher;
 
-    // Snapshots and History share the one docked column left of the content (Grid.Column 1) and are
-    // mutually exclusive — opening one swaps out the other without re-sliding the column.
-    private bool _snapshotsPanelOpen;
-    private bool _historyPanelOpen;
+    // Snapshots, History, and Notes share the one docked column left of the content (Grid.Column 1)
+    // and are mutually exclusive — opening one swaps out the other without re-sliding the column.
+    // One field rather than a bool per panel: with three of them, a set of bools has states that
+    // shouldn't exist (two open at once) and every new panel would mean touching every check.
+    private enum LeftPanel { None, Snapshots, History, Notes }
+    private LeftPanel _leftPanel = LeftPanel.None;
+
+    private bool SnapshotsPanelOpen => _leftPanel == LeftPanel.Snapshots;
+    private bool HistoryPanelOpen => _leftPanel == LeftPanel.History;
+    private bool NotesPanelOpen => _leftPanel == LeftPanel.Notes;
 
     // Slide animation state for the docked left column. The width is tweened per-frame off
     // CompositionTarget.Rendering so the panel glides in/out instead of snapping. Width is always
@@ -90,8 +96,14 @@ public sealed partial class MainWindow : Window
         var panelState = PanelState.Load();
         foreach (var p in panelState.CollapsedSnapshotGroups) _collapsedSnapshotGroups.Add(p);
         foreach (var p in panelState.CollapsedHistoryGroups) _collapsedHistoryGroups.Add(p);
+        foreach (var p in panelState.CollapsedNoteGroups ?? new()) _collapsedNoteGroups.Add(p);
         _snapshotsSeenAt = panelState.SnapshotsSeenAt;
         _historySeenAt = panelState.HistorySeenAt;
+        _lastNotePath = panelState.LastNotePath;
+        _noteModel = panelState.NoteModel;
+        // The editor writes note content; the panel only lists. One store, handed over once.
+        NoteEditor.Store = _notes;
+        WireNotesPanel();
 
         // The first agent. Its whole service graph — AIService, approvals, transcript, token
         // tracking — belongs to it alone, so opening a second tab can't disturb it.
@@ -145,6 +157,9 @@ public sealed partial class MainWindow : Window
     private void MainWindow_Closed(object sender, WindowEventArgs args)
     {
         SaveWorkspace();   // capture the shape BEFORE teardown starts mutating state
+        // A note being typed when the window closes must land on disk — autosave runs on a debounce,
+        // so the last few seconds of typing are still only in the TextBox at this point.
+        NoteEditor.Shutdown();
         foreach (var tab in _tabs) tab.View.Shutdown();
         _terminal?.ShutDown();   // kill any ConPTY shells so no processes leak
 

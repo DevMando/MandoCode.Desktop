@@ -143,8 +143,9 @@ public sealed partial class MainWindow
         NavMcpIcon.Foreground = _currentPage == "mcp" ? accent : normal;
         NavSkillsIcon.Foreground = _currentPage == "skills" ? accent : normal;
         NavAppearanceIcon.Foreground = _currentPage == "appearance" ? accent : normal;
-        NavSnapshotsIcon.Foreground = _snapshotsPanelOpen ? accent : normal;
-        NavHistoryIcon.Foreground = _historyPanelOpen ? accent : normal;
+        NavSnapshotsIcon.Foreground = SnapshotsPanelOpen ? accent : normal;
+        NavHistoryIcon.Foreground = HistoryPanelOpen ? accent : normal;
+        NavNotesIcon.Foreground = NotesPanelOpen ? accent : normal;
         NavTerminalIcon.Foreground = _terminalOpen ? accent : normal;
 
         // Settings and MCP act on the selected agent — disable them while none is open.

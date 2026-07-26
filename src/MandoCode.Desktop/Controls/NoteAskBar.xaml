@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="MandoCode.Desktop.Controls.NoteAskBar"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- The prompt at the bottom of the notes panel. Chat-shaped, but the document above it is your
+         note rather than a transcript: replies land in the strip here and only reach the note if you
+         press Insert or Replace. One bar serves both views — asking about the open note, or about the
+         whole pad when you're on the list. -->
+    <Grid RowSpacing="6" Padding="10,6,10,10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- The reply. Ephemeral by design: it's an answer or a suggestion, not history. -->
+        <Border x:Name="ReplyBox" Grid.Row="0" Visibility="Collapsed"
+                Background="{StaticResource MandoBackgroundBrush}" CornerRadius="8"
+                BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1"
+                Padding="10,8" MaxHeight="240">
+            <Grid RowSpacing="4">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="6">
+                    <ProgressRing x:Name="ReplyRing" Width="12" Height="12" IsActive="False"
+                                  Visibility="Collapsed"/>
+                    <TextBlock x:Name="ReplyLabel" FontSize="10" Opacity="0.5"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
+                <ScrollViewer x:Name="ReplyScroller" Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                    <TextBlock x:Name="ReplyText" FontSize="12" TextWrapping="Wrap"
+                               IsTextSelectionEnabled="True"/>
+                </ScrollViewer>
+            </Grid>
+        </Border>
+
+        <!-- What to do with the reply. Insert/Replace appear only over an open note; the note is never
+             written without one of these being pressed. -->
+        <StackPanel x:Name="ActionRow" Grid.Row="1" Visibility="Collapsed"
+                    Orientation="Horizontal" Spacing="6">
+            <!-- Explicit automation names: the visible label flips to "Replace selection" when text is
+                 selected, and a control whose accessible name changes under you is a control screen
+                 readers (and UI tests) can't refer to. -->
+            <Button x:Name="InsertButton" Click="Insert_Click" FontSize="11" Padding="8,3"
+                    AutomationProperties.Name="Insert into note"
+                    ToolTipService.ToolTip="Put this into the note at the cursor (replacing the selection, if any)">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon Glyph="&#xE896;" FontSize="11"/>
+                    <TextBlock x:Name="InsertLabel" Text="Insert" FontSize="11"/>
+                </StackPanel>
+            </Button>
+            <Button x:Name="ReplaceButton" Click="Replace_Click" FontSize="11" Padding="8,3"
+                    AutomationProperties.Name="Replace note body"
+                    ToolTipService.ToolTip="Replace the whole note with this">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon Glyph="&#xE8AB;" FontSize="11"/>
+                    <TextBlock Text="Replace note" FontSize="11"/>
+                </StackPanel>
+            </Button>
+            <Button Click="Copy_Click" FontSize="11" Padding="8,3" ToolTipService.ToolTip="Copy the reply">
+                <FontIcon Glyph="&#xE8C8;" FontSize="11"/>
+            </Button>
+            <Button Click="Dismiss_Click" FontSize="11" Padding="8,3" Background="Transparent"
+                    BorderThickness="0" ToolTipService.ToolTip="Dismiss the reply">
+                <TextBlock Text="Dismiss" FontSize="11" Opacity="0.7"/>
+            </Button>
+        </StackPanel>
+
+        <Grid Grid.Row="2" ColumnSpacing="6">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <TextBox x:Name="PromptBox" Grid.Row="0" Grid.Column="0"
+                     PlaceholderText="Ask about this note…"
+                     AcceptsReturn="False" IsSpellCheckEnabled="False" FontSize="12"
+                     KeyDown="PromptBox_KeyDown"
+                     AutomationProperties.Name="Ask about notes"/>
+
+            <!-- Not just "Send": the chat input has one of those, and two identically-named buttons in
+                 one window is ambiguous to anything navigating by name. -->
+            <Button x:Name="SendButton" Grid.Row="0" Grid.Column="1" Click="Send_Click" Padding="8,5"
+                    AutomationProperties.Name="Send note question" ToolTipService.ToolTip="Ask (Enter)">
+                <FontIcon x:Name="SendIcon" Glyph="&#xE724;" FontSize="12"/>
+            </Button>
+
+            <!-- Which model answers, and what it was given. The model is app-wide, like the pad. -->
+            <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal"
+                        Spacing="6" Margin="0,4,0,0">
+                <Button x:Name="ModelButton" Padding="6,1" Background="Transparent" BorderThickness="0"
+                        AutomationProperties.Name="Assistant model"
+                        ToolTipService.ToolTip="Model that answers here — no tools, so it can never write to a note">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <FontIcon Glyph="&#xE9D9;" FontSize="10" Opacity="0.6"/>
+                        <TextBlock x:Name="ModelText" FontSize="10" Opacity="0.7" Text="no model"/>
+                        <FontIcon Glyph="&#xE70D;" FontSize="8" Opacity="0.5" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+                <TextBlock x:Name="ScopeText" FontSize="10" Opacity="0.45" VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis"/>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</UserControl>
