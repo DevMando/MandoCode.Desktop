@@ -124,12 +124,29 @@ public sealed partial class ChatTabView
         catch { /* memory restore is best-effort; a fresh conversation always works */ }
     }
 
+    /// <summary>
+    /// Writes a fragment straight into the transcript document, bypassing the <c>_pendingHtml</c>
+    /// queue on purpose: this runs during journal replay, while <c>_webViewReady</c> is still false so
+    /// that live blocks keep queueing BEHIND the restored history. That's also why it can't use
+    /// <see cref="CanScript"/> — which tests <c>_webViewReady</c> and would send the replay to the
+    /// queue it's meant to precede.
+    ///
+    /// The core is captured into a local instead of being dereferenced off the property twice: replay
+    /// awaits between chunks, and closing (or unparenting) the tab in that window unloads the WebView
+    /// and nulls <c>CoreWebView2</c> — which is a NullReferenceException on the next chunk. The catch
+    /// below always swallowed it, so it never crashed anything, but it broke into the debugger on
+    /// every occurrence and abandoned the rest of the replay on an exception path.
+    /// </summary>
     private async Task AppendRawAsync(string html)
     {
+        if (_shutDown) return;
+
+        var core = TranscriptView.CoreWebView2;
+        if (core == null) return;   // WebView gone (tab closed mid-replay) — nothing to render into
+
         try
         {
-            await TranscriptView.CoreWebView2.ExecuteScriptAsync(
-                $"window.__append({JsonSerializer.Serialize(html)})");
+            await core.ExecuteScriptAsync($"window.__append({JsonSerializer.Serialize(html)})");
         }
         catch { /* transient during navigation/teardown — a fragment failing to render is not fatal */ }
     }
@@ -137,7 +154,12 @@ public sealed partial class ChatTabView
     private async void AppendHtml(string html)
     {
         if (_shutDown) return;
-        if (!CanScript)
+
+        // Capture once — CanScript reads the property, and re-reading it at the call site is a race
+        // against the WebView unloading. A block that arrives with no live core is queued, not
+        // dropped, so it still renders if the WebView comes back.
+        var core = CanScript ? TranscriptView.CoreWebView2 : null;
+        if (core == null)
         {
             _pendingHtml.Enqueue(html);
             return;
@@ -145,8 +167,7 @@ public sealed partial class ChatTabView
 
         try
         {
-            await TranscriptView.CoreWebView2.ExecuteScriptAsync(
-                $"window.__append({JsonSerializer.Serialize(html)})");
+            await core.ExecuteScriptAsync($"window.__append({JsonSerializer.Serialize(html)})");
         }
         catch
         {
@@ -156,8 +177,9 @@ public sealed partial class ChatTabView
 
     private async void ClearTranscript()
     {
-        if (!CanScript) return;
-        try { await TranscriptView.CoreWebView2.ExecuteScriptAsync("window.__clear()"); }
+        var core = CanScript ? TranscriptView.CoreWebView2 : null;
+        if (core == null) return;
+        try { await core.ExecuteScriptAsync("window.__clear()"); }
         catch { /* transient during navigation/teardown — clearing a gone WebView is a no-op */ }
     }
 
