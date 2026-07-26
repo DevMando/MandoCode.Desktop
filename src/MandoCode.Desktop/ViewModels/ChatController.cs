@@ -272,12 +272,25 @@ public sealed partial class ChatController
         IsConnected = probe.Ok;
 
         var shouldSetup = MandoCodeConfig.IsFirstRun() || (!probe.Ok && !_config.HasCompletedOnboarding);
-        if (!probe.Ok)
+        if (shouldSetup)
+        {
+            // First launch (or setup never finished and no daemon): run the guided wizard right
+            // here in the chat, like the CLI's onboarding. A fresh user shouldn't have to
+            // discover /setup or hand-edit an endpoint on the Settings page for a first reply.
+            _transcript.Append(_html.Info("Welcome to MandoCode! Let's get you set up — takes about a minute."));
+            _isProcessing = true;   // input waits until the wizard is done, same as /setup mid-chat
+            StateChanged?.Invoke();
+            try { await RunSetupWizardAsync(); }
+            finally { _isProcessing = false; }
+
+            // Wizard cancelled or didn't get connected — land on Settings as the manual fallback.
+            if (!IsConnected) SetupNeeded?.Invoke();
+        }
+        else if (!probe.Ok)
         {
             _transcript.Append(_html.Warn($"Can't reach Ollama at {_config.OllamaEndpoint}."));
             _transcript.Append(_html.Dim("Open Settings (gear icon) to set the endpoint and model, make sure 'ollama serve' is running, then hit Reconnect — or type /retry."));
         }
-        if (shouldSetup) SetupNeeded?.Invoke();
 
         if (IsConnected)
         {

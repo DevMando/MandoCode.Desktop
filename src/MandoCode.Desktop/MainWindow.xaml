@@ -863,6 +863,17 @@
                                         HorizontalAlignment="Left" Padding="0,4,0,8">
                                 <TextBlock Text="Connection" FontSize="13" FontWeight="SemiBold"
                                            Foreground="{StaticResource MandoAccentBrush}"/>
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button Click="RunSetupWizard_Click"
+                                            ToolTipService.ToolTip="Guided setup: reach Ollama, install or start it if needed, and pick a model — the same wizard that runs on first launch.">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <FontIcon Glyph="&#xE945;" FontSize="13"/>
+                                            <TextBlock Text="Run guided setup"/>
+                                        </StackPanel>
+                                    </Button>
+                                    <TextBlock Text="walks through connection + model, like first launch"
+                                               VerticalAlignment="Center" FontSize="12" Opacity="0.6"/>
+                                </StackPanel>
                                 <TextBlock Text="Ollama endpoint" FontSize="13" Opacity="0.8"/>
                                 <TextBox x:Name="EndpointBox" PlaceholderText="http://localhost:11434" MinWidth="560"
                                          HorizontalAlignment="Left"
