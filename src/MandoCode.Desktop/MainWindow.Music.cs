@@ -100,6 +100,16 @@ public sealed partial class MainWindow
         if (folder == null) return;
 
         var music = Music;
+
+        // Re-adding a folder that's already a playlist selects the existing one — matched by
+        // where the junction actually points, not by name, so no "beats 2" twins.
+        if (FindExistingPlaylistFor(music.UserMusicPath, folder.Path) is { } existing)
+        {
+            SelectPlaylist(existing);
+            ShowMusicHint($"“{existing}” already points at that folder — selected it.");
+            return;
+        }
+
         string link;
         try
         {
@@ -129,8 +139,7 @@ public sealed partial class MainWindow
 
         var rediscovered = TryRediscoverTracks(music);
         RefreshMusicUi();
-        if (MusicGenreCombo.Items.Contains(Path.GetFileName(link)))
-            MusicGenreCombo.SelectedItem = Path.GetFileName(link);
+        SelectPlaylist(Path.GetFileName(link));
 
         var mp3Count = Directory.EnumerateFiles(folder.Path, "*.mp3").Count();
         ShowMusicHint(!rediscovered
@@ -175,6 +184,44 @@ public sealed partial class MainWindow
         var visible = MusicGenreCombo.SelectedItem is string name
                       && IsJunction(Path.Combine(Music.UserMusicPath, name));
         MusicRemovePlaylistButton.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>Selects a playlist in the combo by name — case-insensitively, since discovery
+    /// may re-case folder names. Selection IS "loading": the change handler switches live
+    /// playback to it, or arms it as what the play button will start.</summary>
+    private void SelectPlaylist(string name)
+    {
+        var match = MusicGenreCombo.Items.OfType<string>()
+            .FirstOrDefault(g => string.Equals(g, name, StringComparison.OrdinalIgnoreCase));
+        if (match != null) MusicGenreCombo.SelectedItem = match;
+    }
+
+    /// <summary>Finds a junction under the music root already pointing at <paramref name="targetFolder"/>,
+    /// comparing resolved paths rather than playlist names. mklink stores targets in NT form
+    /// (\??\C:\…), so prefixes are stripped before comparing.</summary>
+    private static string? FindExistingPlaylistFor(string musicRoot, string targetFolder)
+    {
+        try
+        {
+            if (!Directory.Exists(musicRoot)) return null;
+            var target = NormalizePath(targetFolder);
+            foreach (var dir in Directory.EnumerateDirectories(musicRoot))
+            {
+                if (!IsJunction(dir)) continue;
+                var linkTarget = new DirectoryInfo(dir).LinkTarget;
+                if (linkTarget != null && string.Equals(NormalizePath(linkTarget), target, StringComparison.OrdinalIgnoreCase))
+                    return Path.GetFileName(dir);
+            }
+        }
+        catch { /* unreadable entries just mean no match */ }
+        return null;
+    }
+
+    private static string NormalizePath(string path)
+    {
+        if (path.StartsWith(@"\??\", StringComparison.Ordinal)) path = path[4..];
+        if (path.StartsWith(@"\\?\", StringComparison.Ordinal)) path = path[4..];
+        return Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
     }
 
     private static bool IsJunction(string path)
