@@ -34,8 +34,16 @@ public sealed class AgentSession
 
     public int Id { get; }
 
-    /// <summary>Tab-strip label. Defaults to the project folder's leaf name.</summary>
-    public string Title { get; set; }
+    /// <summary>Tab-strip label AND the agent's spoken identity: setting it also stamps
+    /// <see cref="MandoCodeConfig.AgentName"/> on this session's config clone, so the system
+    /// prompt introduces the agent by this name on the next prompt rebuild (construction,
+    /// settings refresh, or model switch). Defaults to the project folder's leaf name.</summary>
+    public string Title
+    {
+        get => _title;
+        set { _title = value; Config.AgentName = value; }
+    }
+    private string _title = "";
 
     /// <summary>Durable identity across app launches (unlike <see cref="Id"/>, a process-local
     /// counter). Names this session's transcript journal on disk; a restored tab passes its
@@ -67,7 +75,8 @@ public sealed class AgentSession
         ConfigCoordinator configs,
         McpCoordinator mcp,
         string projectRoot,
-        string? persistKey = null)
+        string? persistKey = null,
+        string? title = null)
     {
         Id = Interlocked.Increment(ref _nextId);
         PersistKey = string.IsNullOrWhiteSpace(persistKey) ? Guid.NewGuid().ToString("N") : persistKey;
@@ -83,7 +92,9 @@ public sealed class AgentSession
 
         Config = configs.CreateClone();
         ProjectRoot = new ProjectRootAccessor(projectRoot);
-        Title = FolderLabel(projectRoot);
+        // Before AIService below: its constructor bakes the system prompt, and the agent's
+        // spoken identity (Config.AgentName, stamped by the Title setter) must be in it.
+        Title = title ?? FolderLabel(projectRoot);
 
         Tokens = new TokenTrackingService();
         PlanHandoff = new PlanHandoff();

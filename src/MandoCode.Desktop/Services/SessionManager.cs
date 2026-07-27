@@ -50,8 +50,9 @@ public sealed class SessionManager
     public AgentSession CreateSession(string? projectRoot = null, string? persistKey = null)
     {
         var root = projectRoot ?? Active?.ProjectRoot.ProjectRoot ?? _initialProjectRoot;
-        var session = new AgentSession(_globals, _configs, _mcp, root, persistKey);
-        session.Title = NextAgentName();
+        // Named at construction, not after: AIService bakes the system prompt in its ctor,
+        // and the callsign must be the identity in it from the first message.
+        var session = new AgentSession(_globals, _configs, _mcp, root, persistKey, NextAgentName());
 
         _sessions.Add(session);
         Activate(session);
@@ -63,7 +64,9 @@ public sealed class SessionManager
     /// label just distinguishes agents; the user can rename it. Reuses the lowest free number so
     /// closing "Agent 2" then opening a new one gives "Agent 2" again, not an ever-climbing count.
     /// </summary>
-    private string NextAgentName() => AgentNaming.NextFreeName(_sessions.Select(s => s.Title));
+    private string NextAgentName() => AgentCallsigns.Enabled
+        ? AgentCallsigns.Next(_sessions.Select(s => s.Title))
+        : AgentNaming.NextFreeName(_sessions.Select(s => s.Title));
 
     public void Activate(AgentSession session)
     {

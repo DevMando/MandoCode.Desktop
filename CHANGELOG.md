@@ -7,6 +7,17 @@ recorded by the `MandoCode` submodule.
 ## [Unreleased]
 
 ### Added
+- **Agent callsigns.** A Settings → Behavior toggle (app-wide) names new agents from a
+  curated 500+ pool of handles — construct-crew, phreak, and cypher energy ("Morphy",
+  "Crunch", "Blazor", "Kaos") — drawn from a shuffled deck that doesn't repeat until it runs
+  dry. Off (the default) keeps "Agent 1, Agent 2, …"; renaming a tab works either way.
+- **Agents know their own name.** The tab's name is the agent's spoken identity: reply cards
+  are labeled with it, and the system prompt introduces the model as "{name}, a local AI
+  coding assistant running on MandoCode" — so saying "hi" to Blazor gets Blazor, not a
+  confused MandoCode. Renaming a tab tells the live conversation. (Engine support is
+  null-safe: the CLI keeps its classic MandoCode identity untouched.)
+- **Version in the title bar.** The window title reads "MandoCode Desktop v{version}",
+  sourced from the same assembly version the update checker compares against releases.
 - **Music player.** A music icon on the left rail opens a compact player: play/pause, next,
   stop, volume, and a playlist picker. While music plays the rail icon becomes an animated
   gold equalizer, and hovering it names the current track. **Add playlist** points at any
