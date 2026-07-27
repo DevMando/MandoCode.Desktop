@@ -60,6 +60,7 @@
     <Compile Include="..\MandoCode.Desktop\Services\PaneLayout.cs" Link="src\PaneLayout.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\ConfigCloning.cs" Link="src\ConfigCloning.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\AgentNaming.cs" Link="src\AgentNaming.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\AgentCallsigns.cs" Link="src\AgentCallsigns.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\HistorySummarizer.cs" Link="src\HistorySummarizer.cs" />
     <Compile Include="..\MandoCode.Desktop\ViewModels\RequestPreambleComposer.cs" Link="src\RequestPreambleComposer.cs" />
 

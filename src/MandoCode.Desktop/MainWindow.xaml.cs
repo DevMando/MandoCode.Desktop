@@ -60,7 +60,7 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        Title = "MandoCode Desktop";
+        Title = $"MandoCode Desktop v{UiUpdateCheckService.CurrentVersion}";
 
         ThemeManager.Initialize(Root);
         // ONE window-level subscription to the static ThemeChanged event. Chat tabs must not
@@ -102,6 +102,7 @@ public sealed partial class MainWindow : Window
         _historySeenAt = panelState.HistorySeenAt;
         _lastNotePath = panelState.LastNotePath;
         _noteModel = panelState.NoteModel;
+        AgentCallsigns.Enabled = panelState.AgentCallsigns ?? false;
         // The editor writes note content; the panel only lists. One store, handed over once.
         NoteEditor.Store = _notes;
         WireNotesPanel();

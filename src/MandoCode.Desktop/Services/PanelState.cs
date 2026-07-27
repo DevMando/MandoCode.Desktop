@@ -16,7 +16,8 @@ public sealed record PanelStateShape(
     DateTimeOffset? HistorySeenAt = null,
     List<string>? CollapsedNoteGroups = null,
     string? LastNotePath = null,
-    string? NoteModel = null);
+    string? NoteModel = null,
+    bool? AgentCallsigns = null);
 
 /// <summary>
 /// Persists per-panel UI preference — the fold state of the Snapshots and History project groups —
@@ -45,7 +46,8 @@ public static class PanelState
                         shape.HistorySeenAt,
                         shape.CollapsedNoteGroups ?? new(),
                         shape.LastNotePath,
-                        shape.NoteModel);
+                        shape.NoteModel,
+                        shape.AgentCallsigns);
             }
         }
         catch { /* corrupt/unreadable — start with everything expanded */ }
