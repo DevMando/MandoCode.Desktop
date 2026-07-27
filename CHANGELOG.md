@@ -6,6 +6,24 @@ recorded by the `MandoCode` submodule.
 
 ## [Unreleased]
 
+### Added
+- **First-run guided setup.** A fresh install now walks through everything in the chat itself:
+  reach Ollama (with a one-click winget install when it's missing), start the daemon, and pick a
+  starter model from a curated list — cloud recommended, or local tiers with size and hardware
+  hints. Setup stays discoverable afterward via `/setup` and a **Run guided setup** button in
+  Settings → Connection. Previously a fresh install landed on the raw Settings page.
+- **Open-in-Explorer buttons in the file explorer.** Every row gains an open icon next to the `@`
+  tag: folders open in Windows File Explorer, files in their default app. (Double-click on
+  folders couldn't do this — it fights the expand/collapse toggle.)
+
+### Fixed
+- **The app no longer freezes while the notes assistant streams a reply.** Fast models (small or
+  thinking models especially) could emit tokens quicker than the reply strip repainted, starving
+  the UI thread for the whole response. Streaming now runs off the UI thread and repaints are
+  batched on a 100 ms clock, so generation speed no longer affects app responsiveness. Closing
+  or switching notes also cancels the in-flight request instead of leaving it generating
+  invisibly.
+
 Multiple agents, one window. Each tab is an independent agent with its own conversation,
 project folder, model, and settings — and the config file stops being "the current settings"
 and becomes "the defaults a new agent starts on."

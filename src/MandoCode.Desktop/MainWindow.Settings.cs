@@ -69,6 +69,15 @@ public sealed partial class MainWindow
         }
     }
 
+    /// <summary>Runs the guided /setup wizard in the active agent's chat — the same flow that
+    /// fires on first launch. Routed through SubmitAsync so it gets the standard command echo
+    /// and the is-processing guard.</summary>
+    private void RunSetupWizard_Click(object sender, RoutedEventArgs e)
+    {
+        SwitchPage("chat");
+        _ = Task.Run(() => _controller.SubmitAsync("/setup"));
+    }
+
     private void SettingsTabs_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
     {
         var s = sender.SelectedItem;

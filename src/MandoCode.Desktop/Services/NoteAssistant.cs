@@ -196,7 +196,10 @@ public static class NoteAssistant
         // Low temperature: this rewrites the user's own words, so faithful beats inventive.
         var settings = new OllamaPromptExecutionSettings { Temperature = 0.3f };
 
-        await foreach (var chunk in chat.GetStreamingChatMessageContentsAsync(history, settings, kernel, ct))
+        // ConfigureAwait(false): per-chunk continuations must not hop through the caller's UI
+        // dispatcher — a small model can stream hundreds of chunks a second.
+        await foreach (var chunk in chat.GetStreamingChatMessageContentsAsync(history, settings, kernel, ct)
+                           .ConfigureAwait(false))
         {
             if (ct.IsCancellationRequested) return;
             if (!string.IsNullOrEmpty(chunk.Content)) onDelta(chunk.Content);

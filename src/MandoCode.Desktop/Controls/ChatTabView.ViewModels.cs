@@ -50,6 +50,8 @@ public sealed class ExplorerItem : System.ComponentModel.INotifyPropertyChanged
 
     public string TagTooltip => $"Tag in prompt \u2014 inserts {Token}";
 
+    public string OpenTooltip => IsDirectory ? "Open in File Explorer" : "Open in its default app";
+
     /// <summary>Files: this file has uncommitted changes. Folders: something inside does.
     /// Mutable + observable so rows already realized in the tree light up in place when a
     /// git refresh lands (rebuilding the tree would lose expansion state).</summary>

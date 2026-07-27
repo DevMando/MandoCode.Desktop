@@ -174,7 +174,12 @@ public sealed partial class ChatController
             var options = new List<ApprovalOption>();
             if (cliInstalled) options.Add(new("Start Ollama now", ApprovalOptionKind.Proceed));
             options.Add(new("Change endpoint URL", ApprovalOptionKind.Proceed));
-            if (!cliInstalled) options.Add(new("Open the Ollama download page", ApprovalOptionKind.Proceed));
+            if (!cliInstalled)
+            {
+                if (OllamaSetupHelper.GetOsInstallCommand() != null)
+                    options.Add(new("Install Ollama for me", ApprovalOptionKind.Proceed));
+                options.Add(new("Open the Ollama download page", ApprovalOptionKind.Proceed));
+            }
             options.Add(new("Retry", ApprovalOptionKind.Proceed));
             options.Add(new("Cancel setup", ApprovalOptionKind.Redirect));
 
@@ -199,6 +204,32 @@ public sealed partial class ChatController
                     _transcript.Append(_html.Warn($"Couldn't start Ollama: {ex.Message}"));
                 }
                 finally { _busy.Reset(); }
+                continue;
+            }
+
+            if (choice == "Install Ollama for me")
+            {
+                // InstallOllamaAsync runs `winget install Ollama.Ollama` as a child process with
+                // its own console window — the user sees winget's progress and any UAC prompt.
+                _transcript.Append(_html.Info($"Running: {OllamaSetupHelper.GetOsInstallCommand()} — a console window will show the installer's progress."));
+                _busy.Start("Installing Ollama...");
+                int exit;
+                try { exit = await OllamaSetupHelper.InstallOllamaAsync(); }
+                catch (Exception ex) { exit = -1; _transcript.Append(_html.Warn(ex.Message)); }
+                finally { _busy.Reset(); }
+
+                if (exit == 0)
+                {
+                    _transcript.Append(_html.Success("✓ Installer finished."));
+                }
+                else
+                {
+                    _transcript.Append(_html.Warn(exit == -1
+                        ? "Couldn't launch the installer — winget may not be available on this machine."
+                        : $"Installer exited with code {exit} — the install may not have completed."));
+                    _transcript.Append(_html.Dim("Opening the download page as a fallback — finish the install there, then pick Retry."));
+                    OllamaSetupHelper.OpenInBrowser("https://ollama.com/download");
+                }
                 continue;
             }
 
@@ -227,15 +258,51 @@ public sealed partial class ChatController
         var models = fetched.Ok ? fetched.Models : new List<string>();
         if (models.Count == 0)
         {
-            _transcript.Append(_html.Warn("No models pulled yet."));
-            if (await WizardConfirmAsync("Pull a model now?", defaultYes: true))
+            // Curated starter picker (mirrors the CLI's PickWhenEmptyAsync): a newcomer with an
+            // empty daemon shouldn't need to know model tags. Sizes and hardware hints let them
+            // self-select; free-text entry remains for people who know what they want.
+            _transcript.Append(_html.Warn("No models are pulled yet — let's get you one."));
+            _transcript.Append(_html.Dim("Cloud models run on ollama.com's servers: more capable, no GPU needed, free with a sign-in. "
+                                       + "Local models run privately on your own hardware — bigger is smarter but needs more memory."));
+
+            var starter = await WizardSelectAsync("Pick a starter model to install:", new List<ApprovalOption>
             {
-                var tag = await WizardTextAsync(
+                new($"Cloud — {MandoCodeConfig.DefaultCloudModel}   (best quality, no GPU needed)", ApprovalOptionKind.Proceed),
+                new("Local — qwen2.5:1.5b   (~1 GB · fast on any laptop)", ApprovalOptionKind.Proceed),
+                new("Local — qwen3:4b   (~2.6 GB · balanced day-to-day)", ApprovalOptionKind.Proceed),
+                new("Local — qwen2.5-coder:7b   (~4.7 GB · code-focused, 6 GB+ VRAM)", ApprovalOptionKind.Proceed),
+                new("Local — qwen3:8b   (~5.2 GB · best local quality, 8 GB+ VRAM)", ApprovalOptionKind.Proceed),
+                new("Type a different model tag", ApprovalOptionKind.Proceed),
+                new("Skip — I'll pull one myself", ApprovalOptionKind.Redirect),
+            });
+
+            string? tag = null;
+            if (starter.StartsWith("Cloud"))
+            {
+                tag = MandoCodeConfig.DefaultCloudModel;
+                var auth = await OllamaSetupHelper.CheckCloudSignInAsync(_config.OllamaEndpoint);
+                if (auth != OllamaSetupHelper.CloudAuthState.SignedIn)
+                {
+                    _transcript.Append(_html.Info("Cloud models need a free ollama.com account."));
+                    if (await WizardConfirmAsync("Sign in to Ollama cloud now?", defaultYes: true))
+                        await RunCloudSigninWalkthroughAsync();
+                }
+            }
+            else if (starter.StartsWith("Local — "))
+            {
+                tag = starter["Local — ".Length..].Split(' ')[0];
+            }
+            else if (starter == "Type a different model tag")
+            {
+                var typed = await WizardTextAsync(
                     "Model tag to pull:", "e.g. qwen2.5-coder:7b",
                     t => string.IsNullOrWhiteSpace(t) ? "Enter a model tag" : null);
-                if (tag != null && await PullModelWithProgressAsync(tag.Trim()))
-                    models = new List<string> { tag.Trim() };
+                tag = typed?.Trim();
             }
+
+            if (tag != null && await PullModelWithProgressAsync(tag))
+                models = new List<string> { tag };
+
             if (models.Count == 0)
             {
                 _transcript.Append(_html.Dim("Setup incomplete — pull a model (ollama pull <tag>) and run /setup again."));
