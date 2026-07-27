@@ -88,6 +88,7 @@ public sealed partial class MainWindow : Window
         _archive = services.GetRequiredService<SessionArchiveStore>();
         _skillCoordinator = services.GetRequiredService<SkillCoordinator>();
         _configs = services.GetRequiredService<ConfigCoordinator>();
+        _music = services.GetRequiredService<MandoCode.Services.MusicPlayerService>();
         // Changed can fire on a background thread (a capture during a model switch).
         _snapshotStore.Changed += () => OnUi(OnSnapshotsChanged);
         _archive.Changed += () => OnUi(OnArchiveChanged);
@@ -164,7 +165,8 @@ public sealed partial class MainWindow : Window
         foreach (var tab in _tabs) tab.View.Shutdown();
         _terminal?.ShutDown();   // kill any ConPTY shells so no processes leak
 
-        try { App.Services.GetRequiredService<MandoCode.Services.MusicPlayerService>().Dispose(); }
+        _musicPollTimer?.Stop();   // or its ticks keep touching a disposed service and closed XAML
+        try { _music.Dispose(); }
         catch { /* nothing playing, or already disposed */ }
     }
 

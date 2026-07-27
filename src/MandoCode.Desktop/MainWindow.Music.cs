@@ -1,11 +1,7 @@
-using System.Diagnostics;
-using System.Reflection;
-using MandoCode.Models;
 using MandoCode.Services;
-using Microsoft.Extensions.DependencyInjection;
+using MandoCode.Desktop.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
 
 namespace MandoCode.Desktop;
 
@@ -13,81 +9,183 @@ public sealed partial class MainWindow
 {
     // ============================================================
     // Music flyout — UI over the harness's app-wide MusicPlayerService (one audio device).
-    // The service has no change events and tracks LOOP rather than auto-advance, so state
-    // only moves when a button here (or a /music command) moves it: refreshing on flyout
-    // open and after each action is complete coverage, no polling.
+    // The service changes state on its own — auto-advance swaps CurrentTrack when a song
+    // ends, and a device failure stops playback with only AudioError to show for it — but
+    // exposes no events, so a 2-second poll watches for movement (WireMusicPolling).
+    // Playlist add/remove (directory junctions) lives in Services/MusicPlaylists.
     // ============================================================
 
-    private MusicPlayerService Music => App.Services.GetRequiredService<MusicPlayerService>();
+    private readonly MusicPlayerService _music;
 
-    /// <summary>Guards the genre combo's SelectionChanged while RefreshMusicUi repopulates it.</summary>
+    /// <summary>Guards the playlist combo's SelectionChanged while RefreshMusicUi repopulates it.</summary>
     private bool _loadingMusicUi;
-
-    /// <summary>Keeps the poll timer alive: a DispatcherQueueTimer referenced only by a local
-    /// is garbage-collected mid-flight and simply stops ticking — the icon then freezes in
-    /// whatever state it was in until something else forces a refresh.</summary>
-    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _musicPollTimer;
-
-    /// <summary>The service has no change events, and playback can be driven from outside this
-    /// flyout (/music chat commands). A 2-second property poll keeps the rail icon truthful; the
-    /// tick is two boolean reads, so it just runs for the window's lifetime. Called once from
-    /// the constructor.</summary>
-    private void WireMusicPolling()
-    {
-        _musicPollTimer = _dispatcher.CreateTimer();
-        _musicPollTimer.Interval = TimeSpan.FromSeconds(2);
-        _musicPollTimer.Tick += (_, _) => UpdateMusicRailIcon(Music);
-        _musicPollTimer.Start();
-    }
 
     private void MusicFlyout_Opening(object sender, object e) => RefreshMusicUi();
 
+    /// <summary>Full rebuild: playlist list, selection, volume, empty state. Only for flyout
+    /// open and playlist add/remove — repopulating ItemsSource on every transport click would
+    /// churn selection (and close the dropdown if it's expanded under the user).</summary>
     private void RefreshMusicUi()
     {
-        var music = Music;
         _loadingMusicUi = true;
         try
         {
-            var genres = music.GetAvailableGenres();
+            var genres = _music.GetAvailableGenres();
             MusicGenreCombo.ItemsSource = genres;
-            MusicGenreCombo.SelectedItem = genres.FirstOrDefault(g =>
-                string.Equals(g, music.Genre, StringComparison.OrdinalIgnoreCase)) ?? genres.FirstOrDefault();
+            MusicGenreCombo.SelectedItem = genres.FirstOrDefault(g => MusicPlaylists.SameName(g, _music.Genre))
+                                           ?? genres.FirstOrDefault();
 
             var hasTracks = genres.Count > 0;
-            MusicPlayPauseButton.IsEnabled = hasTracks;
-            MusicNextButton.IsEnabled = hasTracks && music.IsPlaying;
-            MusicStopButton.IsEnabled = music.IsPlaying || music.IsPaused;
             MusicGenreCombo.IsEnabled = hasTracks;
+            MusicPlayPauseButton.IsEnabled = hasTracks;
+            MusicVolumeSlider.Value = _music.Volume * 100;
 
-            MusicVolumeSlider.Value = Math.Clamp(music.Volume * 100, 0, 100);
+            MusicHintText.Visibility = Visibility.Collapsed;
+            if (!hasTracks)
+                ShowMusicHint($"No MP3s found. A playlist is just a folder of MP3s under {_music.UserMusicPath} (e.g. \\lofi).");
 
-            MusicTrackText.Text = music.CurrentTrack is { } track
-                ? (music.IsPaused ? $"Paused — {track.Name}" : $"{track.Name}  ·  {track.Genre}")
-                : "Nothing playing";
-
-            // Play glyph when stopped/paused, pause glyph while playing.
-            MusicPlayPauseIcon.Glyph = music.IsPlaying && !music.IsPaused ? "" : "";
-
-            var hint = music.AudioError
-                       ?? (hasTracks ? null : $"No MP3s found. A playlist is just a folder of MP3s under {music.UserMusicPath} (e.g. \\lofi).");
-            MusicHintText.Text = hint ?? "";
-            MusicHintText.Visibility = hint == null ? Visibility.Collapsed : Visibility.Visible;
-
-            UpdateMusicRailIcon(music);
             UpdateRemovePlaylistButton();
         }
         finally
         {
             _loadingMusicUi = false;
         }
+        RefreshTransportState();
+    }
+
+    /// <summary>The parts that move during playback: track line, button states, play/pause
+    /// glyph, rail icon — and any AudioError, surfaced the moment the poll sees it.</summary>
+    private void RefreshTransportState()
+    {
+        MusicNextButton.IsEnabled = _music.IsPlaying;
+        MusicStopButton.IsEnabled = _music.IsPlaying || _music.IsPaused;
+
+        // IsPlaying and IsPaused are mutually exclusive in the service — paused means
+        // IsPlaying == false — so IsPlaying alone answers "is audio actually flowing".
+        MusicTrackText.Text = _music.CurrentTrack is { } track
+            ? (_music.IsPaused ? $"Paused — {track.Name}" : $"{track.Name}  ·  {track.Genre}")
+            : "Nothing playing";
+        MusicPlayPauseIcon.Glyph = _music.IsPlaying ? "" : "";   // pause : play
+
+        if (_music.AudioError is { } error) ShowMusicHint(error);
+
+        UpdateMusicRailIcon();
     }
 
     // ============================================================
-    // User playlists — a playlist is a directory JUNCTION under ~\.mandocode\music pointing at
-    // any folder of MP3s the user picked. The harness's folder-scan discovery walks straight
-    // through junctions, so this needs no engine change and the CLI sees the same playlists.
-    // Junctions (not symlinks) because they need no admin rights; the tradeoff is local
-    // volumes only — no UNC targets.
+    // Rail icon + poll
+    // ============================================================
+
+    private string? _musicTooltip;
+
+    /// <summary>The rail icon carries the state worth showing while the flyout is closed: an
+    /// animated gold equalizer while music plays (the glyph hides behind it), and a tooltip
+    /// naming the track — hover answers "what's this song" without opening anything. Runs on
+    /// the poll, so both only move on actual change: Begin() on a running storyboard visibly
+    /// restarts the bounce, and rewriting an open tooltip dismisses it.</summary>
+    private void UpdateMusicRailIcon()
+    {
+        var audible = _music.IsPlaying;
+        if (audible != (MusicEqPanel.Visibility == Visibility.Visible))
+        {
+            NavMusicIcon.Visibility = audible ? Visibility.Collapsed : Visibility.Visible;
+            MusicEqPanel.Visibility = audible ? Visibility.Visible : Visibility.Collapsed;
+            if (audible) MusicEqStoryboard.Begin();
+            else MusicEqStoryboard.Stop();
+        }
+
+        var tooltip = _music.CurrentTrack is { } track
+            ? (audible ? $"Playing — {track.Name}" : $"Paused — {track.Name}")
+            : "Music — background playlists while you work";
+        if (tooltip != _musicTooltip)
+        {
+            _musicTooltip = tooltip;
+            ToolTipService.SetToolTip(NavMusic, tooltip);
+        }
+    }
+
+    /// <summary>Kept in a field: a DispatcherQueueTimer referenced only by a local is
+    /// garbage-collected mid-flight and simply stops ticking. Stopped in MainWindow_Closed.</summary>
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _musicPollTimer;
+    private string? _musicStateKey;
+
+    /// <summary>Watches for state the service changes on its own (auto-advance, device
+    /// failure) or that /music chat commands change from outside this flyout. Each tick
+    /// compares a small state key and touches the UI only when it moved — the open flyout
+    /// gets a transport refresh (so the track line follows an auto-advance), the closed one
+    /// just the rail icon. Called once from the constructor.</summary>
+    private void WireMusicPolling()
+    {
+        _musicPollTimer = _dispatcher.CreateTimer();
+        _musicPollTimer.Interval = TimeSpan.FromSeconds(2);
+        _musicPollTimer.Tick += (_, _) =>
+        {
+            var key = $"{_music.IsPlaying}|{_music.IsPaused}|{_music.CurrentTrack?.Name}|{_music.AudioError}";
+            if (key == _musicStateKey) return;
+            _musicStateKey = key;
+
+            if (MusicFlyout.IsOpen) RefreshTransportState();
+            else UpdateMusicRailIcon();
+        };
+        _musicPollTimer.Start();
+
+        UpdateMusicRailIcon();   // seed the icon and tooltip (the tooltip is only set here, not in XAML)
+    }
+
+    // ============================================================
+    // Transport + playlist selection
+    // ============================================================
+
+    private void MusicPlayPause_Click(object sender, RoutedEventArgs e)
+    {
+        if (_music.IsPlaying || _music.IsPaused) _music.TogglePause();
+        else _music.Play(MusicGenreCombo.SelectedItem as string);
+        RefreshTransportState();
+    }
+
+    private void MusicNext_Click(object sender, RoutedEventArgs e)
+    {
+        _music.NextTrack();
+        RefreshTransportState();
+    }
+
+    private void MusicStop_Click(object sender, RoutedEventArgs e)
+    {
+        _music.Stop();
+        RefreshTransportState();
+    }
+
+    private void MusicGenre_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loadingMusicUi || MusicGenreCombo.SelectedItem is not string genre) return;
+
+        UpdateRemovePlaylistButton();
+
+        // Record the pick through the config owner even while idle. The flyout closes (and
+        // this combo unloads) around Add-playlist's folder picker, and RefreshMusicUi
+        // re-selects from music.Genre — without this the dropdown snaps back to the previous
+        // playlist on reopen. Saving also makes the pick survive a restart, like the volume
+        // already does via the service's own SavePreferences.
+        _configs.Defaults.Music.Genre = genre;
+        _configs.SaveDefaults();
+
+        // Switching playlist while playing jumps to it immediately; while idle it just
+        // becomes what the play button will start.
+        if (_music.IsPlaying || _music.IsPaused)
+        {
+            _music.Play(genre);
+            RefreshTransportState();
+        }
+    }
+
+    private void MusicVolume_ValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+    {
+        if (_loadingMusicUi) return;
+        _music.SetVolume((float)(e.NewValue / 100.0));
+    }
+
+    // ============================================================
+    // Playlist add / remove — thin UI over Services/MusicPlaylists
     // ============================================================
 
     private async void MusicAddPlaylist_Click(object sender, RoutedEventArgs e)
@@ -100,37 +198,18 @@ public sealed partial class MainWindow
         var folder = await picker.PickSingleFolderAsync();
         if (folder == null) return;
 
-        var music = Music;
-
-        // Re-adding a folder that's already a playlist selects the existing one — matched by
-        // where the junction actually points, not by name, so no "beats 2" twins.
-        if (FindExistingPlaylistFor(music.UserMusicPath, folder.Path) is { } existing)
+        // Re-adding a folder that's already a playlist selects the existing one.
+        if (MusicPlaylists.FindExistingFor(_music.UserMusicPath, folder.Path) is { } existing)
         {
             SelectPlaylist(existing);
             ShowMusicHint($"“{existing}” already points at that folder — selected it.");
             return;
         }
 
-        string link;
+        var name = MusicPlaylists.MakeUniqueName(_music.UserMusicPath, folder.Path);
         try
         {
-            Directory.CreateDirectory(music.UserMusicPath);
-            link = Path.Combine(music.UserMusicPath, MakeUniquePlaylistName(music.UserMusicPath, folder.Path));
-
-            // cmd's mklink /J is the only junction API that needs neither admin rights nor P/Invoke.
-            var psi = new ProcessStartInfo("cmd.exe", $"/c mklink /J \"{link}\" \"{folder.Path}\"")
-            {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-            };
-            using var proc = Process.Start(psi);
-            if (proc == null) throw new InvalidOperationException("Couldn't start cmd.exe.");
-            await proc.WaitForExitAsync();
-            if (proc.ExitCode != 0)
-                throw new InvalidOperationException((await proc.StandardError.ReadToEndAsync()).Trim() is { Length: > 0 } err
-                    ? err : $"mklink exited with code {proc.ExitCode}.");
+            await MusicPlaylists.CreateAsync(_music.UserMusicPath, name, folder.Path);
         }
         catch (Exception ex)
         {
@@ -138,33 +217,38 @@ public sealed partial class MainWindow
             return;
         }
 
-        var rediscovered = TryRediscoverTracks(music);
+        // Off the UI thread: the rescan walks every playlist folder, including junctions
+        // into arbitrarily large directories.
+        var rediscovered = await Task.Run(() => MusicPlaylists.TryRediscover(_music));
         RefreshMusicUi();
-        SelectPlaylist(Path.GetFileName(link));
+        SelectPlaylist(name);
 
-        var mp3Count = Directory.EnumerateFiles(folder.Path, "*.mp3").Count();
-        ShowMusicHint(!rediscovered
-            ? "Playlist added — restart MandoCode to see it."
-            : mp3Count == 0
+        string message;
+        if (!rediscovered)
+        {
+            message = "Playlist added — restart MandoCode to see it.";
+        }
+        else
+        {
+            var tracks = _music.GetAvailableTracks(name).Count;
+            message = tracks == 0
                 ? "Playlist added, but no MP3s sit at the top level of that folder."
-                : $"Added “{Path.GetFileName(link)}” ({mp3Count} track{(mp3Count == 1 ? "" : "s")}).");
+                : $"Added “{name}” ({tracks} track{(tracks == 1 ? "" : "s")}).";
+        }
+        ShowMusicHint(message);
     }
 
-    private void MusicRemovePlaylist_Click(object sender, RoutedEventArgs e)
+    private async void MusicRemovePlaylist_Click(object sender, RoutedEventArgs e)
     {
         if (MusicGenreCombo.SelectedItem is not string name) return;
-        var music = Music;
-        var link = Path.Combine(music.UserMusicPath, name);
-        if (!IsJunction(link)) return;   // only ever delete pointers, never a real folder of files
+        // Pointers only, never a real folder of files — same gate as the button's visibility.
+        if (!MusicPlaylists.IsJunction(Path.Combine(_music.UserMusicPath, name))) return;
 
         try
         {
-            if (string.Equals(music.Genre, name, StringComparison.OrdinalIgnoreCase)
-                && (music.IsPlaying || music.IsPaused))
-                music.Stop();
-            // recursive:false on a reparse point removes the junction itself; the target
-            // folder and its MP3s are untouched.
-            Directory.Delete(link, recursive: false);
+            if (MusicPlaylists.SameName(_music.Genre, name) && (_music.IsPlaying || _music.IsPaused))
+                _music.Stop();
+            MusicPlaylists.Remove(_music.UserMusicPath, name);
         }
         catch (Exception ex)
         {
@@ -172,181 +256,32 @@ public sealed partial class MainWindow
             return;
         }
 
-        var rediscovered = TryRediscoverTracks(music);
+        var rediscovered = await Task.Run(() => MusicPlaylists.TryRediscover(_music));
         RefreshMusicUi();
         ShowMusicHint(rediscovered ? $"Removed “{name}” — its folder is untouched."
                                    : "Playlist removed — restart MandoCode to update the list.");
     }
 
-    /// <summary>Remove only offers itself for junction-backed playlists. Embedded genres have no
-    /// folder, and a real folder of files is not ours to delete from a flyout.</summary>
+    /// <summary>Remove only offers itself for junction-backed playlists. Embedded genres have
+    /// no folder, and a real folder of files is not ours to delete from a flyout.</summary>
     private void UpdateRemovePlaylistButton()
     {
         var visible = MusicGenreCombo.SelectedItem is string name
-                      && IsJunction(Path.Combine(Music.UserMusicPath, name));
+                      && MusicPlaylists.IsJunction(Path.Combine(_music.UserMusicPath, name));
         MusicRemovePlaylistButton.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    /// <summary>Selects a playlist in the combo by name — case-insensitively, since discovery
-    /// may re-case folder names. Selection IS "loading": the change handler switches live
-    /// playback to it, or arms it as what the play button will start.</summary>
+    /// <summary>Selects a playlist in the combo by name. Selection IS "loading": the change
+    /// handler records it as the service's genre and switches live playback to it.</summary>
     private void SelectPlaylist(string name)
     {
-        var match = MusicGenreCombo.Items.OfType<string>()
-            .FirstOrDefault(g => string.Equals(g, name, StringComparison.OrdinalIgnoreCase));
+        var match = MusicGenreCombo.Items.OfType<string>().FirstOrDefault(g => MusicPlaylists.SameName(g, name));
         if (match != null) MusicGenreCombo.SelectedItem = match;
-    }
-
-    /// <summary>Finds a junction under the music root already pointing at <paramref name="targetFolder"/>,
-    /// comparing resolved paths rather than playlist names. mklink stores targets in NT form
-    /// (\??\C:\…), so prefixes are stripped before comparing.</summary>
-    private static string? FindExistingPlaylistFor(string musicRoot, string targetFolder)
-    {
-        try
-        {
-            if (!Directory.Exists(musicRoot)) return null;
-            var target = NormalizePath(targetFolder);
-            foreach (var dir in Directory.EnumerateDirectories(musicRoot))
-            {
-                if (!IsJunction(dir)) continue;
-                var linkTarget = new DirectoryInfo(dir).LinkTarget;
-                if (linkTarget != null && string.Equals(NormalizePath(linkTarget), target, StringComparison.OrdinalIgnoreCase))
-                    return Path.GetFileName(dir);
-            }
-        }
-        catch { /* unreadable entries just mean no match */ }
-        return null;
-    }
-
-    private static string NormalizePath(string path)
-    {
-        if (path.StartsWith(@"\??\", StringComparison.Ordinal)) path = path[4..];
-        if (path.StartsWith(@"\\?\", StringComparison.Ordinal)) path = path[4..];
-        return Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
-    }
-
-    private static bool IsJunction(string path)
-    {
-        try
-        {
-            return Directory.Exists(path)
-                   && (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
-        }
-        catch { return false; }
-    }
-
-    /// <summary>Playlist name from the target folder's own name, uniquified against whatever is
-    /// already under the music root ("beats", "beats 2", …).</summary>
-    private static string MakeUniquePlaylistName(string musicRoot, string targetFolder)
-    {
-        var baseName = Path.GetFileName(Path.TrimEndingDirectorySeparator(targetFolder));
-        foreach (var c in Path.GetInvalidFileNameChars()) baseName = baseName.Replace(c, '_');
-        if (baseName.Length == 0) baseName = "playlist";
-
-        var name = baseName;
-        for (var n = 2; Directory.Exists(Path.Combine(musicRoot, name)); n++)
-            name = $"{baseName} {n}";
-        return name;
-    }
-
-    /// <summary>The harness discovers tracks once, in its constructor, and exposes no re-scan.
-    /// Until the engine grows a public rediscover API (backlogged for the next pin roll), invoke
-    /// the private scan by reflection — with an honest "restart to see it" fallback if a future
-    /// harness renames it.</summary>
-    private static bool TryRediscoverTracks(MusicPlayerService music)
-    {
-        try
-        {
-            var discover = typeof(MusicPlayerService)
-                .GetMethod("DiscoverTracks", BindingFlags.Instance | BindingFlags.NonPublic);
-            if (discover == null) return false;
-            discover.Invoke(music, null);
-            return true;
-        }
-        catch { return false; }
     }
 
     private void ShowMusicHint(string text)
     {
         MusicHintText.Text = text;
         MusicHintText.Visibility = Visibility.Visible;
-    }
-
-    private bool _eqAnimating;
-    private string? _musicTooltip;
-
-    /// <summary>The rail icon carries the state worth showing while the flyout is closed: an
-    /// animated gold equalizer while music plays (the glyph hides behind it), and a tooltip
-    /// naming the track — hover answers "what's this song" without opening anything.
-    /// Runs on a 2s poll, so both the storyboard and the tooltip only move on actual state
-    /// change — Begin() on a running storyboard visibly restarts the bounce.</summary>
-    private void UpdateMusicRailIcon(MusicPlayerService music)
-    {
-        var audible = music.IsPlaying && !music.IsPaused;
-        if (audible != _eqAnimating)
-        {
-            _eqAnimating = audible;
-            NavMusicIcon.Visibility = audible ? Visibility.Collapsed : Visibility.Visible;
-            MusicEqPanel.Visibility = audible ? Visibility.Visible : Visibility.Collapsed;
-            if (audible) MusicEqStoryboard.Begin();
-            else MusicEqStoryboard.Stop();
-        }
-
-        var tooltip = music.CurrentTrack is { } track
-            ? (audible ? $"Playing — {track.Name}" : $"Paused — {track.Name}")
-            : "Music — background playlists while you work";
-        if (tooltip != _musicTooltip)
-        {
-            _musicTooltip = tooltip;
-            ToolTipService.SetToolTip(NavMusic, tooltip);
-        }
-    }
-
-    private void MusicPlayPause_Click(object sender, RoutedEventArgs e)
-    {
-        var music = Music;
-        if (music.IsPlaying || music.IsPaused) music.TogglePause();
-        else music.Play(MusicGenreCombo.SelectedItem as string);
-        RefreshMusicUi();
-    }
-
-    private void MusicNext_Click(object sender, RoutedEventArgs e)
-    {
-        Music.NextTrack();
-        RefreshMusicUi();
-    }
-
-    private void MusicStop_Click(object sender, RoutedEventArgs e)
-    {
-        Music.Stop();
-        RefreshMusicUi();
-    }
-
-    private void MusicGenre_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_loadingMusicUi || MusicGenreCombo.SelectedItem is not string genre) return;
-
-        UpdateRemovePlaylistButton();
-
-        // Record the pick as the service's current genre even while idle. The flyout closes
-        // (and this combo unloads) around Add-playlist's folder picker, and the next
-        // RefreshMusicUi re-selects from music.Genre — without this line the dropdown snaps
-        // back to the previous playlist on reopen.
-        App.Services.GetRequiredService<MandoCodeConfig>().Music.Genre = genre;
-
-        // Switching playlist while playing jumps to it immediately; while idle it just becomes
-        // what the play button will start.
-        var music = Music;
-        if (music.IsPlaying || music.IsPaused)
-        {
-            music.Play(genre);
-            RefreshMusicUi();
-        }
-    }
-
-    private void MusicVolume_ValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
-    {
-        if (_loadingMusicUi) return;
-        Music.SetVolume((float)(e.NewValue / 100.0));
     }
 }
