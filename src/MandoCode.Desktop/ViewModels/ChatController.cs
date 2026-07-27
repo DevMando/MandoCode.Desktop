@@ -767,7 +767,7 @@ public sealed partial class ChatController
                 PlanProgressChanged?.Invoke(progressEvent.CurrentStep, progressEvent.TotalSteps, true);
                 if (!string.IsNullOrEmpty(progressEvent.Message))
                 {
-                    _transcript.Append(_html.AssistantCard(progressEvent.Message));
+                    _transcript.Append(_html.AssistantCard(progressEvent.Message, _config.AgentName));
                     ConversationLogger?.Invoke("a", progressEvent.Message!);
                 }
                 _transcript.Append(_html.Success($"Step {progressEvent.CurrentStep} completed."));

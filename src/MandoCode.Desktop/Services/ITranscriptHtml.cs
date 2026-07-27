@@ -8,7 +8,7 @@ namespace MandoCode.Desktop.Services;
 /// </summary>
 public interface ITranscriptHtml
 {
-    string AssistantCard(string markdown);
+    string AssistantCard(string markdown, string? speaker = null);
     string Warn(string text);
     string Error(string text);
     string Dim(string text);

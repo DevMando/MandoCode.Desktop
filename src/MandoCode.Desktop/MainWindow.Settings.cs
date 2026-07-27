@@ -46,6 +46,7 @@ public sealed partial class MainWindow
             S_TemperatureLabel.Text = cfg.Temperature.ToString("0.##");
             S_MaxTokens.Value = cfg.MaxTokens;
             S_Streaming.SelectedItem = cfg.ResponseStreaming;
+            S_AgentCallsigns.IsOn = AgentCallsigns.Enabled;   // app-wide, not from the agent's config
             S_TaskPlanning.IsOn = cfg.EnableTaskPlanning;
             S_DiffApprovals.IsOn = cfg.EnableDiffApprovals;
             S_AutoContinue.IsOn = cfg.EnableAutoContinuation;
@@ -67,6 +68,15 @@ public sealed partial class MainWindow
         {
             _loadingSettings = false;
         }
+    }
+
+    /// <summary>App-wide naming style for new agents — applies immediately (like Appearance),
+    /// not through the agent config / Make Default flow the rest of the page uses.</summary>
+    private void AgentCallsigns_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_loadingSettings) return;
+        AgentCallsigns.Enabled = S_AgentCallsigns.IsOn;
+        SavePanelState();
     }
 
     /// <summary>Runs the guided /setup wizard in the active agent's chat — the same flow that

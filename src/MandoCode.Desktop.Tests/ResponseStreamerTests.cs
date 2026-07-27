@@ -19,7 +19,7 @@ public sealed class ResponseStreamerTests
     // Tags each fragment type so a test can assert which builder method produced a transcript block.
     private sealed class TagHtml : ITranscriptHtml
     {
-        public string AssistantCard(string markdown) => $"CARD:{markdown}";
+        public string AssistantCard(string markdown, string? speaker = null) => $"CARD:{markdown}";
         public string Warn(string text) => $"WARN:{text}";
         public string Error(string text) => $"ERR:{text}";
         public string Dim(string text) => $"DIM:{text}";

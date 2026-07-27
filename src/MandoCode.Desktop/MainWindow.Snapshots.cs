@@ -141,7 +141,8 @@ public sealed partial class MainWindow
     private void SavePanelState() => PanelState.Save(new PanelStateShape(
         _collapsedSnapshotGroups.ToList(), _collapsedHistoryGroups.ToList(),
         _snapshotsSeenAt, _historySeenAt,
-        _collapsedNoteGroups.ToList(), _lastNotePath, _noteModel));
+        _collapsedNoteGroups.ToList(), _lastNotePath, _noteModel,
+        AgentCallsigns.Enabled));
 
     // The group object is kept in sync (not just the set) so that when the ListView recycles a
     // container on scroll, the OneTime IsExpanded x:Bind re-reads the correct, current state.

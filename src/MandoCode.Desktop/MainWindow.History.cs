@@ -554,6 +554,12 @@ public sealed partial class MainWindow
         entry.View.Session.Title = name;
         entry.Label.Text = name;
         RefreshTabStrip();
+
+        // The system prompt was baked at session start, so a live conversation learns the new
+        // name the way it learns other outside-the-conversation facts; the next fresh session
+        // bakes it properly via the Title setter's Config.AgentName stamp.
+        entry.View.Session.Controller.NoteWorkspaceEvent(
+            $"The user renamed you — your name is now “{name}”.");
     }
 
     /// <summary>Selecting an agent also returns you to the chat page — the Settings you were

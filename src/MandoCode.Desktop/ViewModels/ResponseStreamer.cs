@@ -77,7 +77,7 @@ public sealed class ResponseStreamer
                     if (segment.Length > 0)
                     {
                         segments.Add(segment);
-                        _transcript.Append(_html.AssistantCard(segment));
+                        _transcript.Append(_html.AssistantCard(segment, _config.AgentName));
                         ConversationLogger?.Invoke("a", segment);
                     }
                 } while (await enumerator.MoveNextAsync());

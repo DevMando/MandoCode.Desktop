@@ -1032,6 +1032,12 @@
                                         HorizontalAlignment="Left" Padding="0,4,0,8">
                                 <TextBlock Text="Behavior" FontSize="13" FontWeight="SemiBold"
                                            Foreground="{StaticResource MandoAccentBrush}"/>
+                                <!-- App-wide (naming happens in SessionManager before any agent exists), unlike
+                                     the rest of this tab — the header says so. Applies to agents opened after
+                                     the change; existing tabs keep their names. -->
+                                <ToggleSwitch x:Name="S_AgentCallsigns" Header="Callsign names for new agents — app-wide"
+                                              Toggled="AgentCallsigns_Toggled"
+                                              ToolTipService.ToolTip="Off: new agents are Agent 1, Agent 2, … On: each new agent draws a random callsign — Morphy, Kernel, Cloud — from a 500-name deck that doesn't repeat until it runs dry. Renaming a tab always works either way."/>
                                 <ToggleSwitch x:Name="S_TaskPlanning" Header="Task planning (propose_plan for multi-step requests)"
                                               Tag="taskPlanning" Toggled="Setting_Toggled"
                                               ToolTipService.ToolTip="For multi-step requests the model first proposes a numbered plan you approve before any work starts. More predictable on big tasks; an extra step on small ones."/>

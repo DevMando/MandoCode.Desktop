@@ -51,8 +51,11 @@ public sealed class TranscriptHtmlBuilder : ITranscriptHtml
     public string UserEcho(string text) =>
         $"<div class=\"user-echo\"><span class=\"ue-sigil\">&gt;</span> {E(text)}</div>";
 
-    public string AssistantCard(string markdown) =>
-        $"<div class=\"assistant\"><div class=\"assistant-label\">MandoCode</div><div class=\"md\">{FromMarkdown(markdown)}</div></div>";
+    /// <summary>Null speaker keeps the classic MandoCode label — used by surfaces with no
+    /// agent (the appearance preview). Per-agent callers pass the tab's name so the card
+    /// agrees with what the system prompt told the model it's called.</summary>
+    public string AssistantCard(string markdown, string? speaker = null) =>
+        $"<div class=\"assistant\"><div class=\"assistant-label\">{E(speaker ?? "MandoCode")}</div><div class=\"md\">{FromMarkdown(markdown)}</div></div>";
 
     public string Info(string text) => $"<div class=\"line info\">{E(text)}</div>";
     public string Success(string text) => $"<div class=\"line success\">{E(text)}</div>";
