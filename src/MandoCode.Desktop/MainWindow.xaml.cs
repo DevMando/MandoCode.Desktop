@@ -104,6 +104,7 @@ public sealed partial class MainWindow : Window
         // The editor writes note content; the panel only lists. One store, handed over once.
         NoteEditor.Store = _notes;
         WireNotesPanel();
+        WireMusicPolling();
 
         // The first agent. Its whole service graph — AIService, approvals, transcript, token
         // tracking — belongs to it alone, so opening a second tab can't disturb it.
