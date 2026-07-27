@@ -22,16 +22,21 @@ public sealed partial class MainWindow
     /// <summary>Guards the genre combo's SelectionChanged while RefreshMusicUi repopulates it.</summary>
     private bool _loadingMusicUi;
 
+    /// <summary>Keeps the poll timer alive: a DispatcherQueueTimer referenced only by a local
+    /// is garbage-collected mid-flight and simply stops ticking — the icon then freezes in
+    /// whatever state it was in until something else forces a refresh.</summary>
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _musicPollTimer;
+
     /// <summary>The service has no change events, and playback can be driven from outside this
     /// flyout (/music chat commands). A 2-second property poll keeps the rail icon truthful; the
     /// tick is two boolean reads, so it just runs for the window's lifetime. Called once from
     /// the constructor.</summary>
     private void WireMusicPolling()
     {
-        var timer = _dispatcher.CreateTimer();
-        timer.Interval = TimeSpan.FromSeconds(2);
-        timer.Tick += (_, _) => UpdateMusicRailIcon(Music);
-        timer.Start();
+        _musicPollTimer = _dispatcher.CreateTimer();
+        _musicPollTimer.Interval = TimeSpan.FromSeconds(2);
+        _musicPollTimer.Tick += (_, _) => UpdateMusicRailIcon(Music);
+        _musicPollTimer.Start();
     }
 
     private void MusicFlyout_Opening(object sender, object e) => RefreshMusicUi();
