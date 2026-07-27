@@ -7,6 +7,13 @@ recorded by the `MandoCode` submodule.
 ## [Unreleased]
 
 ### Added
+- **Music player.** A music icon on the left rail opens a compact player: play/pause, next,
+  stop, volume, and a playlist picker. While music plays the rail icon becomes an animated
+  gold equalizer, and hovering it names the current track. **Add playlist** points at any
+  folder of MP3s on a local disk (a junction under `~\.mandocode\music` — nothing is copied,
+  and the CLI sees the same playlists); **Remove** deletes only the pointer, never the files,
+  and only ever offers itself on playlists added this way. Tracks auto-advance through the
+  playlist (an engine fix that also benefits the CLI — see the MandoCode changelog).
 - **First-run guided setup.** A fresh install now walks through everything in the chat itself:
   reach Ollama (with a one-click winget install when it's missing), start the daemon, and pick a
   starter model from a curated list — cloud recommended, or local tiers with size and hardware

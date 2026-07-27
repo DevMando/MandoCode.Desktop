@@ -90,6 +90,101 @@
                     ToolTipService.ToolTip="Skills — reusable instructions the AI loads on demand">
                 <FontIcon x:Name="NavSkillsIcon" Glyph="&#xE7BE;" FontSize="16"/>
             </Button>
+            <!-- Global (one audio device, one app-wide MusicPlayerService): background playlists.
+                 A flyout rather than a page — music is a set-and-forget control, not a workspace.
+                 The icon turns gold while something is playing. -->
+            <!-- Tooltip is set in code (UpdateMusicRailIcon) — it live-updates to the track name. -->
+            <Button x:Name="NavMusic" Padding="10,8" Background="Transparent"
+                    BorderThickness="0" HorizontalAlignment="Stretch">
+                <Grid Width="16" Height="16">
+                    <FontIcon x:Name="NavMusicIcon" Glyph="&#xE8D6;" FontSize="16"/>
+                    <!-- Equalizer: three gold bars that bounce while music plays (the glyph hides).
+                         Scale animations are dependent (UI-thread) by necessity; three bars on one
+                         icon is negligible. Staggered durations so the bounce never looks locked. -->
+                    <StackPanel x:Name="MusicEqPanel" Orientation="Horizontal" Spacing="2"
+                                HorizontalAlignment="Center" VerticalAlignment="Center"
+                                Visibility="Collapsed">
+                        <StackPanel.Resources>
+                            <Storyboard x:Name="MusicEqStoryboard" RepeatBehavior="Forever" AutoReverse="True">
+                                <DoubleAnimation Storyboard.TargetName="EqScale1" Storyboard.TargetProperty="ScaleY"
+                                                 From="0.3" To="1.0" Duration="0:0:0.35" EnableDependentAnimation="True"/>
+                                <DoubleAnimation Storyboard.TargetName="EqScale2" Storyboard.TargetProperty="ScaleY"
+                                                 From="1.0" To="0.35" Duration="0:0:0.45" EnableDependentAnimation="True"/>
+                                <DoubleAnimation Storyboard.TargetName="EqScale3" Storyboard.TargetProperty="ScaleY"
+                                                 From="0.5" To="0.9" Duration="0:0:0.28" EnableDependentAnimation="True"/>
+                            </Storyboard>
+                            <!-- The bars render only while the storyboard runs, so the animations'
+                                 From values are the single definition of the starting pose. -->
+                            <Style x:Key="EqBar" TargetType="Rectangle">
+                                <Setter Property="Width" Value="3"/>
+                                <Setter Property="Height" Value="14"/>
+                                <Setter Property="Fill" Value="{StaticResource MandoGoldBrush}"/>
+                                <Setter Property="RadiusX" Value="1.5"/>
+                                <Setter Property="RadiusY" Value="1.5"/>
+                                <Setter Property="RenderTransformOrigin" Value="0.5,1"/>
+                            </Style>
+                        </StackPanel.Resources>
+                        <Rectangle Style="{StaticResource EqBar}">
+                            <Rectangle.RenderTransform><ScaleTransform x:Name="EqScale1"/></Rectangle.RenderTransform>
+                        </Rectangle>
+                        <Rectangle Style="{StaticResource EqBar}">
+                            <Rectangle.RenderTransform><ScaleTransform x:Name="EqScale2"/></Rectangle.RenderTransform>
+                        </Rectangle>
+                        <Rectangle Style="{StaticResource EqBar}">
+                            <Rectangle.RenderTransform><ScaleTransform x:Name="EqScale3"/></Rectangle.RenderTransform>
+                        </Rectangle>
+                    </StackPanel>
+                </Grid>
+                <Button.Flyout>
+                    <Flyout x:Name="MusicFlyout" Placement="Right" Opening="MusicFlyout_Opening">
+                        <StackPanel Spacing="10" MinWidth="248">
+                            <TextBlock Text="Music" FontWeight="SemiBold" FontSize="13"/>
+                            <TextBlock x:Name="MusicTrackText" Text="Nothing playing" FontSize="12"
+                                       Opacity="0.75" TextTrimming="CharacterEllipsis" MaxWidth="248"/>
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <Button x:Name="MusicPlayPauseButton" Click="MusicPlayPause_Click" Padding="12,6"
+                                        ToolTipService.ToolTip="Play / pause">
+                                    <FontIcon x:Name="MusicPlayPauseIcon" Glyph="&#xE768;" FontSize="14"/>
+                                </Button>
+                                <Button x:Name="MusicNextButton" Click="MusicNext_Click" Padding="12,6"
+                                        ToolTipService.ToolTip="Next track">
+                                    <FontIcon Glyph="&#xE893;" FontSize="14"/>
+                                </Button>
+                                <Button x:Name="MusicStopButton" Click="MusicStop_Click" Padding="12,6"
+                                        ToolTipService.ToolTip="Stop">
+                                    <FontIcon Glyph="&#xE71A;" FontSize="14"/>
+                                </Button>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE767;" FontSize="13" Opacity="0.7" VerticalAlignment="Center"/>
+                                <Slider x:Name="MusicVolumeSlider" Minimum="0" Maximum="100" Width="180"
+                                        ValueChanged="MusicVolume_ValueChanged"/>
+                            </StackPanel>
+                            <ComboBox x:Name="MusicGenreCombo" Header="Playlist" HorizontalAlignment="Stretch"
+                                      SelectionChanged="MusicGenre_SelectionChanged"/>
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <Button Click="MusicAddPlaylist_Click" Padding="10,5"
+                                        ToolTipService.ToolTip="Add a playlist — point at any folder of MP3s (nothing is copied or moved)">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <FontIcon Glyph="&#xE710;" FontSize="12"/>
+                                        <TextBlock Text="Add playlist" FontSize="12"/>
+                                    </StackPanel>
+                                </Button>
+                                <Button x:Name="MusicRemovePlaylistButton" Click="MusicRemovePlaylist_Click"
+                                        Padding="10,5" Visibility="Collapsed"
+                                        ToolTipService.ToolTip="Remove this playlist — the folder it points at is untouched">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <FontIcon Glyph="&#xE74D;" FontSize="12"/>
+                                        <TextBlock Text="Remove" FontSize="12"/>
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
+                            <TextBlock x:Name="MusicHintText" FontSize="11" Opacity="0.6"
+                                       TextWrapping="Wrap" MaxWidth="248" Visibility="Collapsed"/>
+                        </StackPanel>
+                    </Flyout>
+                </Button.Flyout>
+            </Button>
             <!-- Global (a window property, not per-agent): themes + window opacity. Last on the rail
                  since it's cosmetic and set-once. -->
             <Button x:Name="NavAppearance" Click="NavAppearance_Click" Padding="10,8" Background="Transparent"
