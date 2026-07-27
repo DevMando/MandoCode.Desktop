@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using MandoCode.Models;
 using MandoCode.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
@@ -327,8 +328,14 @@ public sealed partial class MainWindow
 
         UpdateRemovePlaylistButton();
 
+        // Record the pick as the service's current genre even while idle. The flyout closes
+        // (and this combo unloads) around Add-playlist's folder picker, and the next
+        // RefreshMusicUi re-selects from music.Genre — without this line the dropdown snaps
+        // back to the previous playlist on reopen.
+        App.Services.GetRequiredService<MandoCodeConfig>().Music.Genre = genre;
+
         // Switching playlist while playing jumps to it immediately; while idle it just becomes
-        // what the play button will start (Play stores the pick in config either way).
+        // what the play button will start.
         var music = Music;
         if (music.IsPlaying || music.IsPaused)
         {
