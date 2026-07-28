@@ -376,6 +376,11 @@ public static class ThemeManager
                 var dest = Path.Combine(UserDataFolder,
                     "chat-bg" + Path.GetExtension(sourcePath).ToLowerInvariant());
                 File.Copy(sourcePath, dest, overwrite: true);
+                // File.Copy keeps the SOURCE's timestamp, and the shipped images all share one
+                // (git writes them in a single checkout) — so the ?v cache-buster wouldn't change
+                // between gallery picks and the WebView would keep serving the old image. Stamp
+                // the copy time to make every pick a fresh URL.
+                File.SetLastWriteTimeUtc(dest, DateTime.UtcNow);
                 ChatBackgroundFile = dest;
             }
             catch { /* unreadable source — behave as if cleared */ }
