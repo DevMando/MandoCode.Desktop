@@ -157,6 +157,40 @@ public sealed partial class TerminalPanel : UserControl
         // Spin up the matching xterm instance and switch to it.
         Post(new { type = "create", id, cols = 80, rows = 24 });
         SwitchTo(id);
+
+        // Every new shell session gets a look — MandoCliDetector's own counter decides
+        // whether THIS is the one-in-N that actually shows anything.
+        MaybeShowCliHint(id);
+    }
+
+    /// <summary>Periodic, best-effort nudge toward the mandocode CLI — see MandoCliDetector for
+    /// the cadence and why every uncertain case stays quiet. Detection runs off the UI thread
+    /// (file/PATH checks); the note itself is written straight into the fresh shell's own xterm
+    /// buffer, never through its stdin, so it can't be mistaken for a command. The short delay
+    /// lets the shell print its own startup banner/prompt first, so this reads as "after the
+    /// prompt" instead of racing it.</summary>
+    private void MaybeShowCliHint(string id)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                if (!MandoCliDetector.ShouldShowHint()) return;
+
+                await Task.Delay(700);
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (_tabs.ContainsKey(id))
+                        Post(new
+                        {
+                            type = "note",
+                            id,
+                            message = "(tip: mandocode CLI not found — install with: dotnet tool install --global MandoCode)"
+                        });
+                });
+            }
+            catch { /* never disrupt the terminal over this */ }
+        });
     }
 
     private (Border header, TextBlock title) BuildTabHeader(string id, ShellSpec shell)

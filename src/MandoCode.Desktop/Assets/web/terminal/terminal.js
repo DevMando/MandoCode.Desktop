@@ -106,6 +106,16 @@
     t.term.write("\r\n\x1b[38;5;244m" + (message || "[process exited]") + "\x1b[0m\r\n");
   }
 
+  // A one-time informational line (e.g. the "install the CLI" nudge) — same dim styling as
+  // exited(), but semantically separate: it never touches tab/exit state, and it's written
+  // straight to this xterm instance's own buffer, never through the shell's stdin, so it can
+  // never be mistaken for something to run or interfere with whatever's actually in progress.
+  function note(id, message) {
+    const t = terms[id];
+    if (!t || !message) return;
+    t.term.write("\r\n\x1b[38;5;244m" + message + "\x1b[0m\r\n");
+  }
+
   function setTheme(theme) {
     for (const k in terms) terms[k].term.options.theme = makeTheme(theme);
   }
@@ -122,6 +132,7 @@
       case "focus": focus(m.id); break;
       case "dispose": dispose(m.id); break;
       case "exited": exited(m.id, m.message); break;
+      case "note": note(m.id, m.message); break;
       case "theme": setTheme(m.theme); break;
     }
   });
