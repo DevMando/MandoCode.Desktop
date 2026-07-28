@@ -12,14 +12,13 @@ namespace MandoCode.Desktop.Services;
 /// current settings"; it is <see cref="Defaults"/>, the starting point every NEW agent is seeded
 /// from. "Make Default for New Agents" is the one action that writes it.
 ///
-/// Two things are deliberately app-wide rather than per-agent, because the machinery underneath
-/// them is:
-///   • MCP servers — OS processes owned by a single shared McpClientManager. An agent can turn
-///     MCP on or off for itself (AIService.AttachMcpPluginsAsync honours its own EnableMcp), but
-///     the server SET is one list. Edits land on Defaults and mirror into every live agent, so
-///     per-agent autoApprove lookups agree with what the MCP page shows.
-///   • ContextLength — applied as OLLAMA_CONTEXT_LENGTH when MandoCode starts the Ollama daemon.
-///     One daemon, one context window.
+/// One thing is deliberately app-wide rather than per-agent, because the machinery underneath
+/// it is: MCP servers — OS processes owned by a single shared McpClientManager. An agent can turn
+/// MCP on or off for itself (AIService.AttachMcpPluginsAsync honours its own EnableMcp), but
+/// the server SET is one list. Edits land on Defaults and mirror into every live agent, so
+/// per-agent autoApprove lookups agree with what the MCP page shows.
+/// (ContextLength used to be on this list — env-var-scoped to the one daemon — but it now rides
+/// on every request as num_ctx, so each agent's own value governs its own conversations.)
 ///
 /// A clone's Save() must never be called: it would write that agent's session settings over
 /// everybody's defaults. The method is public and non-virtual on a type in the read-only harness
