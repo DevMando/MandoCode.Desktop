@@ -7,6 +7,13 @@ recorded by the `MandoCode` submodule.
 ## [Unreleased]
 
 ### Changed
+- **The context-window floor is now 16k** (harness 0.14.3). Live testing on a small local model
+  showed 8k is unusable in practice: the system prompt and tool definitions consume most of it
+  before the conversation starts, so the model lived in a permanent compaction cycle and filled
+  the gaps by making things up. The default and the auto-sizing tier for local models under 7B
+  both move to 16k (7B+ stays at 32k), and the compaction safety margin was widened so a web
+  search landing mid-turn can no longer overflow the window. Existing agents pick the new size
+  up on their next model switch; a smaller window can still be set explicitly.
 - **Assistant text always starts on its own line.** Inserting a reply at the cursor used to glue it
   onto the tail of whatever line you were mid-way through. It now opens a new line first — unless
   the cursor already sits at the start of one, so an empty note doesn't gain a blank first line.
