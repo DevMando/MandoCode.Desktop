@@ -33,4 +33,23 @@ public static class NoteText
         editorText.Replace("\r\n", "\n", StringComparison.Ordinal)
                   .Replace('\r', '\n')
                   .Replace("\n", newline, StringComparison.Ordinal);
+
+    /// <summary>
+    /// The newline to place in FRONT of text being inserted at <paramref name="at"/>, so assistant
+    /// output always begins on its own line instead of being glued onto the end of whatever the caret
+    /// was sitting after. "" when the insertion point already starts a line — the guarantee is "this
+    /// starts on a new line", and an unconditional newline would open every empty note with a blank
+    /// first line.
+    ///
+    /// Checks for CR as well as LF because this runs against the EDITOR's buffer, where WinUI holds
+    /// every newline as a bare CR (see the class remarks). The returned "\n" is normalized to CR by
+    /// the same assignment that applies it, and <see cref="ToFileText"/> maps it to the note's own
+    /// convention on save.
+    /// </summary>
+    public static string LeadIn(string body, int at)
+    {
+        if (at <= 0 || body.Length == 0) return "";
+        var before = body[Math.Min(at, body.Length) - 1];
+        return before is '\n' or '\r' ? "" : "\n";
+    }
 }

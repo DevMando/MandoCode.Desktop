@@ -41,6 +41,18 @@ public sealed class SessionArchiveEntry
     /// </summary>
     public string? LastMessage { get; set; }
 
+    /// <summary>
+    /// The agent's last reply, flattened to prose and clipped to a couple of sentences by
+    /// <see cref="CardPreview.ClipReply"/> — the line that makes a row RECOGNIZABLE. The two user
+    /// quotes say what was asked; this says how it came out, which is usually what you actually
+    /// remember a conversation by.
+    ///
+    /// Same null-vs-empty contract as <see cref="LastMessage"/>: "" means computed with nothing
+    /// worth showing (no assistant turn, or a reply that was pure code), null means still to be
+    /// backfilled.
+    /// </summary>
+    public string? LastReply { get; set; }
+
     // ---- display helpers for the panel ----
 
     [System.Text.Json.Serialization.JsonIgnore]
@@ -164,26 +176,35 @@ public sealed class SessionArchiveStore
         Changed?.Invoke();
     }
 
+    /// <summary>The card's two derived quote lines, resolved together from one read of a session's
+    /// conversation log. Both MUST be "" rather than null when there's nothing to show — see
+    /// <see cref="BackfillCardLines"/>.</summary>
+    public readonly record struct CardLines(string LastMessage, string LastReply);
+
     /// <summary>
-    /// One-time migration for rows archived before <see cref="SessionArchiveEntry.LastMessage"/>
-    /// existed, so old and new cards look the same instead of only new ones carrying a last line.
-    /// <paramref name="resolve"/> does the per-session file read and MUST return "" (not null) when
-    /// there's nothing to show, otherwise the row is retried on every launch. Persists once for the
-    /// whole batch. Safe to call from a background thread — <see cref="Changed"/> is documented as
-    /// possibly arriving off the UI thread.
+    /// One-time migration for rows archived before <see cref="SessionArchiveEntry.LastMessage"/> and
+    /// <see cref="SessionArchiveEntry.LastReply"/> existed, so old and new cards look the same
+    /// instead of only new ones carrying the extra lines. Both fields are resolved in ONE pass —
+    /// they come from the same log file, and a second migration would read all 60 of them again.
+    /// <paramref name="resolve"/> does the per-session file read and MUST return "" (not null) for a
+    /// line with nothing to show, otherwise the row is retried on every launch. Persists once for
+    /// the whole batch. Safe to call from a background thread — <see cref="Changed"/> is documented
+    /// as possibly arriving off the UI thread.
     /// </summary>
-    public int BackfillLastMessages(Func<SessionArchiveEntry, string?> resolve)
+    public int BackfillCardLines(Func<SessionArchiveEntry, CardLines?> resolve)
     {
         List<SessionArchiveEntry> pending;
-        lock (_lock) pending = _items.Where(e => e.LastMessage == null).ToList();
+        lock (_lock) pending = _items.Where(e => e.LastMessage == null || e.LastReply == null).ToList();
         if (pending.Count == 0) return 0;
 
         var filled = 0;
         foreach (var entry in pending)
         {
-            var value = resolve(entry);
-            if (value == null) continue;   // resolve failed outright — leave it for next time
-            entry.LastMessage = value;
+            if (resolve(entry) is not { } lines) continue;   // resolve failed outright — leave it for next time
+            // Both are rewritten even when only one was missing: they're recomputed from the same
+            // read, under the current rules, so a line trimmed by an older rule is refreshed too.
+            entry.LastMessage = lines.LastMessage;
+            entry.LastReply = lines.LastReply;
             filled++;
         }
         if (filled == 0) return 0;

@@ -14,7 +14,7 @@
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>0.1.0</Version>
+    <Version>0.14.0</Version>
     <Authors>Armando Fernandez (DevMando)</Authors>
     <Description>MandoCode Desktop — the MandoCode AI coding agent with a native WinUI 3 interface.</Description>
     <!-- Embedded in the exe → taskbar, Alt-Tab, and Explorer icon. The title-bar icon is set at
@@ -37,6 +37,20 @@
     <Content Include="Assets\images\mandocode-desktop.ico">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <!-- Chat backgrounds offered in Settings → Appearance. Discovered at runtime by
+         BuiltInBackgrounds, so adding one to a future release is a file drop here — no code change.
+         Listed explicitly (by extension) rather than left to the implicit Assets\** glob in
+         Microsoft.WinUI.props: the images shipping is the whole feature, so it shouldn't depend on
+         an SDK package's internal item list. -->
+    <Content Include="Assets\images\backgrounds\*.jpg;Assets\images\backgrounds\*.jpeg;Assets\images\backgrounds\*.png;Assets\images\backgrounds\*.webp">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <!-- That same WinUI glob sweeps in the folder's README, which an unpackaged build then copies
+         beside the exe. It's guidance for whoever adds the next image, not a shipped asset — so drop
+         it from Content, and keep it as None so it stays visible in the IDE. Must come AFTER the
+         include above: a Remove only affects items already in the list. -->
+    <Content Remove="Assets\images\backgrounds\README.md" />
+    <None Include="Assets\images\backgrounds\README.md" />
   </ItemGroup>
 
   <ItemGroup>

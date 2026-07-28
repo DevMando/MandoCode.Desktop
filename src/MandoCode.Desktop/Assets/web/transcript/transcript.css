@@ -115,8 +115,20 @@
      buttons. Status lines and tool ops sit directly on the teal like desktop icon labels,
      with brightened colors (the theme's dark semantic hues are unreadable on teal).
      (A user-chosen chat background image still paints over the teal via #bg — wallpaper.) */
-  html[data-win98] .user-echo { background: var(--bg); padding: 7px 12px;
+  /* The one place W98 must drop the gold "user's voice" convention: gold resolves to #806000 in
+     this palette, and dark mustard on a silver window is 3.21:1 — under the 4.5:1 AA floor and
+     genuinely hard to read. Black window text is both legible (11.5:1) and the era-correct answer;
+     the silver bevelled frame already marks whose turn it is, so color isn't carrying that meaning
+     here the way it does in every other theme. */
+  html[data-win98] .user-echo { background: var(--bg); padding: 7px 12px; color: var(--fg);
     border: 2px solid; border-color: #FFFFFF #404040 #404040 #FFFFFF; }
+  /* The clamp toggle is a SIBLING of the echo, so it lands on the teal desktop rather than inside
+     the silver window — same situation as the status lines above, and it takes the same treatment:
+     a brightened literal, because --dim on teal is 1.45:1 (effectively invisible). White underlined
+     is 4.77:1 and reads as a desktop icon label; the hover is a hue shift, since white has no
+     brightness left to gain. */
+  html[data-win98] .ue-toggle { color: #FFFFFF; text-decoration: underline; }
+  html[data-win98] .ue-toggle:hover { color: #FFE082; }
   html[data-win98] .assistant { background: var(--bg);
     border: 2px solid; border-color: #FFFFFF #404040 #404040 #FFFFFF; }
   html[data-win98] .assistant-label {

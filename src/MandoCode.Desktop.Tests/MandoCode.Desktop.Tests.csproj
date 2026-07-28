@@ -38,6 +38,13 @@
     <Compile Include="..\MandoCode.Desktop\Services\ContextSnapshot.cs" Link="src\ContextSnapshot.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\SnapshotNaming.cs" Link="src\SnapshotNaming.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\SessionArchiveStore.cs" Link="src\SessionArchiveStore.cs" />
+    <!-- The History card's quote-clipping rules: capping a user turn, and flattening the agent's
+         markdown reply down to a couple of sentences. Pure string work, which is exactly why it
+         lives in Services rather than in the panel's code-behind. -->
+    <Compile Include="..\MandoCode.Desktop\Services\CardPreview.cs" Link="src\CardPreview.cs" />
+    <!-- The bundled-background gallery. Discovered from a folder rather than declared in code, so
+         the file-naming convention is a real contract worth pinning; pure System.IO, no WinUI. -->
+    <Compile Include="..\MandoCode.Desktop\Services\BuiltInBackgrounds.cs" Link="src\BuiltInBackgrounds.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\TranscriptJournal.cs" Link="src\TranscriptJournal.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\ConversationLog.cs" Link="src\ConversationLog.cs" />
     <!-- History's full-text matching + snippet extraction. Pure (text in, match out); the file reads

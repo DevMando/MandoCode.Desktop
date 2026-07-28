@@ -87,9 +87,18 @@ public sealed partial class NoteEditorPane : UserControl
     /// <summary>The selected passage, or "" — lets a prompt act on a highlighted paragraph.</summary>
     public string SelectionText => Editor.SelectedText ?? "";
 
-    /// <summary>Puts assistant output into the note at the cursor, replacing the selection if there is
-    /// one. Goes through the normal dirty/autosave path, so it saves like typing does — and is undoable
-    /// in the TextBox like anything else.</summary>
+    /// <summary>
+    /// Puts assistant output into the note at the cursor, replacing the selection if there is one.
+    /// Goes through the normal dirty/autosave path, so it saves like typing does.
+    ///
+    /// Inserted text always STARTS ON ITS OWN LINE (see <see cref="NoteText.LeadIn"/>) — a reply
+    /// landing on the tail of the line you were writing is never what you meant. Replacing a
+    /// selection is exempt: there you aimed at a specific span, and pushing the replacement onto a
+    /// new line would orphan the rest of its line.
+    ///
+    /// NOT undoable with Ctrl+Z: assigning <c>Editor.Text</c> resets the control's own undo history.
+    /// That's what <see cref="UndoAssistantEdit"/> and the header's Undo button exist for.
+    /// </summary>
     public void InsertAtCursor(string text)
     {
         if (Current == null || Editor.IsReadOnly || text.Length == 0) return;
@@ -98,28 +107,114 @@ public sealed partial class NoteEditorPane : UserControl
         var start = Math.Clamp(Editor.SelectionStart, 0, body.Length);
         var length = Math.Clamp(Editor.SelectionLength, 0, body.Length - start);
 
-        Editor.Text = body[..start] + text + body[(start + length)..];
-        Editor.Select(start + text.Length, 0);
+        // Replacing a selection swaps it in place; inserting at a caret opens a new line first.
+        var lead = length > 0 ? "" : NoteText.LeadIn(body, start);
+        var block = lead + text;
+
+        CaptureAssistantUndo(body, start, "insert");
+
+        Editor.Text = body[..start] + block + body[(start + length)..];
+        Editor.Select(start + block.Length, 0);
         Editor.Focus(FocusState.Programmatic);
 
-        SetDirty(true);
-        _autosave.Stop();
-        _autosave.Start();
+        MarkAssistantEditApplied();
     }
 
-    /// <summary>Replaces the whole note with assistant output. Same path as typing it by hand.</summary>
+    /// <summary>Replaces the whole note with assistant output. Same path as typing it by hand, and
+    /// undoable from the header — this is the single most destructive thing the assistant can do to a
+    /// note, and Ctrl+Z can't reach it.</summary>
     public void ReplaceBody(string text)
     {
         if (Current == null || Editor.IsReadOnly) return;
+
+        CaptureAssistantUndo(Editor.Text, Editor.SelectionStart, "replace");
 
         Editor.Text = text;
         Editor.Select(Editor.Text.Length, 0);
         Editor.Focus(FocusState.Programmatic);
 
+        MarkAssistantEditApplied();
+    }
+
+    // ---- undoing an assistant edit ----
+    //
+    // The TextBox's own undo stack is no help here: setting Editor.Text programmatically resets it,
+    // so Ctrl+Z cannot walk back an Insert or Replace. One snapshot is enough — this undoes "what the
+    // assistant just did", not the whole editing session, which is the TextBox's job for typing.
+
+    /// <summary>The buffer as it was before the last assistant edit, or null when there's nothing to
+    /// undo.</summary>
+    private string? _undoBuffer;
+
+    /// <summary>Caret to restore with it, so undo puts you back where you were.</summary>
+    private int _undoCaret;
+
+    /// <summary>What the buffer looked like immediately AFTER that edit. The invalidation yardstick:
+    /// content rather than a flag, because TextChanged arrives asynchronously and a flag set around
+    /// the assignment can't be trusted to still mean anything by the time the event lands.</summary>
+    private string _undoApplied = "";
+
+    private string _undoWhat = "";
+
+    private void CaptureAssistantUndo(string before, int caret, string what)
+    {
+        _undoBuffer = before;
+        _undoCaret = Math.Clamp(caret, 0, before.Length);
+        _undoWhat = what;
+    }
+
+    /// <summary>Finishes an assistant edit: records the result as the undo yardstick, then runs the
+    /// same dirty/autosave path typing does.</summary>
+    private void MarkAssistantEditApplied()
+    {
+        _undoApplied = Editor.Text;
+        RefreshUndoButton();
+
         SetDirty(true);
         _autosave.Stop();
         _autosave.Start();
     }
+
+    /// <summary>Puts the note back as it was before the last Insert or Replace. Autosaves like any
+    /// other edit, so the file follows — an undo you have to remember to save is the same trap a jot
+    /// pad exists to avoid.</summary>
+    public void UndoAssistantEdit()
+    {
+        if (_undoBuffer == null || Current == null || Editor.IsReadOnly) return;
+
+        var restored = _undoBuffer;
+        var caret = _undoCaret;
+        ClearAssistantUndo();   // single level: undoing is not itself undoable
+
+        Editor.Text = restored;
+        Editor.Select(Math.Clamp(caret, 0, Editor.Text.Length), 0);
+        Editor.Focus(FocusState.Programmatic);
+
+        SetDirty(true);
+        _autosave.Stop();
+        _autosave.Start();
+        SetStatus("Undid the assistant's edit");
+    }
+
+    private void ClearAssistantUndo()
+    {
+        _undoBuffer = null;
+        _undoApplied = "";
+        _undoWhat = "";
+        RefreshUndoButton();
+    }
+
+    private void RefreshUndoButton()
+    {
+        UndoButton.Visibility = _undoBuffer == null ? Visibility.Collapsed : Visibility.Visible;
+        if (_undoBuffer == null) return;
+
+        var label = _undoWhat == "replace" ? "Undo the assistant's replace" : "Undo the assistant's insert";
+        ToolTipService.SetToolTip(UndoButton, label);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(UndoButton, label);
+    }
+
+    private void Undo_Click(object sender, RoutedEventArgs e) => UndoAssistantEdit();
 
     // ---- opening / closing ----
 
@@ -201,6 +296,9 @@ public sealed partial class NoteEditorPane : UserControl
         if (Current == null) return;
         Shutdown();
         Current = null;
+        // The snapshot belongs to the note that was open — offering it against a different note (or
+        // the same one after a reload) would paste one note's text into another.
+        ClearAssistantUndo();
     }
 
     /// <summary>Leaves the note entirely (back to the list).</summary>
@@ -216,6 +314,11 @@ public sealed partial class NoteEditorPane : UserControl
 
     private void Editor_TextChanged(object sender, TextChangedEventArgs e)
     {
+        // Any change that ISN'T the assistant edit we just applied retires the undo offer. Restoring
+        // the pre-insert buffer after the user has typed on top of it would take their typing with
+        // it, which is a worse outcome than not offering undo at all.
+        if (_undoBuffer != null && Editor.Text != _undoApplied) ClearAssistantUndo();
+
         if (_suppressDirty || Current == null) return;
 
         // WinUI raises TextChanged asynchronously, so the event for our own programmatic load can

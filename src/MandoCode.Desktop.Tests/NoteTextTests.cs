@@ -85,4 +85,44 @@ public sealed class NoteTextTests
             Assert.Equal(original, NoteText.ToFileText(editorForm, newline));
         }
     }
+
+    // ---- LeadIn: assistant output always starts on its own line ----------------------
+
+    [Fact]
+    public void LeadIn_adds_a_newline_when_the_caret_sits_mid_line()
+    {
+        // The case this exists for: a reply landing on the tail of the line you were writing.
+        Assert.Equal("\n", NoteText.LeadIn("shopping list", 13));
+        Assert.Equal("\n", NoteText.LeadIn("one\rtwo", 7));
+    }
+
+    [Fact]
+    public void LeadIn_adds_nothing_at_the_very_start_of_a_note()
+    {
+        Assert.Equal("", NoteText.LeadIn("", 0));
+        Assert.Equal("", NoteText.LeadIn("already here", 0));
+    }
+
+    [Theory]
+    [InlineData("done\r", 5)]      // editor form — WinUI holds newlines as bare CR
+    [InlineData("done\n", 5)]      // file form, in case a buffer ever carries LF
+    [InlineData("done\r\n", 6)]
+    public void LeadIn_adds_nothing_when_the_caret_already_starts_a_line(string body, int at)
+        => Assert.Equal("", NoteText.LeadIn(body, at));
+
+    [Fact]
+    public void LeadIn_does_not_double_up_on_a_blank_line()
+    {
+        // Caret after a blank line: there's already a line to write on, so forcing another newline
+        // would push assistant output down with a stray gap above it every time.
+        Assert.Equal("", NoteText.LeadIn("notes\r\r", 7));
+    }
+
+    [Fact]
+    public void LeadIn_tolerates_a_caret_past_the_end()
+    {
+        // Defensive: the caller clamps, but a LeadIn that threw would take the insert down with it.
+        Assert.Equal("\n", NoteText.LeadIn("abc", 99));
+        Assert.Equal("", NoteText.LeadIn("", 99));
+    }
 }
