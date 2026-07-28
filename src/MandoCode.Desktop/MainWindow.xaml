@@ -92,12 +92,20 @@
             </Button>
             <!-- Global (one audio device, one app-wide MusicPlayerService): background playlists.
                  A flyout rather than a page — music is a set-and-forget control, not a workspace.
-                 The icon turns gold while something is playing. -->
+                 While something is playing the glyph hides entirely and the gold equalizer below
+                 takes its place, so the glyph itself is only ever the idle/paused state. -->
             <!-- Tooltip is set in code (UpdateMusicRailIcon) — it live-updates to the track name. -->
             <Button x:Name="NavMusic" Padding="10,8" Background="Transparent"
                     BorderThickness="0" HorizontalAlignment="Stretch">
                 <Grid Width="16" Height="16">
-                    <FontIcon x:Name="NavMusicIcon" Glyph="&#xE8D6;" FontSize="16"/>
+                    <!-- Themed here rather than in RefreshNavIcons (which colors every other rail
+                         icon) because music is a flyout with no active-page state to toggle: it's
+                         always the idle color. ThemeManager.SetBrush mutates the shared brush's
+                         Color in place, so this StaticResource retints on every theme change —
+                         same mechanism the EqBar style below relies on. Without it the FontIcon
+                         inherits WinUI's default foreground and stays white in all 16 themes. -->
+                    <FontIcon x:Name="NavMusicIcon" Glyph="&#xE8D6;" FontSize="16"
+                              Foreground="{StaticResource MandoDimBrush}"/>
                     <!-- Equalizer: three gold bars that bounce while music plays (the glyph hides).
                          Scale animations are dependent (UI-thread) by necessity; three bars on one
                          icon is negligible. Staggered durations so the bounce never looks locked. -->
