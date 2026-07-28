@@ -148,9 +148,11 @@ approval in one agent would stop another's from ever rendering; and `ChatControl
 (not `+=`) five approval delegates, so on shared services the last agent constructed silently
 steals every approval.
 
-Two settings can't be per-agent and are labelled app-wide in the UI: **Appearance** is a property
-of the window (and lives outside the shared config), and **Context window** is applied as
-`OLLAMA_CONTEXT_LENGTH` when MandoCode starts the Ollama daemon — one daemon, one context window.
+One setting can't be per-agent and is labelled app-wide in the UI: **Appearance** is a property
+of the window (and lives outside the shared config). **Context window** used to share that label —
+it was applied as `OLLAMA_CONTEXT_LENGTH` at daemon start, one daemon, one window — but it now
+rides on every chat request as `num_ctx`, so each agent's own value governs its own conversations,
+like any other per-agent setting.
 
 ### Settings and the config file
 

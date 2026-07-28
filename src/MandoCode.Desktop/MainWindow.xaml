@@ -1027,11 +1027,11 @@
                                            Minimum="1" SpinButtonPlacementMode="Compact" SmallChange="1024"
                                            ValueChanged="Setting_NumberChanged" HorizontalAlignment="Stretch"
                                            ToolTipService.ToolTip="Upper limit on how long a single response can be. Raise it if answers get cut off mid-code; lower it for shorter, faster replies."/>
-                                <NumberBox x:Name="S_ContextLength" Header="Context window (tokens, 0 = Ollama default) — app-wide"
+                                <NumberBox x:Name="S_ContextLength" Header="Context window (tokens, 0 = Ollama default)"
                                            Tag="contextLength" Minimum="0" SpinButtonPlacementMode="Compact" SmallChange="2048"
                                            ValueChanged="Setting_NumberChanged" HorizontalAlignment="Stretch"
                                            ToolTipService.ToolTip="How much conversation and file content the model can see at once. Larger windows track big files and long chats but use much more RAM/VRAM and respond slower. 0 keeps Ollama's default."/>
-                                <TextBlock Text="Applied when MandoCode starts Ollama (as OLLAMA_CONTEXT_LENGTH). One Ollama server backs every agent, so unlike the settings above this one is app-wide, not per-agent."
+                                <TextBlock Text="Sent with every request (num_ctx), so it applies from this agent's next message — no restart needed. Auto-sized to the model's hardware tier when you switch models; set it here to override."
                                            Opacity="0.5" FontSize="11" TextWrapping="Wrap" Margin="0,-6,0,0"/>
                                 <ComboBox x:Name="S_Streaming" Header="Response streaming" SelectionChanged="Streaming_Changed"
                                           HorizontalAlignment="Stretch"

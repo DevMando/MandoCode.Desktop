@@ -24,6 +24,15 @@ recorded by the `MandoCode` submodule.
   period-correct white dialog on the silver desktop.
 
 ### Fixed
+- **The context window setting now actually reaches the model.** It was exported as
+  `OLLAMA_CONTEXT_LENGTH` only when MandoCode launched the Ollama daemon itself — anyone whose
+  daemon was already running (the tray app, most commonly) silently got the daemon's own default
+  instead, making the Settings field, the "context window sized to Nk tokens" line, and the
+  per-model auto-sizing all cosmetic. The window now rides on every chat request as `num_ctx`,
+  which outranks the tray app's slider and the daemon default, applies from the next message with
+  no restart, and — as a bonus the old design could never offer — is genuinely per-agent: two tabs
+  can run different windows against the same daemon. The Settings caption and README stop calling
+  it app-wide, and `0` still means "let Ollama decide."
 - **W98 chat prompts are readable again.** Your own prompts rendered in the theme's gold, which
   resolves to a dark mustard `#806000` — 3.21:1 on a silver window, under the accessibility floor
   and hard going for anyone with less-than-perfect sight. W98 prompts now use black window text
@@ -33,6 +42,13 @@ recorded by the `MandoCode` submodule.
   and is now white underlined at 4.77:1. Other themes are untouched.
 
 ### Added
+- **Conversations compact themselves before the context window overflows** (pinned harness
+  update). Local Ollama never rejects an oversized prompt — it silently drops the oldest tokens,
+  system prompt first, which surfaced as "Model returned an empty response" at the end of a
+  tool-heavy turn on a small model. The harness now estimates each outgoing prompt (history plus
+  every tool schema riding along, MCP servers included) before sending, and when it nears the
+  window it folds older history into a recap first and says so in the reply — leaving thinking
+  models the generation headroom they spend reasoning before any visible answer appears.
 - **Undo for the notes assistant.** A gold undo arrow appears in the note header after the assistant
   inserts or replaces text, putting the note back exactly as it was. Ctrl+Z can't do this job —
   assigning the editor's text resets the TextBox's own undo history, so the one edit you *didn't*
