@@ -12,7 +12,6 @@
   <a href="https://ollama.com"><img alt="Platform: Ollama" src="https://img.shields.io/badge/platform-Ollama-000000"></a>
   <a href="https://github.com/DevMando/MandoCode"><img alt="Engine: MandoCode CLI" src="https://img.shields.io/badge/engine-MandoCode%20CLI-informational"></a>
 </p>
-<p align="center">Made with &lt;3 by Mando</p>
 
 ---
 
