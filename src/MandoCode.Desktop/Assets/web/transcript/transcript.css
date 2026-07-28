@@ -347,6 +347,11 @@
   a.file-link { color: var(--sky); text-decoration: none;
     border-bottom: 1px dotted color-mix(in srgb, var(--sky) 55%, transparent); cursor: pointer; }
   a.file-link:hover { color: var(--accent); border-bottom-color: var(--accent); }
+  /* Paths linkified out of assistant prose (transcript.js linkifyPaths) can be a full
+     absolute path — one unbroken 100-char token that would otherwise push the card wider
+     than the column. Break anywhere rather than overflow; only in .md, so the op cards'
+     short relative paths keep wrapping normally. */
+  .md a.file-link { overflow-wrap: anywhere; }
   .op { margin: 2px 0; }
   .op-head { font-weight: 600; }
   .op-path { font-family: "Cascadia Code", Consolas, monospace; font-size: 13px; }

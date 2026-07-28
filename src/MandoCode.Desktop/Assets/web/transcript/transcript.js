@@ -45,6 +45,93 @@
       try { hljs.highlightElement(c); } catch (err) { }
     });
   }
+  // --- clickable file paths in assistant PROSE -----------------------------------------
+  // Operation cards get their links from TranscriptHtmlBuilder.FileLink, but the model also
+  // names files in ordinary sentences ("I've created xbox.txt at C:\...\xbox.txt"). Those
+  // are plain text, so this pass walks the text nodes of each new .md block and wraps any
+  // path-shaped run in the same a.file-link the op cards use — one shared click handler,
+  // one shared style, and the host already resolves relative-or-absolute (OpenTranscriptPath).
+  //
+  // Text nodes only: no HTML parsing, so a path can never be found inside a tag or an
+  // attribute, and the walker refuses to descend into <pre> (code listings — linkifying
+  // there would fight highlight.js and read as noise) or an existing <a>. Inline <code> IS
+  // linkified, because a single backticked filename is how the model usually cites one.
+  // No single-letter extensions (.c/.h): a two-char floor is what stops the "*.com/…" and
+  // "*.co/…" segment of a URL from reading as a filename. Matched case-insensitively, so
+  // C:\…\XBOX.TXT works — safe only because of that floor.
+  const FILE_EXT = 'cs|csproj|sln|props|targets|razor|cshtml|xaml|axaml|js|mjs|cjs|jsx|ts|tsx|' +
+    'json|jsonc|xml|xsd|resx|yml|yaml|toml|ini|cfg|conf|config|md|markdown|txt|log|csv|tsv|' +
+    'html|htm|css|scss|sass|less|py|rb|go|rs|java|kt|swift|cpp|hpp|cc|php|lua|sql|' +
+    'sh|bash|zsh|ps1|psm1|psd1|bat|cmd|env|lock|manifest|nuspec|dll|exe|pdb|' +
+    'zip|tar|gz|7z|png|jpg|jpeg|gif|svg|webp|ico|pdf|docx|xlsx|pptx';
+  // Two alternatives, deliberately conservative — a false link on ordinary prose is worse
+  // than a missed one:
+  //   1. drive-rooted (C:\… , C:/…) or UNC (\\server\…). The prefix is unambiguous, so no
+  //      extension is required and the whole run is taken. The leading (?<![A-Za-z0-9]) is
+  //      load-bearing: a drive letter is ONE letter, and without it the "s:/" inside
+  //      "https://" parses as a drive and swallows the entire URL. The closing char class
+  //      drops sentence punctuation so "…\xbox.txt." keeps the period out of the link.
+  //   2. everything else must END in a known extension, with (?![\w./\\-]) so a partial
+  //      extension can't match inside a longer one (.cs must not fire inside ".csx"). That
+  //      extension rule is what keeps prices ($19.99/mo), versions (v3.1,
+  //      net8.0-windows10.0.19041.0), ratios (2/3, 17/19) and domains (pcguide.com,
+  //      shattered.io) out — none of them end in a code/doc extension. The lookahead lives
+  //      on THIS branch only; on branch 1 it would reject any path ending a sentence.
+  const PATH_RE = new RegExp(
+    '(?:' +
+      '(?<![A-Za-z0-9])(?:[A-Za-z]:[\\\\/]|\\\\\\\\)' +
+        '[^\\s<>"\'`|*?\\n]*[^\\s<>"\'`|*?.,;:!)\\]}\\n]' +
+      '|' +
+      '(?:(?:\\.{0,2}[\\\\/])?(?:[\\w.@+~-]+[\\\\/])+?[\\w.@+~-]+|[\\w@+~-][\\w.@+~-]*)' +
+        '\\.(?:' + FILE_EXT + ')(?![\\w./\\\\-])' +
+    ')',
+    'gi');
+
+  function linkifyIn(md) {
+    // Collect first, mutate after — replacing a node mid-walk invalidates the TreeWalker.
+    const targets = [];
+    const walker = document.createTreeWalker(md, NodeFilter.SHOW_TEXT, {
+      acceptNode: function (n) {
+        if (!n.nodeValue || n.nodeValue.length < 3) return NodeFilter.FILTER_REJECT;
+        for (let p = n.parentElement; p && p !== md; p = p.parentElement) {
+          const t = p.tagName;
+          if (t === 'PRE' || t === 'A' || t === 'CODE' && p.closest('pre'))
+            return NodeFilter.FILTER_REJECT;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+    for (let n = walker.nextNode(); n; n = walker.nextNode())
+      if (PATH_RE.test(n.nodeValue)) targets.push(n);
+
+    targets.forEach(function (node) {
+      const text = node.nodeValue;
+      const frag = document.createDocumentFragment();
+      let last = 0, m;
+      PATH_RE.lastIndex = 0;
+      while ((m = PATH_RE.exec(text)) !== null) {
+        if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+        const a = document.createElement('a');
+        a.className = 'file-link';
+        a.href = '#';
+        a.title = 'Open in default app';
+        a.setAttribute('data-file', m[0]);
+        a.textContent = m[0];   // shown verbatim — the model's own wording is the record
+        frag.appendChild(a);
+        last = m.index + m[0].length;
+      }
+      if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+      node.parentNode.replaceChild(frag, node);
+    });
+  }
+  // Runs after highlightNew() so code blocks are already tokenized (and skipped anyway).
+  function linkifyPaths() {
+    log.querySelectorAll('.md:not([data-fl])').forEach(function (md) {
+      md.setAttribute('data-fl', '1');
+      try { linkifyIn(md); } catch (err) { }
+    });
+  }
+
   function doCopy(text, chip) {
     // In the app, the host writes the clipboard (copy: message). In an EXPORTED transcript
     // there is no webview bridge, so fall back to the browser clipboard API — file:// pages
@@ -292,6 +379,7 @@
     wrap.innerHTML = html;
     while (wrap.firstChild) placeChild(wrap.firstChild);
     highlightNew();
+    linkifyPaths();
     addCopyChips();
     addReactionGhosts();
     addCollapsers();
@@ -305,7 +393,11 @@
     const link = e.target.closest('a[data-file]');
     if (!link) return;
     e.preventDefault();
-    window.chrome.webview.postMessage('open-file:' + link.getAttribute('data-file'));
+    // Guarded like doCopy: an EXPORTED transcript has no webview bridge, and prose
+    // linkification puts these links on far more lines than the op cards did — an
+    // unguarded call would throw on every path click in a saved page.
+    if (window.chrome && window.chrome.webview)
+      window.chrome.webview.postMessage('open-file:' + link.getAttribute('data-file'));
   });
 
   // Interactive diff-card chips (delegated — survives transcript export, like the toggles).
