@@ -190,7 +190,14 @@ public sealed partial class MainWindow
 
     private async void MusicAddPlaylist_Click(object sender, RoutedEventArgs e)
     {
-        var picker = new Windows.Storage.Pickers.FolderPicker();
+        var picker = new Windows.Storage.Pickers.FolderPicker
+        {
+            // See ChatTabView.Explorer.cs's OpenFolderButton_Click — every picker in the app
+            // needs its own SettingsIdentifier or they all share one "last visited folder"
+            // memory (this was the cause of the project-root picker opening onto whatever
+            // folder was last picked here).
+            SettingsIdentifier = "MusicPlaylist",
+        };
         picker.FileTypeFilter.Add("*");
         // Unpackaged apps must initialize pickers with the window handle.
         WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
@@ -203,6 +210,24 @@ public sealed partial class MainWindow
         {
             SelectPlaylist(existing);
             ShowMusicHint($"“{existing}” already points at that folder — selected it.");
+            return;
+        }
+
+        // Validate BEFORE creating the junction — matches the engine's own scan
+        // (MusicPlayerService.DiscoverTracks uses SearchOption.TopDirectoryOnly, so nested
+        // MP3s don't count either). A folder with zero top-level MP3s must never become a
+        // junction: GetAvailableGenres() only lists genres that have at least one track, so
+        // an empty junction would be permanently invisible in this very combo box —
+        // unselectable, and therefore unremovable, since MusicRemovePlaylist_Click requires a
+        // combo selection. It would sit as a silent orphan under UserMusicPath, and re-picking
+        // the same folder would hit FindExistingFor above and claim "selected it" for a
+        // playlist that still can't be selected. Checking first means a bad folder leaves no
+        // trace, and the SAME clear answer every time you try it again — which is what "add a
+        // message when there aren't any MP3s" actually needs: this folder is never silently
+        // swallowed, so it can't look like the click did nothing.
+        if (!Directory.EnumerateFiles(folder.Path, "*.mp3", SearchOption.TopDirectoryOnly).Any())
+        {
+            ShowMusicHint($"No MP3s found directly inside “{folder.Path}” — files in subfolders don't count, they need to sit at the top level.");
             return;
         }
 
@@ -223,19 +248,11 @@ public sealed partial class MainWindow
         RefreshMusicUi();
         SelectPlaylist(name);
 
-        string message;
-        if (!rediscovered)
-        {
-            message = "Playlist added — restart MandoCode to see it.";
-        }
-        else
-        {
-            var tracks = _music.GetAvailableTracks(name).Count;
-            message = tracks == 0
-                ? "Playlist added, but no MP3s sit at the top level of that folder."
-                : $"Added “{name}” ({tracks} track{(tracks == 1 ? "" : "s")}).";
-        }
-        ShowMusicHint(message);
+        // The pre-flight check above guarantees at least one track once rediscovery runs.
+        var tracks = rediscovered ? _music.GetAvailableTracks(name).Count : 0;
+        ShowMusicHint(rediscovered
+            ? $"Added “{name}” ({tracks} track{(tracks == 1 ? "" : "s")})."
+            : "Playlist added — restart MandoCode to see it.");
     }
 
     private async void MusicRemovePlaylist_Click(object sender, RoutedEventArgs e)

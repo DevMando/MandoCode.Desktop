@@ -27,7 +27,9 @@ public sealed partial class MainWindow
 
     private async void BgChoose_Click(object sender, RoutedEventArgs e)
     {
-        var picker = new Windows.Storage.Pickers.FileOpenPicker();
+        // SettingsIdentifier keeps this picker's "last visited folder" separate from every
+        // other picker in the app — see ChatTabView.Explorer.cs's OpenFolderButton_Click.
+        var picker = new Windows.Storage.Pickers.FileOpenPicker { SettingsIdentifier = "ChatBackground" };
         // Desktop apps must marry the picker to an HWND before use.
         WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
         foreach (var ext in new[] { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp" })

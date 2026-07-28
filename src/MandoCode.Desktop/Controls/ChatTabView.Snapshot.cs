@@ -207,7 +207,10 @@ public sealed partial class ChatTabView
             var json = await core.ExecuteScriptAsync("document.documentElement.outerHTML");
             var html = JsonSerializer.Deserialize<string>(json) ?? "";
 
-            var picker = new Windows.Storage.Pickers.FileSavePicker();
+            // SettingsIdentifier keeps this picker's "last visited folder" separate from every
+            // other picker in the app — see OpenFolderButton_Click below in this same class's
+            // sibling file, ChatTabView.Explorer.cs.
+            var picker = new Windows.Storage.Pickers.FileSavePicker { SettingsIdentifier = "TranscriptExport" };
             WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(_owner));
             picker.FileTypeChoices.Add("HTML page", new List<string> { ".html" });
             picker.SuggestedFileName = $"mandocode-transcript-{DateTime.Now:yyyy-MM-dd-HHmm}";

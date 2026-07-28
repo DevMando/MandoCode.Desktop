@@ -51,16 +51,26 @@
             </StackPanel>
 
             <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Top">
-            <!-- Undo the assistant's last Insert/Replace. Appears only when there IS one to undo, and
-                 goes away again the moment you type — see UndoAssistantEdit. It exists because
-                 Ctrl+Z can't do this job: assigning Editor.Text resets the TextBox's undo history,
-                 so the one edit the user didn't type by hand is the one the control can't reverse.
-                 Gold, like the unsaved dot: this is the note in a state worth noticing. -->
+            <!-- Undo/Redo the assistant's last Insert/Replace — a single-level TOGGLE between the
+                 buffer right before that edit and right after it (see NoteEditorPane's undo/redo
+                 region). Exactly one of the two is ever visible, matching whichever endpoint the
+                 editor's current text equals; both go away once you type past either endpoint.
+                 They exist because Ctrl+Z can't do this job: assigning Editor.Text resets the
+                 TextBox's own undo history, so the one edit the user didn't type by hand is the one
+                 the control can't reverse on its own. Gold, like the unsaved dot: this is the note
+                 in a state worth noticing. -->
             <Button x:Name="UndoButton" Click="Undo_Click" Padding="6" Visibility="Collapsed"
                     Background="Transparent" BorderThickness="0"
                     AutomationProperties.Name="Undo the assistant's insert"
                     ToolTipService.ToolTip="Undo the assistant's insert">
                 <FontIcon Glyph="&#xE7A7;" FontSize="13"
+                          Foreground="{StaticResource MandoGoldBrush}"/>
+            </Button>
+            <Button x:Name="RedoButton" Click="Redo_Click" Padding="6" Visibility="Collapsed"
+                    Background="Transparent" BorderThickness="0"
+                    AutomationProperties.Name="Redo the assistant's insert"
+                    ToolTipService.ToolTip="Redo the assistant's insert">
+                <FontIcon Glyph="&#xE7A6;" FontSize="13"
                           Foreground="{StaticResource MandoGoldBrush}"/>
             </Button>
 

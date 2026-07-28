@@ -378,7 +378,9 @@ public sealed partial class MainWindow
 
     private async void SkillBrowseFolder_Click(object sender, RoutedEventArgs e)
     {
-        var picker = new Windows.Storage.Pickers.FolderPicker();
+        // SettingsIdentifier keeps this picker's "last visited folder" separate from every
+        // other picker in the app — see ChatTabView.Explorer.cs's OpenFolderButton_Click.
+        var picker = new Windows.Storage.Pickers.FolderPicker { SettingsIdentifier = "SkillInstallFolder" };
         picker.FileTypeFilter.Add("*");
         WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
         var folder = await picker.PickSingleFolderAsync();
@@ -387,7 +389,7 @@ public sealed partial class MainWindow
 
     private async void SkillBrowseZip_Click(object sender, RoutedEventArgs e)
     {
-        var picker = new Windows.Storage.Pickers.FileOpenPicker();
+        var picker = new Windows.Storage.Pickers.FileOpenPicker { SettingsIdentifier = "SkillInstallZip" };
         picker.FileTypeFilter.Add(".zip");
         WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
         var file = await picker.PickSingleFileAsync();

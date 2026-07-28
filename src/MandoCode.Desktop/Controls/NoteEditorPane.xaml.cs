@@ -136,39 +136,42 @@ public sealed partial class NoteEditorPane : UserControl
         MarkAssistantEditApplied();
     }
 
-    // ---- undoing an assistant edit ----
+    // ---- undoing / redoing an assistant edit ----
     //
     // The TextBox's own undo stack is no help here: setting Editor.Text programmatically resets it,
-    // so Ctrl+Z cannot walk back an Insert or Replace. One snapshot is enough — this undoes "what the
-    // assistant just did", not the whole editing session, which is the TextBox's job for typing.
+    // so Ctrl+Z cannot walk back an Insert or Replace. This remembers exactly ONE edit — the buffer
+    // right before it and right after it — and Undo/Redo just toggle the editor between those two
+    // endpoints. That's "single level" in both directions: there's no history of the edit BEFORE this
+    // one, and no way to redo past the edit that's currently offered. Whichever endpoint the editor's
+    // current text equals decides which button is showing, so the two are always mutually exclusive.
 
-    /// <summary>The buffer as it was before the last assistant edit, or null when there's nothing to
-    /// undo.</summary>
-    private string? _undoBuffer;
+    /// <summary>Buffer right before the last assistant edit (the Undo target), or null once there's
+    /// nothing left to toggle.</summary>
+    private string? _editBefore;
 
-    /// <summary>Caret to restore with it, so undo puts you back where you were.</summary>
-    private int _undoCaret;
+    /// <summary>Buffer right after that edit landed (the Redo target).</summary>
+    private string? _editAfter;
 
-    /// <summary>What the buffer looked like immediately AFTER that edit. The invalidation yardstick:
-    /// content rather than a flag, because TextChanged arrives asynchronously and a flag set around
-    /// the assignment can't be trusted to still mean anything by the time the event lands.</summary>
-    private string _undoApplied = "";
+    /// <summary>Caret to restore with each endpoint, so toggling puts you back where you were.</summary>
+    private int _editBeforeCaret, _editAfterCaret;
 
-    private string _undoWhat = "";
+    private string _editWhat = "";
 
     private void CaptureAssistantUndo(string before, int caret, string what)
     {
-        _undoBuffer = before;
-        _undoCaret = Math.Clamp(caret, 0, before.Length);
-        _undoWhat = what;
+        _editBefore = before;
+        _editBeforeCaret = Math.Clamp(caret, 0, before.Length);
+        _editWhat = what;
+        _editAfter = null;   // set once the edit actually lands, in MarkAssistantEditApplied
     }
 
-    /// <summary>Finishes an assistant edit: records the result as the undo yardstick, then runs the
+    /// <summary>Finishes an assistant edit: records the result as the Redo endpoint, then runs the
     /// same dirty/autosave path typing does.</summary>
     private void MarkAssistantEditApplied()
     {
-        _undoApplied = Editor.Text;
-        RefreshUndoButton();
+        _editAfter = Editor.Text;
+        _editAfterCaret = Editor.SelectionStart;
+        RefreshUndoRedoButtons();
 
         SetDirty(true);
         _autosave.Stop();
@@ -177,44 +180,77 @@ public sealed partial class NoteEditorPane : UserControl
 
     /// <summary>Puts the note back as it was before the last Insert or Replace. Autosaves like any
     /// other edit, so the file follows — an undo you have to remember to save is the same trap a jot
-    /// pad exists to avoid.</summary>
+    /// pad exists to avoid. The Redo endpoint survives this: clicking Undo doesn't forget what it
+    /// undid, so Redo can put it right back.</summary>
     public void UndoAssistantEdit()
     {
-        if (_undoBuffer == null || Current == null || Editor.IsReadOnly) return;
+        if (_editBefore == null || Current == null || Editor.IsReadOnly) return;
 
-        var restored = _undoBuffer;
-        var caret = _undoCaret;
-        ClearAssistantUndo();   // single level: undoing is not itself undoable
-
-        Editor.Text = restored;
-        Editor.Select(Math.Clamp(caret, 0, Editor.Text.Length), 0);
+        Editor.Text = _editBefore;
+        Editor.Select(Math.Clamp(_editBeforeCaret, 0, Editor.Text.Length), 0);
         Editor.Focus(FocusState.Programmatic);
 
+        RefreshUndoRedoButtons();
         SetDirty(true);
         _autosave.Stop();
         _autosave.Start();
         SetStatus("Undid the assistant's edit");
     }
 
-    private void ClearAssistantUndo()
+    /// <summary>Puts the assistant's edit back after an Undo. Same toggle in the other direction —
+    /// the Undo endpoint survives this too, so you can go back and forth as many times as you like
+    /// between exactly these two states.</summary>
+    public void RedoAssistantEdit()
     {
-        _undoBuffer = null;
-        _undoApplied = "";
-        _undoWhat = "";
-        RefreshUndoButton();
+        if (_editAfter == null || Current == null || Editor.IsReadOnly) return;
+
+        Editor.Text = _editAfter;
+        Editor.Select(Math.Clamp(_editAfterCaret, 0, Editor.Text.Length), 0);
+        Editor.Focus(FocusState.Programmatic);
+
+        RefreshUndoRedoButtons();
+        SetDirty(true);
+        _autosave.Stop();
+        _autosave.Start();
+        SetStatus("Redid the assistant's edit");
     }
 
-    private void RefreshUndoButton()
+    private void ClearAssistantUndo()
     {
-        UndoButton.Visibility = _undoBuffer == null ? Visibility.Collapsed : Visibility.Visible;
-        if (_undoBuffer == null) return;
+        _editBefore = null;
+        _editAfter = null;
+        _editWhat = "";
+        RefreshUndoRedoButtons();
+    }
 
-        var label = _undoWhat == "replace" ? "Undo the assistant's replace" : "Undo the assistant's insert";
-        ToolTipService.SetToolTip(UndoButton, label);
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(UndoButton, label);
+    /// <summary>Shows whichever of Undo/Redo makes sense for the editor's CURRENT text — it can only
+    /// ever equal one of the two remembered endpoints (or neither, once typing has moved past both),
+    /// so the buttons are never both visible at once.</summary>
+    private void RefreshUndoRedoButtons()
+    {
+        bool atAfter = _editAfter != null && Editor.Text == _editAfter;
+        bool atBefore = _editBefore != null && Editor.Text == _editBefore;
+
+        UndoButton.Visibility = atAfter ? Visibility.Visible : Visibility.Collapsed;
+        RedoButton.Visibility = atBefore ? Visibility.Visible : Visibility.Collapsed;
+
+        var noun = _editWhat == "replace" ? "replace" : "insert";
+        if (atAfter)
+        {
+            var label = $"Undo the assistant's {noun}";
+            ToolTipService.SetToolTip(UndoButton, label);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(UndoButton, label);
+        }
+        if (atBefore)
+        {
+            var label = $"Redo the assistant's {noun}";
+            ToolTipService.SetToolTip(RedoButton, label);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(RedoButton, label);
+        }
     }
 
     private void Undo_Click(object sender, RoutedEventArgs e) => UndoAssistantEdit();
+    private void Redo_Click(object sender, RoutedEventArgs e) => RedoAssistantEdit();
 
     // ---- opening / closing ----
 
@@ -314,10 +350,14 @@ public sealed partial class NoteEditorPane : UserControl
 
     private void Editor_TextChanged(object sender, TextChangedEventArgs e)
     {
-        // Any change that ISN'T the assistant edit we just applied retires the undo offer. Restoring
-        // the pre-insert buffer after the user has typed on top of it would take their typing with
-        // it, which is a worse outcome than not offering undo at all.
-        if (_undoBuffer != null && Editor.Text != _undoApplied) ClearAssistantUndo();
+        // Any change that lands somewhere OTHER than the two endpoints Undo/Redo toggle between
+        // retires both — same reasoning either direction: restoring a remembered buffer after the
+        // user has typed on top of it would take their typing with it, which is worse than just not
+        // offering the toggle anymore. Landing ON one of the two endpoints (via Undo/Redo themselves,
+        // or by hand-typing your way back to one) is not a new edit and leaves the pair intact.
+        if ((_editBefore != null || _editAfter != null)
+            && Editor.Text != _editBefore && Editor.Text != _editAfter)
+            ClearAssistantUndo();
 
         if (_suppressDirty || Current == null) return;
 
