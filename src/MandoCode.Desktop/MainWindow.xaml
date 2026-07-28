@@ -478,17 +478,31 @@
                                                                 <TextBlock Text="{x:Bind TurnCount}" Opacity="0.55" FontSize="11"
                                                                            VerticalAlignment="Center"/>
                                                             </StackPanel>
+                                                            <!-- The opening prompt: what this conversation was ABOUT. Two lines, not
+                                                                 three — the card now carries three quotes, and the two below need the
+                                                                 room more than a third line of the opening does. -->
                                                             <TextBlock Text="{x:Bind PreviewOrPlaceholder}" Opacity="0.75" FontSize="12"
-                                                                       MaxLines="3" TextTrimming="CharacterEllipsis" TextWrapping="Wrap"/>
-                                                            <!-- Where the conversation stopped: the user's LAST message, under the
-                                                                 opening line above. Dimmer, because the line above is what identifies
-                                                                 the row. Hidden when there's nothing distinct to show (a single-turn
-                                                                 conversation) and for rows not yet backfilled. -->
+                                                                       MaxLines="2" TextTrimming="CharacterEllipsis" TextWrapping="Wrap"/>
+                                                            <!-- Where the conversation stopped, in both voices: the user's LAST message
+                                                                 and then the agent's LAST reply. Dimmer than the opening line, which is
+                                                                 what identifies the row. The labels ("you" / "reply") are what tells the
+                                                                 two apart — without them a bare second quote reads as more of the first.
+                                                                 Each hides when there's nothing distinct to show (a single-turn
+                                                                 conversation; a conversation the agent never answered) and for rows not
+                                                                 yet backfilled. -->
                                                             <StackPanel Orientation="Horizontal" Spacing="6"
                                                                         Visibility="{x:Bind local:Vis.WhenText(LastMessage)}">
-                                                                <TextBlock Text="last" FontSize="10" Opacity="0.4"
+                                                                <TextBlock Text="you" FontSize="10" Opacity="0.4"
                                                                            VerticalAlignment="Top" Margin="0,2,0,0"/>
                                                                 <TextBlock Text="{x:Bind LastMessage}" FontSize="11" Opacity="0.55"
+                                                                           MaxLines="2" TextTrimming="CharacterEllipsis"
+                                                                           TextWrapping="Wrap"/>
+                                                            </StackPanel>
+                                                            <StackPanel Orientation="Horizontal" Spacing="6"
+                                                                        Visibility="{x:Bind local:Vis.WhenText(LastReply)}">
+                                                                <TextBlock Text="reply" FontSize="10" Opacity="0.4"
+                                                                           VerticalAlignment="Top" Margin="0,2,0,0"/>
+                                                                <TextBlock Text="{x:Bind LastReply}" FontSize="11" Opacity="0.55"
                                                                            MaxLines="2" TextTrimming="CharacterEllipsis"
                                                                            TextWrapping="Wrap"/>
                                                             </StackPanel>
@@ -1232,6 +1246,58 @@
                                                 Background="{StaticResource MandoBackgroundBrush}">
                                             <WebView2 x:Name="BgPreviewWeb" DefaultBackgroundColor="Transparent"/>
                                         </Border>
+
+                                        <!-- Backgrounds that ship with the release, so a fresh install has
+                                             something to pick without hunting for a file. The tiles are
+                                             whatever images are in Assets/images/backgrounds (see
+                                             BuiltInBackgrounds) — adding one in a future release needs no
+                                             change here. The whole block hides when a build ships none,
+                                             leaving "Choose image…" exactly as it was. -->
+                                        <StackPanel x:Name="BgBuiltInPanel" Spacing="6" Visibility="Collapsed">
+                                            <TextBlock x:Name="BgBuiltInHeader" Text="Included with MandoCode"
+                                                       FontSize="12" Opacity="0.6"/>
+                                            <ItemsRepeater x:Name="BgBuiltInList">
+                                                <ItemsRepeater.Layout>
+                                                    <!-- Wraps rather than scrolling, so a future fourth or fifth
+                                                         image flows onto a second row instead of off the edge. -->
+                                                    <UniformGridLayout MinItemWidth="140" MinItemHeight="104"
+                                                                       MinRowSpacing="8" MinColumnSpacing="8"/>
+                                                </ItemsRepeater.Layout>
+                                                <ItemsRepeater.ItemTemplate>
+                                                    <DataTemplate x:DataType="local:BackgroundChoiceVm">
+                                                        <Button Click="BgBuiltIn_Click" Tag="{x:Bind}"
+                                                                Padding="3" CornerRadius="9"
+                                                                Background="Transparent"
+                                                                BorderBrush="{x:Bind RingBrush}"
+                                                                BorderThickness="{x:Bind RingThickness}"
+                                                                ToolTipService.ToolTip="{x:Bind DisplayName}"
+                                                                AutomationProperties.Name="{x:Bind DisplayName}">
+                                                            <StackPanel Spacing="4">
+                                                                <Grid>
+                                                                    <Border CornerRadius="6" Width="124" Height="70">
+                                                                        <Image Source="{x:Bind Thumbnail}" Stretch="UniformToFill"/>
+                                                                    </Border>
+                                                                    <!-- Check badge: the ring alone is easy to miss on a
+                                                                         busy image, and it has to survive the light themes. -->
+                                                                    <Border Visibility="{x:Bind CheckVisibility}"
+                                                                            Background="{StaticResource MandoAccentBrush}"
+                                                                            CornerRadius="9" Width="18" Height="18"
+                                                                            HorizontalAlignment="Right" VerticalAlignment="Top"
+                                                                            Margin="0,4,4,0">
+                                                                        <FontIcon Glyph="&#xE73E;" FontSize="10"
+                                                                                  Foreground="White"/>
+                                                                    </Border>
+                                                                </Grid>
+                                                                <TextBlock Text="{x:Bind DisplayName}" FontSize="11"
+                                                                           Opacity="0.75" MaxWidth="124"
+                                                                           TextTrimming="CharacterEllipsis"
+                                                                           HorizontalAlignment="Center"/>
+                                                            </StackPanel>
+                                                        </Button>
+                                                    </DataTemplate>
+                                                </ItemsRepeater.ItemTemplate>
+                                            </ItemsRepeater>
+                                        </StackPanel>
 
                                         <StackPanel Orientation="Horizontal" Spacing="8">
                                             <Button x:Name="BgChooseButton" Content="Choose image…" Click="BgChoose_Click"/>

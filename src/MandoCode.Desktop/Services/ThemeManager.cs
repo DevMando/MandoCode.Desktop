@@ -238,6 +238,13 @@ public static class ThemeManager
     /// survives the original moving; transcripts load it via the mandocode.userdata host.</summary>
     public static string? ChatBackgroundFile { get; private set; }
 
+    /// <summary>File name of the shipped background currently in use (see
+    /// <see cref="BuiltInBackgrounds"/>), or null when the background is the user's own file or
+    /// none. Identity only — the image itself is copied like any picked file, and that copy is
+    /// RENAMED to chat-bg.&lt;ext&gt;, so without this the gallery couldn't mark which tile is
+    /// active after a restart.</summary>
+    public static string? ChatBackgroundBuiltIn { get; private set; }
+
     /// <summary>Opacity of the chat background image layer only (0.05–1.0). Text never
     /// fades — the slider dims the picture, not the conversation.</summary>
     public static double ChatBackgroundOpacity { get; private set; } = 0.30;
@@ -273,9 +280,15 @@ public static class ThemeManager
     /// the window constructor, before first render.</summary>
     public static void Initialize(FrameworkElement root)
     {
+        // A MISSING settings file is the fresh-install signal, deliberately narrower than "we ended
+        // up on the defaults": a file that exists but won't parse belongs to someone who has used
+        // the app, and handing them a background they never chose would read as the corruption
+        // doing something rather than the app recovering from it.
+        var freshInstall = !File.Exists(SettingsPath);
+
         try
         {
-            if (File.Exists(SettingsPath))
+            if (!freshInstall)
             {
                 var saved = JsonSerializer.Deserialize<UiSettings>(File.ReadAllText(SettingsPath));
                 Current = UiTheme.All.FirstOrDefault(t => t.Name == saved?.Theme) ?? Current;
@@ -287,12 +300,38 @@ public static class ThemeManager
                 {
                     var bg = Path.Combine(UserDataFolder, saved.ChatBackground);
                     if (File.Exists(bg)) ChatBackgroundFile = bg;
+                    // Only meaningful while that copy is still on disk — otherwise the gallery would
+                    // mark a tile as active with no background actually showing.
+                    if (ChatBackgroundFile != null) ChatBackgroundBuiltIn = saved.ChatBgBuiltIn;
                 }
             }
         }
         catch { /* unreadable settings file — fall back to the defaults */ }
+
+        if (freshInstall) ApplyFirstRunBackground();
+
         ApplyCore(Current, root);
         Save();   // first run (or corrupt file): materialize the defaults on disk
+    }
+
+    /// <summary>
+    /// Opens a brand-new install on the first bundled background instead of a bare theme, so the app
+    /// has a look out of the box and the gallery isn't a feature only the curious ever find.
+    /// <see cref="ChatBackgroundOpacity"/> is left at its 30% default — the same value a
+    /// user-picked image gets.
+    ///
+    /// "First" means first in gallery order, so the <c>01-</c> prefix picks the first-run image as
+    /// well as the tile order: a future release changes the default by renumbering, not by editing
+    /// this. A build that ships no backgrounds is a no-op and opens on the flat theme, exactly as
+    /// before.
+    ///
+    /// Runs on the first launch ONLY. Any later change — including removing the background — writes
+    /// a settings file, and this never runs again, so a user's "no background" choice sticks.
+    /// </summary>
+    private static void ApplyFirstRunBackground()
+    {
+        if (BuiltInBackgrounds.All.FirstOrDefault() is not { } first) return;
+        SetChatBackground(first.FullPath, first.FileName);
     }
 
     public static void Apply(UiTheme theme, FrameworkElement root)
@@ -311,8 +350,14 @@ public static class ThemeManager
 
     /// <summary>Copies the picked image into <see cref="UserDataFolder"/> and remembers it,
     /// or clears the background when <paramref name="sourcePath"/> is null. The caller
-    /// re-scripts open transcripts (MainWindow.ApplyThemeToAllTabs).</summary>
-    public static void SetChatBackground(string? sourcePath)
+    /// re-scripts open transcripts (MainWindow.ApplyThemeToAllTabs).
+    ///
+    /// <paramref name="builtInName"/> is the shipped image's file name when the source came from
+    /// the gallery, and null for a file the user picked — the copy is renamed on the way in, so
+    /// this is the only record of which tile is active. Copying rather than referencing the install
+    /// folder is deliberate: the background survives the app being reinstalled or updated
+    /// underneath it, and every downstream consumer keeps working off one path.</summary>
+    public static void SetChatBackground(string? sourcePath, string? builtInName = null)
     {
         try
         {
@@ -335,6 +380,10 @@ public static class ThemeManager
             }
             catch { /* unreadable source — behave as if cleared */ }
         }
+
+        // Tied to the copy actually landing: a source that failed to copy leaves no background, so
+        // claiming a gallery tile is active would mark a tile that isn't showing anything.
+        ChatBackgroundBuiltIn = ChatBackgroundFile == null ? null : builtInName;
         Save();
     }
 
@@ -369,6 +418,7 @@ public static class ThemeManager
                     Theme = Current.Name,
                     Opacity = WindowOpacity,
                     ChatBackground = ChatBackgroundFile == null ? null : Path.GetFileName(ChatBackgroundFile),
+                    ChatBgBuiltIn = ChatBackgroundBuiltIn,
                     ChatBgOpacity = ChatBackgroundOpacity,
                     Boxed = BoxedMessages,
                 }));
@@ -390,6 +440,7 @@ public static class ThemeManager
         SetBrush(res, "MandoBorderBrush", t.Border);
         SetBrush(res, "MandoTextBrush", t.Text);
         SetBrush(res, "MandoDimBrush", t.Dim);
+        SetBrush(res, "MandoRaisedBrush", Raised(t));
 
         // Accent family: Light2 feeds accent fills in dark themes, Dark1 in light
         // themes — both pinned to the exact brand accent so fills never drift.
@@ -447,8 +498,98 @@ public static class ThemeManager
             : "document.documentElement.removeAttribute('data-cards');") +
         "})();";
 
+    /// <summary>Accent tint used for the raised surface. The strong value is what nearly every theme
+    /// gets; the gentle one is the floor a low-contrast theme backs off to (see
+    /// <see cref="Raised"/>).</summary>
+    private const double RaisedTintStrong = 0.18;
+    private const double RaisedTintGentle = 0.08;
+
+    /// <summary>Text-on-card contrast the tint must preserve where the theme allows it — the WCAG AA
+    /// floor for body text.</summary>
+    private const double RaisedTextContrastFloor = 4.5;
+
+    /// <summary>Panel-vs-Background separation at which a theme's Panel already reads as a raised
+    /// surface on its own, and tinting it would do more harm than good.</summary>
+    private const double RaisedAlreadySeparated = 1.5;
+
+    /// <summary>
+    /// The raised-surface color for a theme: <see cref="UiTheme.Panel"/> blended toward that theme's
+    /// own <see cref="UiTheme.Accent"/>. Used by transient cards that float OVER the transcript (the
+    /// snapshot offer), which need to read as ON TOP OF the conversation rather than part of it —
+    /// and Panel can't do that job, because Panel and Background are only a few points apart in most
+    /// themes (Visual Studio Dark is #252526 on #1E1E1E).
+    ///
+    /// Derived rather than a hand-authored hex per theme for two reasons. It's one less value to keep
+    /// in sync every time a theme is added or retuned; and blending toward the theme's OWN accent
+    /// means each theme gets a shade that belongs to it instead of a generic gray — the tint stays
+    /// grayscale in E-Ink Paper (whose accent is desaturated ink), goes navy in W98, and goes
+    /// phosphor green in Phosphor Fwog, all for free.
+    ///
+    /// Deliberately NOT a lift toward white/black: W98's Panel is pure white on a silver Background,
+    /// so darkening it would push the card TOWARD the background it needs to separate from.
+    ///
+    /// The tint backs off when a full-strength one would hurt legibility. Solarized Light is the case
+    /// that needs it: its Text/Panel pair is famously low-contrast and already sits below AA, so the
+    /// strong tint would take a marginal theme to genuinely hard to read. It lands on the gentle tint
+    /// instead, which still separates from its background about as well as W98 does at full strength.
+    /// </summary>
+    private static Color Raised(UiTheme t)
+    {
+        var panel = C(t.Panel);
+        var accent = C(t.Accent);
+        var text = C(t.Text);
+
+        // Some themes already put real distance between Panel and Background, and tinting those
+        // makes things worse rather than better. W98 is the case: its white content wells sit
+        // 1.82:1 off the silver desktop — already the most separated surface of any theme — and
+        // tinting turned a period-correct white dialog into a pale lavender one belonging to no
+        // era, while REDUCING the separation to 1.21:1. Every other theme is at most 1.36:1, so
+        // this only ever exempts a theme whose own palette has done the job.
+        if (Contrast(panel, C(t.Background)) >= RaisedAlreadySeparated) return panel;
+
+        for (var tint = RaisedTintStrong; tint > RaisedTintGentle; tint -= 0.02)
+        {
+            var candidate = MixToward(panel, accent, tint);
+            if (Contrast(text, candidate) >= RaisedTextContrastFloor) return candidate;
+        }
+
+        // No tint in range clears the floor (the theme starts below it) — take the gentlest, which
+        // costs the least contrast while still being a distinct surface.
+        return MixToward(panel, accent, RaisedTintGentle);
+    }
+
+    /// <summary>WCAG relative luminance of an sRGB color.</summary>
+    private static double Luminance(Color c)
+    {
+        static double Ch(byte v)
+        {
+            var s = v / 255.0;
+            return s <= 0.03928 ? s / 12.92 : Math.Pow((s + 0.055) / 1.055, 2.4);
+        }
+        return 0.2126 * Ch(c.R) + 0.7152 * Ch(c.G) + 0.0722 * Ch(c.B);
+    }
+
+    /// <summary>WCAG contrast ratio between two colors, 1.0 (identical) to 21.0 (black on white).</summary>
+    private static double Contrast(Color a, Color b)
+    {
+        var (la, lb) = (Luminance(a), Luminance(b));
+        return (Math.Max(la, lb) + 0.05) / (Math.Min(la, lb) + 0.05);
+    }
+
     private static void SetBrush(ResourceDictionary res, string key, string hex) =>
         ((SolidColorBrush)res[key]).Color = C(hex);
+
+    private static void SetBrush(ResourceDictionary res, string key, Color color) =>
+        ((SolidColorBrush)res[key]).Color = color;
+
+    /// <summary>Blends <paramref name="from"/> toward <paramref name="to"/> by
+    /// <paramref name="amount"/> (0–1). The result always lands between the two channels, so the
+    /// byte casts can't overflow.</summary>
+    private static Color MixToward(Color from, Color to, double amount)
+    {
+        byte Ch(byte a, byte b) => (byte)(a + (b - a) * amount);
+        return Color.FromArgb(255, Ch(from.R, to.R), Ch(from.G, to.G), Ch(from.B, to.B));
+    }
 
     public static Color C(string hex) => Color.FromArgb(
         255,
@@ -470,6 +611,10 @@ public static class ThemeManager
         public string? Theme { get; set; }
         public double Opacity { get; set; } = 1.0;
         public string? ChatBackground { get; set; }      // file name inside UserDataFolder
+        /// <summary>Shipped image this came from, or null for the user's own file. Absent in a
+        /// settings file written before the gallery existed, which reads as "your own file" — the
+        /// safe answer, since it only means no tile is marked.</summary>
+        public string? ChatBgBuiltIn { get; set; }
         public double ChatBgOpacity { get; set; } = 0.30;
         /// <summary>Nullable on purpose: absent (pre-feature settings file) means "use the
         /// current default", so changing the default never fights a user's explicit choice.</summary>

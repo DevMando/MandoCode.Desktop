@@ -41,6 +41,21 @@ public sealed partial class MainWindow
         ApplyThemeToAllTabs();
     }
 
+    /// <summary>Picks one of the backgrounds that shipped with the app. It goes through the same
+    /// copy-and-serve path as a file the user chose — the only extra is recording WHICH shipped image
+    /// it was, so the gallery can mark it after a restart. Clicking the active tile turns it off
+    /// again, so a tile is a toggle rather than a one-way trip.</summary>
+    private void BgBuiltIn_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not BackgroundChoiceVm choice) return;
+
+        if (choice.IsSelected) ThemeManager.SetChatBackground(null);
+        else ThemeManager.SetChatBackground(choice.Item.FullPath, choice.Item.FileName);
+
+        UpdateBgControls();
+        ApplyThemeToAllTabs();
+    }
+
     private void BgClear_Click(object sender, RoutedEventArgs e)
     {
         ThemeManager.SetChatBackground(null);
@@ -66,9 +81,27 @@ public sealed partial class MainWindow
     private void UpdateBgControls()
     {
         var hasImage = ThemeManager.ChatBackgroundFile != null;
-        BgFileLabel.Text = hasImage ? "Image set ✓" : "No image set";
+        var builtIn = BuiltInBackgrounds.Find(ThemeManager.ChatBackgroundBuiltIn);
+
+        // Naming the shipped image beats "Image set ✓" — with a gallery on the page, the label is
+        // what tells you whether you're on one of ours or your own file.
+        BgFileLabel.Text = builtIn != null ? builtIn.DisplayName
+                         : hasImage ? "Your own image ✓"
+                         : "No image set";
         BgClearButton.IsEnabled = hasImage;
         S_BgOpacity.IsEnabled = hasImage;
+
+        // Rebuilt wholesale so the selection ring re-evaluates — the tiles bind OneTime.
+        var shipped = BuiltInBackgrounds.All;
+        BgBuiltInPanel.Visibility = shipped.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        BgBuiltInList.ItemsSource = shipped
+            .Select(b => new BackgroundChoiceVm
+            {
+                Item = b,
+                IsSelected = b.FileName.Equals(ThemeManager.ChatBackgroundBuiltIn, StringComparison.OrdinalIgnoreCase),
+            })
+            .ToList();
+
         // The preview WebView renders the image itself (via the userdata host + theme
         // script), so there is no XAML image to update here anymore.
     }

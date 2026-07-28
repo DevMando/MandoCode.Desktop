@@ -6,7 +6,62 @@ recorded by the `MandoCode` submodule.
 
 ## [Unreleased]
 
+### Changed
+- **Assistant text always starts on its own line.** Inserting a reply at the cursor used to glue it
+  onto the tail of whatever line you were mid-way through. It now opens a new line first — unless
+  the cursor already sits at the start of one, so an empty note doesn't gain a blank first line.
+  Replacing a highlighted selection is unchanged: there you aimed at a specific span, and pushing
+  the replacement onto its own line would orphan the rest of that line.
+- **The snapshot offer now reads as a card floating over the chat.** It was painted with the same
+  panel shade as the docked chrome, which sits within a few points of the transcript background in
+  most themes (Visual Studio Dark is `#252526` on `#1E1E1E`), so it blended into the conversation.
+  Both stages — the thin bar and the full name + model picker — now use a new raised surface plus an
+  accent edge. The shade is derived per theme from that theme's own accent rather than hand-picked,
+  so it carries the theme's character (grayscale in E-Ink Paper, navy in W98, phosphor green in
+  Phosphor Fwog) and new themes get one automatically. The tint eases off on a theme whose text
+  contrast can't afford it — Solarized Light, which already sat below AA on its own panel — and is
+  skipped entirely on a theme whose panel already reads as raised, which keeps W98's card the
+  period-correct white dialog on the silver desktop.
+
+### Fixed
+- **W98 chat prompts are readable again.** Your own prompts rendered in the theme's gold, which
+  resolves to a dark mustard `#806000` — 3.21:1 on a silver window, under the accessibility floor
+  and hard going for anyone with less-than-perfect sight. W98 prompts now use black window text
+  (11.5:1), which is the era-correct answer anyway; the silver bevelled frame already marks whose
+  turn it is. The "Show more" toggle on a clamped prompt got the same treatment: it sits on the teal
+  desktop rather than in the window, where the dim gray it used was 1.44:1 — effectively invisible —
+  and is now white underlined at 4.77:1. Other themes are untouched.
+
 ### Added
+- **Undo for the notes assistant.** A gold undo arrow appears in the note header after the assistant
+  inserts or replaces text, putting the note back exactly as it was. Ctrl+Z can't do this job —
+  assigning the editor's text resets the TextBox's own undo history, so the one edit you *didn't*
+  type by hand was the one the control couldn't reverse, and a Replace could take a whole note with
+  it. The offer covers the assistant's last edit only and retires the moment you type, since
+  restoring the earlier buffer would otherwise discard whatever you'd written on top of it.
+- **Chat backgrounds included in the box.** Settings → Appearance now offers a gallery of three
+  backgrounds that ship with MandoCode — **Golden Gate**, **Sequoia Trail**, and **Pismo Beach** —
+  so a fresh install has something to pick without hunting for a file. Click a tile to use it, click it again to turn it off; the active one is ringed and
+  named. Choosing your own image works exactly as before, and the two are interchangeable — a
+  tile is just a starting point, not a mode. The gallery is read from the release's
+  `Assets/images/backgrounds` folder at startup rather than listed in code, so a future release
+  adds one by dropping the file in. A **fresh install now opens on "Golden Gate"** at the usual 30%
+  opacity instead of a bare theme — first launch only, so nobody who has already set (or cleared) a
+  background is re-skinned by an update.
+- **One-click snapshot from the tab header.** A camera button joins the folder and explorer icons
+  at the right of each agent's header, taking the same snapshot offer that lived two clicks deep
+  in the tab's "…" menu (which stays). It sits with the header's other *actions* rather than
+  beside the model label it captures, so it keeps a fixed position instead of sliding whenever
+  the model name changes length. On an empty conversation it answers with the usual "Nothing to
+  snapshot" chip rather than presenting a dead button.
+- **History cards quote the agent's last reply.** A card showed the opening prompt and the last
+  thing you typed; it now adds the last thing the agent *said*, which is usually what you
+  actually remember a conversation by. The reply is flattened out of markdown (code fences,
+  headings, bullets and tables dropped; link text kept) and clipped to its first couple of
+  sentences, so the card doesn't grow — the opening line gives up a third row of wrapping to pay
+  for it. The two closing quotes are now labeled **you** and **reply** so it's clear which voice
+  is which. Conversations archived before this fill in on the first History open, alongside the
+  existing last-message backfill (one file read for both).
 - **Agent callsigns.** A Settings → Behavior toggle (app-wide) names new agents from a
   curated 500+ pool of handles — construct-crew, phreak, and cypher energy ("Morphy",
   "Crunch", "Blazor", "Kaos") — drawn from a shuffled deck that doesn't repeat until it runs

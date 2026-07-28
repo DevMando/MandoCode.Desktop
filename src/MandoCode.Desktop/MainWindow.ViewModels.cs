@@ -124,6 +124,46 @@ public sealed class NoteGroup : List<NoteRow>
 }
 
 /// <summary>
+/// One tile in the Appearance page's shipped-background gallery. Selection is baked in at build
+/// time rather than observed: <c>UpdateBgControls</c> rebuilds the whole list on every change, the
+/// same way the History and Notes panels rebuild their rows, so OneTime bindings are enough and
+/// there's no INotifyPropertyChanged to keep honest.
+/// </summary>
+public sealed class BackgroundChoiceVm
+{
+    public required Services.BuiltInBackground Item { get; init; }
+
+    /// <summary>True when this is the background currently in use.</summary>
+    public required bool IsSelected { get; init; }
+
+    public string DisplayName => Item.DisplayName;
+
+    /// <summary>
+    /// Thumbnail for the tile. <c>DecodePixelWidth</c> is set BEFORE the source (WinUI ignores it
+    /// afterward) so a 1920-wide wallpaper decodes at tile size — otherwise every gallery image
+    /// would sit in memory at full resolution just to draw a 128px card.
+    /// </summary>
+    public ImageSource Thumbnail
+    {
+        get
+        {
+            var bitmap = new BitmapImage { DecodePixelWidth = 280 };
+            bitmap.UriSource = new Uri(Item.FullPath);
+            return bitmap;
+        }
+    }
+
+    public Visibility CheckVisibility => Vis.When(IsSelected);
+
+    /// <summary>An accent ring marks the active tile; the others take the ordinary border. Both are
+    /// the shared brush INSTANCES, so they recolor with the theme like everything else.</summary>
+    public Brush RingBrush => (Brush)Application.Current.Resources[
+        IsSelected ? "MandoAccentBrush" : "MandoBorderBrush"];
+
+    public Thickness RingThickness => new(IsSelected ? 2 : 1);
+}
+
+/// <summary>
 /// x:Bind function-binding helpers. These exist so bool/string→<see cref="Visibility"/> logic can
 /// stay OUT of the persisted service models: `SessionArchiveStore.cs` and friends are compiled into
 /// the WinUI-free test project, so a Visibility property on them would break that build. Cheaper

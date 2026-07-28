@@ -36,6 +36,14 @@
             <SolidColorBrush x:Key="MandoTextBrush" Color="{StaticResource MandoTextColor}" />
             <SolidColorBrush x:Key="MandoDimBrush" Color="{StaticResource MandoDimColor}" />
 
+            <!-- Raised surface, for cards that FLOAT over the transcript and must not read as
+                 more transcript. Panel sits only a few points from Background in most themes,
+                 so a floating card painted with Panel disappears. Derived per theme from that
+                 theme's own accent — see ThemeManager.Raised; this literal is the Mando Dark
+                 value, used only until Initialize applies the saved theme. -->
+            <Color x:Key="MandoRaisedColor">#3E2753</Color>
+            <SolidColorBrush x:Key="MandoRaisedBrush" Color="{StaticResource MandoRaisedColor}" />
+
             <!-- Replace the user's Windows accent color with MandoCode purple so
                  accent buttons, toggle switches, sliders, and selection highlights
                  match the brand on every machine -->

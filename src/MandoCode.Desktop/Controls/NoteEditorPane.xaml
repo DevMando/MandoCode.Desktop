@@ -50,7 +50,21 @@
                            TextTrimming="CharacterEllipsis"/>
             </StackPanel>
 
-            <Button Grid.Column="2" Padding="6" Background="Transparent" BorderThickness="0"
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Top">
+            <!-- Undo the assistant's last Insert/Replace. Appears only when there IS one to undo, and
+                 goes away again the moment you type — see UndoAssistantEdit. It exists because
+                 Ctrl+Z can't do this job: assigning Editor.Text resets the TextBox's undo history,
+                 so the one edit the user didn't type by hand is the one the control can't reverse.
+                 Gold, like the unsaved dot: this is the note in a state worth noticing. -->
+            <Button x:Name="UndoButton" Click="Undo_Click" Padding="6" Visibility="Collapsed"
+                    Background="Transparent" BorderThickness="0"
+                    AutomationProperties.Name="Undo the assistant's insert"
+                    ToolTipService.ToolTip="Undo the assistant's insert">
+                <FontIcon Glyph="&#xE7A7;" FontSize="13"
+                          Foreground="{StaticResource MandoGoldBrush}"/>
+            </Button>
+
+            <Button Padding="6" Background="Transparent" BorderThickness="0"
                     VerticalAlignment="Top" AutomationProperties.Name="Note options"
                     ToolTipService.ToolTip="Note options">
                 <FontIcon Glyph="&#xE712;" FontSize="13"/>
@@ -75,6 +89,7 @@
                     </MenuFlyout>
                 </Button.Flyout>
             </Button>
+            </StackPanel>
         </Grid>
 
         <!-- Conflict surface. Something other than this editor wrote (or removed) the note —

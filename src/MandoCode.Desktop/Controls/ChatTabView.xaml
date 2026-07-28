@@ -109,6 +109,16 @@
                        ToolTipService.ToolTip="This tab's project folder"/>
 
             <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
+                <!-- Quick snapshot — a shortcut for the tab menu's "Take snapshot", not a
+                     replacement (that item stays). It lives in the ACTION cluster rather than
+                     beside the model label it captures: the header reads as status on the left,
+                     actions on the right, and an action anchored here keeps a fixed position
+                     instead of sliding every time the model name changes length.
+                     Same glyph as the menu item, so the two are recognizably one feature. -->
+                <Button x:Name="SnapshotButton" Click="SnapshotButton_Click" Padding="8,5"
+                        ToolTipService.ToolTip="Snapshot this conversation's context">
+                    <FontIcon Glyph="&#xE722;" FontSize="15"/>
+                </Button>
                 <Button x:Name="OpenFolderButton" Click="OpenFolderButton_Click" Padding="8,5"
                         ToolTipService.ToolTip="Change this tab's project folder">
                     <FontIcon Glyph="&#xE8B7;" FontSize="15"/>
@@ -380,10 +390,14 @@
                 <TranslateTransform x:Name="SnapshotOfferTransform"/>
             </Grid.RenderTransform>
 
-            <!-- Stage 1: thin notification bar -->
+            <!-- Stage 1: thin notification bar.
+                 Both stages wear the RAISED surface and an accent edge, not the Panel/Border pair
+                 the docked chrome uses. They float over the transcript, and Panel is within a few
+                 points of the transcript background in most themes — the card read as part of the
+                 conversation rather than something sitting on top of it awaiting an answer. -->
             <Border x:Name="SnapshotNotifyBar" Padding="12,8" CornerRadius="10"
-                    Background="{StaticResource MandoPanelBrush}"
-                    BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1">
+                    Background="{StaticResource MandoRaisedBrush}"
+                    BorderBrush="{StaticResource MandoAccentBrush}" BorderThickness="1">
                 <Grid ColumnSpacing="10">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
@@ -415,8 +429,8 @@
 
             <!-- Stage 2: full name + model picker (shown after Create on the bar) -->
             <Border x:Name="SnapshotOfferCard" Visibility="Collapsed" Padding="14,12" CornerRadius="10"
-                    Background="{StaticResource MandoPanelBrush}"
-                    BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1">
+                    Background="{StaticResource MandoRaisedBrush}"
+                    BorderBrush="{StaticResource MandoAccentBrush}" BorderThickness="1">
                 <Grid>
                 <StackPanel x:Name="SnapshotOfferContent" Spacing="10">
                     <Grid>

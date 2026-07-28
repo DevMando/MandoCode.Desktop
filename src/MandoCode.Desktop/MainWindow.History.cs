@@ -41,9 +41,10 @@ public sealed partial class MainWindow
             return;
         }
 
-        // What it was about (first) and where it stopped (last) — both the user's own words.
-        var said = turns.Where(t => t.R == "u").ToList();
-        var preview = TrimForCard(said.FirstOrDefault()?.T);
+        // What it was about (first user turn) and where it stopped (last user turn + the agent's
+        // last reply).
+        var preview = CardPreview.Trim(turns.FirstOrDefault(t => t.R == "u")?.T);
+        var closing = CardLinesFor(turns, preview);
 
         _archive.Add(new SessionArchiveEntry
         {
@@ -54,30 +55,29 @@ public sealed partial class MainWindow
             ClosedAt = DateTimeOffset.Now,
             TurnCount = turns.Count,
             Preview = preview,
-            LastMessage = LastMessageFor(said, preview),
+            LastMessage = closing.LastMessage,
+            LastReply = closing.LastReply,
         });
     }
 
-    /// <summary>Card lines are capped at this; shared by the first- and last-message previews so the
-    /// two can't drift apart.</summary>
-    private const int CardPreviewChars = 140;
-
-    private static string? TrimForCard(string? text)
+    /// <summary>
+    /// The two closing quotes for a conversation: the user's last message and the agent's last reply.
+    /// Both are "" — meaning "computed, nothing to show" — rather than null when there's nothing
+    /// worth printing, which is what keeps the backfill from retrying the row forever.
+    ///
+    /// The last user message is suppressed when it IS <paramref name="preview"/>: a single-turn
+    /// conversation would otherwise quote the same line twice. The reply has no such clash (it's the
+    /// other voice) so it shows even on a one-turn row — that's the case it helps most.
+    /// </summary>
+    private static SessionArchiveStore.CardLines CardLinesFor(
+        IReadOnlyList<ConversationTurn> turns, string? preview)
     {
-        var trimmed = text?.Trim();
-        if (string.IsNullOrEmpty(trimmed)) return null;
-        return trimmed.Length > CardPreviewChars
-            ? trimmed[..CardPreviewChars].TrimEnd() + "…"
-            : trimmed;
-    }
+        var lastSaid = CardPreview.Trim(turns.LastOrDefault(t => t.R == "u")?.T);
+        var lastReply = CardPreview.ClipReply(turns.LastOrDefault(t => t.R == "a")?.T);
 
-    /// <summary>The "where you left off" line for a set of user turns. Returns "" — meaning
-    /// "computed, nothing to show" — when there are no user turns, or when the last one IS the first
-    /// one, since a single-turn conversation would otherwise print the same quote twice.</summary>
-    private static string LastMessageFor(IReadOnlyList<ConversationTurn> userTurns, string? preview)
-    {
-        var last = TrimForCard(userTurns.LastOrDefault()?.T);
-        return last == null || last == preview ? "" : last;
+        return new SessionArchiveStore.CardLines(
+            lastSaid == null || lastSaid == preview ? "" : lastSaid,
+            lastReply ?? "");
     }
 
     private void OnArchiveChanged()
@@ -107,26 +107,27 @@ public sealed partial class MainWindow
         MarkHistorySeen();   // opening the panel IS reading it — clear the unread badge
         PopulateHistory();
         ShowLeftPanel(LeftPanel.History);
-        _ = BackfillHistoryLastMessagesAsync();
+        _ = BackfillHistoryCardLinesAsync();
     }
 
     private bool _historyBackfillStarted;
 
-    /// <summary>Fills in <see cref="SessionArchiveEntry.LastMessage"/> for conversations archived
-    /// before it was recorded, so old cards carry the same "where you left off" line as new ones.
-    /// Deferred to the first History open rather than startup (it's up to 60 log reads), run off the
-    /// UI thread, and persisted in one write. The store's Changed event repopulates the panel.</summary>
-    private async Task BackfillHistoryLastMessagesAsync()
+    /// <summary>Fills in <see cref="SessionArchiveEntry.LastMessage"/> and
+    /// <see cref="SessionArchiveEntry.LastReply"/> for conversations archived before those were
+    /// recorded, so old cards carry the same closing lines as new ones. Deferred to the first History
+    /// open rather than startup (it's up to 60 log reads), run off the UI thread, and persisted in one
+    /// write. The store's Changed event repopulates the panel.</summary>
+    private async Task BackfillHistoryCardLinesAsync()
     {
         if (_historyBackfillStarted) return;
         _historyBackfillStarted = true;
 
-        await Task.Run(() => _archive.BackfillLastMessages(entry =>
+        await Task.Run(() => _archive.BackfillCardLines(entry =>
         {
-            var said = ConversationLog.Load(entry.Key).Where(t => t.R == "u").ToList();
+            var turns = ConversationLog.Load(entry.Key);
             // Recompute the first line the same way too: comparing against the STORED preview would
             // miss a single-turn conversation whose preview was trimmed under an older rule.
-            return LastMessageFor(said, TrimForCard(said.FirstOrDefault()?.T));
+            return CardLinesFor(turns, CardPreview.Trim(turns.FirstOrDefault(t => t.R == "u")?.T));
         }));
     }
 

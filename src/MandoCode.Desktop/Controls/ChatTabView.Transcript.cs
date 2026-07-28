@@ -187,4 +187,10 @@ public sealed partial class ChatTabView
     /// opt-in create card so the user can pick a summarizer model.</summary>
     public void TakeSnapshotManually() => _ = _controller.OfferManualSnapshotAsync();
 
+    /// <summary>The header's camera button — the same offer as the tab menu's "Take snapshot", one
+    /// click away instead of two. No guard for an empty conversation: the offer itself answers that
+    /// with a "Nothing to snapshot" chip in the transcript, which teaches more than a dead button
+    /// would.</summary>
+    private void SnapshotButton_Click(object sender, RoutedEventArgs e) => TakeSnapshotManually();
+
 }
