@@ -251,7 +251,14 @@ public sealed partial class ChatTabView
 
     private async void OpenFolderButton_Click(object sender, RoutedEventArgs e)
     {
-        var picker = new Windows.Storage.Pickers.FolderPicker();
+        var picker = new Windows.Storage.Pickers.FolderPicker
+        {
+            // Without this, every FolderPicker/FileOpenPicker/FileSavePicker in the app shares
+            // ONE "last visited folder" bucket — picking a folder anywhere (e.g. the Music
+            // flyout's playlist picker) silently becomes the starting point here too. Each
+            // call site across the app gets its own identifier for exactly this reason.
+            SettingsIdentifier = "ProjectRoot",
+        };
         picker.FileTypeFilter.Add("*");
 
         // Unpackaged apps must initialize pickers with the window handle.
