@@ -3,7 +3,7 @@
 </p>
 
 <h1 align="center">MandoCode Desktop</h1>
-<p align="center"><b>An AI coding assistant that lives on your machine, not someone else's server.</b></p>
+<p align="center"><b>An AI coding assistant built on open-weight models, not someone else's closed one.</b></p>
 
 <p align="center">
   <a href="https://github.com/DevMando/MandoCode.Desktop/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/DevMando/MandoCode.Desktop?label=release"></a>
@@ -12,15 +12,14 @@
   <a href="https://ollama.com"><img alt="Platform: Ollama" src="https://img.shields.io/badge/platform-Ollama-000000"></a>
   <a href="https://github.com/DevMando/MandoCode"><img alt="Engine: MandoCode CLI" src="https://img.shields.io/badge/engine-MandoCode%20CLI-informational"></a>
 </p>
-<p align="center">Made with &lt;3 by Mando</p>
 
 ---
 
-Most AI coding tools assume you're always online, sending your code to someone else's servers, on
-someone else's subscription. MandoCode doesn't have to. It runs entirely on your own machine through
-[Ollama](https://ollama.com) — free, private, no API key, nothing metered per token — or, when you
-want more horsepower, a cloud model when *you* choose to reach for one. Same assistant either way,
-same conversation, your call.
+Most AI coding tools lock you into one vendor's closed model — whatever they ship, whenever they
+change it, on their terms. MandoCode runs on open-weight models instead, through
+[Ollama](https://ollama.com): entirely on your own machine — free, private, no API key, nothing
+metered per token — or a hosted model when you want more headroom. Same assistant either way, same
+conversation, your call.
 
 MandoCode Desktop takes that assistant and gives it an actual home on Windows, instead of a single
 chat window bolted onto a terminal: several agents working in parallel, a real integrated shell, a
@@ -33,8 +32,7 @@ Only the interface is.
 
 ## Screenshots
 
-*(Drop your images into `docs/screenshots/` with the filenames below and they'll show up here —
-see `docs/screenshots/README.md` for the exact list.)*
+*(Drop your images into `docs/screenshots/` with the filenames below and they'll show up here.)*
 
 <p align="center">
   <img src="docs/screenshots/chat-and-agents.png" width="100%" alt="Chat with multiple agent tabs">
@@ -59,13 +57,13 @@ see `docs/screenshots/README.md` for the exact list.)*
 
 Two problems, one app:
 
-- **You shouldn't need a cloud subscription to have an AI pair programmer.** MandoCode is
-  local-first — point it at Ollama and it runs on your own hardware, on your own data, for free. A
-  cloud model is there if you want the extra ceiling, never because the app requires it.
-- **A coding assistant is something you live in all day, not a popup.** So it gets a real app:
-  multiple agents open at once, a real shell, a file tree that actually knows about git, a place to
-  jot down a thought without opening a text editor, and a look you can make your own instead of one
-  fixed dark theme.
+- **Open models, your choice — never one vendor's.** MandoCode runs on open-weight models through
+  Ollama: swap models per agent, run one entirely on your own hardware for free, or reach for a
+  hosted model when you want more ceiling. You're never locked to a single closed API.
+- **A coding assistant is something you live in all day, not a popup.** So it gets a real native
+  app built on C#, WinUI 3, and Semantic Kernel's Ollama connector — multiple agents open at once,
+  a real shell, a file tree that actually knows about git, a place to jot down a thought without
+  opening a text editor, and a look you can make your own instead of one fixed dark theme.
 
 ## Features
 
