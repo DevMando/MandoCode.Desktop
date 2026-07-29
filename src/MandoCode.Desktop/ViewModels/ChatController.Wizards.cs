@@ -171,22 +171,36 @@ public sealed partial class ChatController
 
             IsConnected = false;
             var cliInstalled = OllamaSetupHelper.IsOllamaCliInstalled();
+
+            // Options are ordered by likelihood for the population that actually hits this
+            // screen: a fresh machine wants the install actions first, and the endpoint
+            // override (a remote daemon / custom port) is marked Not Recommended — it used
+            // to lead the list, putting the least-relevant choice first. The raw socket
+            // error ("actively refused") reads as a crash to a first-run user, so the
+            // dialog leads with a plain-language diagnosis and the detail rides dimmed.
+            _transcript.Append(_html.Dim(
+                $"MandoCode uses Ollama (free) to run AI models locally. Can't reach {_config.OllamaEndpoint}"
+                + (probe.Error != null ? $" — {probe.Error}" : "") + "."));
+
             var options = new List<ApprovalOption>();
             if (cliInstalled) options.Add(new("Start Ollama now", ApprovalOptionKind.Proceed));
-            options.Add(new("Change endpoint URL", ApprovalOptionKind.Proceed));
             if (!cliInstalled)
             {
                 if (OllamaSetupHelper.GetOsInstallCommand() != null)
                     options.Add(new("Install Ollama for me", ApprovalOptionKind.Proceed));
-                options.Add(new("Open the Ollama download page", ApprovalOptionKind.Proceed));
+                options.Add(new("Open the Ollama Download Page (I'll install it myself)", ApprovalOptionKind.Proceed));
             }
+            options.Add(new("Change the Endpoint URL (Not Recommended)", ApprovalOptionKind.Proceed));
             options.Add(new("Retry", ApprovalOptionKind.Proceed));
-            options.Add(new("Cancel setup", ApprovalOptionKind.Redirect));
+            options.Add(new("Cancel Setup", ApprovalOptionKind.Redirect));
 
             var choice = await WizardSelectAsync(
-                $"Can't reach Ollama at {_config.OllamaEndpoint}. ({probe.Error ?? "no detail"})", options);
+                cliInstalled
+                    ? "Ollama is installed but isn't running. How would you like to proceed?"
+                    : "Ollama isn't running on this computer — it may not be installed yet. How would you like to proceed?",
+                options);
 
-            if (choice == "Cancel setup") { WizardCancelled(); StateChanged?.Invoke(); return; }
+            if (choice == "Cancel Setup") { WizardCancelled(); StateChanged?.Invoke(); return; }
             if (choice == "Retry") continue;
 
             if (choice == "Start Ollama now")
@@ -233,7 +247,7 @@ public sealed partial class ChatController
                 continue;
             }
 
-            if (choice == "Open the Ollama download page")
+            if (choice.StartsWith("Open the Ollama Download Page"))
             {
                 OllamaSetupHelper.OpenInBrowser("https://ollama.com/download");
                 _transcript.Append(_html.Dim("Install Ollama, then pick Retry."));
@@ -262,12 +276,13 @@ public sealed partial class ChatController
             // empty daemon shouldn't need to know model tags. Sizes and hardware hints let them
             // self-select; free-text entry remains for people who know what they want.
             _transcript.Append(_html.Warn("No models are pulled yet — let's get you one."));
-            _transcript.Append(_html.Dim("Cloud models run on ollama.com's servers: more capable, no GPU needed, free with a sign-in. "
-                                       + "Local models run privately on your own hardware — bigger is smarter but needs more memory."));
+            _transcript.Append(_html.Dim("Cloud models run on ollama.com's servers: more capable, no GPU needed, but they require an "
+                                       + "ollama.com account with an active cloud subscription. "
+                                       + "Local models run privately on your own hardware, free — bigger is smarter but needs more memory."));
 
             var starter = await WizardSelectAsync("Pick a starter model to install:", new List<ApprovalOption>
             {
-                new($"Cloud — {MandoCodeConfig.DefaultCloudModel}   (best quality, no GPU needed)", ApprovalOptionKind.Proceed),
+                new($"Cloud — {MandoCodeConfig.DefaultCloudModel}   (best quality, no GPU needed, ollama.com subscription)", ApprovalOptionKind.Proceed),
                 new("Local — qwen2.5:1.5b   (~1 GB · fast on any laptop)", ApprovalOptionKind.Proceed),
                 new("Local — qwen3:4b   (~2.6 GB · balanced day-to-day)", ApprovalOptionKind.Proceed),
                 new("Local — qwen2.5-coder:7b   (~4.7 GB · code-focused, 6 GB+ VRAM)", ApprovalOptionKind.Proceed),
@@ -283,7 +298,7 @@ public sealed partial class ChatController
                 var auth = await OllamaSetupHelper.CheckCloudSignInAsync(_config.OllamaEndpoint);
                 if (auth != OllamaSetupHelper.CloudAuthState.SignedIn)
                 {
-                    _transcript.Append(_html.Info("Cloud models need a free ollama.com account."));
+                    _transcript.Append(_html.Info("Cloud models need an ollama.com account with an active cloud subscription — without one, cloud requests fail with 403 Forbidden."));
                     if (await WizardConfirmAsync("Sign in to Ollama cloud now?", defaultYes: true))
                         await RunCloudSigninWalkthroughAsync();
                 }

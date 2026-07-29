@@ -1191,6 +1191,12 @@ public sealed partial class ChatController
 
         _transcript.Append(_html.StatusChip(modelTag, "now active", "ok"));
 
+        // Selection-time awareness, not just failure-time: cloud models require an active
+        // ollama.com cloud subscription — a signed-in account without one gets 403 Forbidden
+        // on its first message, which reads as the app breaking.
+        if (MandoCodeConfig.IsCloudModel(modelTag))
+            _transcript.Append(_html.Dim("Cloud model — runs on ollama.com's servers and needs an account with an active cloud subscription. Without one, requests return 403 Forbidden."));
+
         // Only mention the cleared context — and offer a snapshot — when there was actually a
         // conversation to clear. Switching an empty chat has nothing to salvage, so stay quiet.
         if (_pending != null)

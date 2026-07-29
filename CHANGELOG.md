@@ -6,6 +6,32 @@ ships (the engine drives 0.14 → 0.15; each product's patch number advances
 independently). The exact pinned engine commit is recorded by the `MandoCode`
 submodule.
 
+## [0.14.1] — 2026-07-28
+
+First-five-minutes polish from watching 0.14.0's fresh-machine debut, plus honest guidance
+about cloud model pricing.
+
+### Changed
+- **New agents get callsigns by default.** Tabs now open as Morphy, Kernel, Cloud — the
+  500-name deck — instead of Agent 1, Agent 2. Numbered naming is still one Settings toggle
+  away, and anyone who had explicitly chosen it keeps their choice (only the default flipped).
+- **The "can't reach Ollama" screen puts the likely fix first.** On a machine without Ollama,
+  the options now read: Install Ollama for me → Open the Ollama Download Page (I'll install it
+  myself) → Change the Endpoint URL (Not Recommended) → Retry → Cancel Setup. The endpoint
+  override — the option a fresh machine never needs — used to lead the list. The message now
+  opens with a plain-language diagnosis ("Ollama isn't running on this computer — it may not
+  be installed yet") instead of a raw socket error; the technical detail still shows, dimmed.
+
+### Added
+- **Cloud subscription awareness.** Cloud models on ollama.com now require an account with an
+  active cloud subscription — without one, requests fail with 403 Forbidden, which previously
+  surfaced as a raw error that looked like the app breaking. The subscription requirement is
+  now stated everywhere a cloud model is chosen (the starter picker, the sign-in prompt, and
+  on every model switch to a `:cloud` tag), and a 403 response gets its own explanation card
+  naming the real cause and the two real exits (subscribe, or `/model` to a free local model).
+  Deliberately distinct from the 401 path: 403 does *not* trigger the sign-in walkthrough,
+  which cannot fix it and would loop.
+
 ## [0.14.0] — 2026-07-28
 
 **The first public release of MandoCode Desktop** — the WinUI 3 desktop home for the MandoCode

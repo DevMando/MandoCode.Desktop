@@ -102,7 +102,10 @@ public sealed partial class MainWindow : Window
         _historySeenAt = panelState.HistorySeenAt;
         _lastNotePath = panelState.LastNotePath;
         _noteModel = panelState.NoteModel;
-        AgentCallsigns.Enabled = panelState.AgentCallsigns ?? false;
+        // Callsigns are the default face; numbered agents are the opt-in. The null-coalesce
+        // matters: a user who explicitly toggled numbering keeps it (saved false), while
+        // fresh installs and pre-0.14.1 panel states get callsigns.
+        AgentCallsigns.Enabled = panelState.AgentCallsigns ?? true;
         // The editor writes note content; the panel only lists. One store, handed over once.
         NoteEditor.Store = _notes;
         WireNotesPanel();

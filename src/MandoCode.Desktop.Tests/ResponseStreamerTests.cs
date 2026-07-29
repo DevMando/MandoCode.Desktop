@@ -144,6 +144,34 @@ public sealed class ResponseStreamerTests
     }
 
     [Fact]
+    public async Task Response_LookingLike403_ExplainsSubscription_NotSignIn()
+    {
+        // 403 = signed in but no cloud subscription. The sign-in walkthrough (401 recovery)
+        // must NOT fire — it would loop uselessly — and the card must name the real cause.
+        var (s, blocks) = Make(new FakeAiService(new[] { "Error: HTTP 403 (Forbidden) from ollama.com" }));
+        var signInFired = false;
+        s.On401 = () => { signInFired = true; return Task.CompletedTask; };
+
+        await s.StreamAsync("hi", CancellationToken.None);
+
+        Assert.False(signInFired);
+        Assert.Contains(blocks, b => b.StartsWith("WARN:") && b.Contains("subscription"));
+        Assert.Contains(blocks, b => b.StartsWith("DIM:") && b.Contains("/model"));
+    }
+
+    [Fact]
+    public async Task NormalResponse_DoesNotEmit403Card()
+    {
+        // "403" alone in prose (e.g. a line number or HTTP discussion) must not trigger —
+        // the match requires "forbidden" too.
+        var (s, blocks) = Make(new FakeAiService(new[] { "see RFC 9110 section 403 for details" }));
+
+        await s.StreamAsync("hi", CancellationToken.None);
+
+        Assert.DoesNotContain(blocks, b => b.Contains("subscription"));
+    }
+
+    [Fact]
     public async Task Cancellation_SurfacesAsWarning_NotThrow()
     {
         var (s, blocks) = Make(new FakeAiService(Array.Empty<string>(), new OperationCanceledException()));
