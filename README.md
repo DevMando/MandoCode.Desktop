@@ -125,12 +125,6 @@ rather than a console) is new. If you want the deep dive — how the harness sub
 rolled forward, how agents and split view are wired, how snapshots/notes/history actually persist —
 see **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
-## Releasing
-
-Push a tag (`git tag v0.2.0 && git push --tags`) and the Release workflow publishes a
-self-contained win-x64 zip to GitHub Releases. The app's built-in update checker watches those
-releases — older installs show an update notice within 24 hours.
-
 ## License
 
-MIT — same as the MandoCode CLI.
+MIT — Armando Fernandez - DevMando.
