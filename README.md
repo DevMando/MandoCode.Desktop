@@ -32,6 +32,8 @@ Only the interface is.
 
 ## Screenshots
 
+https://github.com/user-attachments/assets/c62cd34f-b421-4b43-9c15-4f735b8682f6
+
 *(Drop your images into `docs/screenshots/` with the filenames below and they'll show up here.)*
 
 <p align="center">
