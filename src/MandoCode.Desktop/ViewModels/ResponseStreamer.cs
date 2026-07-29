@@ -99,6 +99,14 @@ public sealed class ResponseStreamer
                     // offer the sign-in walkthrough inline instead of making the user type /setup.
                     await On401();
                 }
+                else if (Looks403(responseText))
+                {
+                    // 403 is NOT a sign-in problem — the account is authenticated but has no
+                    // cloud subscription, so the sign-in walkthrough would loop uselessly.
+                    // Name the real cause and the two real exits.
+                    _transcript.Append(_html.Warn("403 Forbidden from the cloud — your ollama.com account is signed in but doesn't have an active cloud subscription."));
+                    _transcript.Append(_html.Dim("Cloud models require a subscription at ollama.com. Or switch to a free local model with /model."));
+                }
 
                 if (_config.EnableTokenTracking)
                 {
@@ -134,4 +142,9 @@ public sealed class ResponseStreamer
     private static bool Looks401(string responseText)
         => !string.IsNullOrEmpty(responseText)
            && responseText.Contains("401 Unauthorized", StringComparison.OrdinalIgnoreCase);
+
+    private static bool Looks403(string responseText)
+        => !string.IsNullOrEmpty(responseText)
+           && responseText.Contains("403", StringComparison.Ordinal)
+           && responseText.Contains("forbidden", StringComparison.OrdinalIgnoreCase);
 }

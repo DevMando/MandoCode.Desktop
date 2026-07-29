@@ -14,8 +14,9 @@ namespace MandoCode.Desktop.Services;
 public static class AgentCallsigns
 {
     /// <summary>App-wide naming style for NEW agents — persisted in panel-state.json, toggled
-    /// from Settings → Behavior. Existing tabs keep whatever name they have.</summary>
-    public static bool Enabled { get; set; }
+    /// from Settings → Behavior. Existing tabs keep whatever name they have. ON by default:
+    /// callsigns are the product's face and numbered agents are the opt-in, not the reverse.</summary>
+    public static bool Enabled { get; set; } = true;
 
     private static readonly Random Rng = new();
     private static readonly List<string> Deck = new();
