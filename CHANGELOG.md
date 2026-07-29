@@ -1,10 +1,20 @@
 # Changelog
 
 All notable changes to MandoCode Desktop are documented here.
-Versioning is independent of the MandoCode CLI; the pinned harness commit is
-recorded by the `MandoCode` submodule.
+Desktop shares its major.minor version with the MandoCode engine generation it
+ships (the engine drives 0.14 → 0.15; each product's patch number advances
+independently). The exact pinned engine commit is recorded by the `MandoCode`
+submodule.
 
-## [Unreleased]
+## [0.14.0] — 2026-07-28
+
+**The first public release of MandoCode Desktop** — the WinUI 3 desktop home for the MandoCode
+engine (paired with engine/CLI 0.14.3). Everything below accumulated between the internal 0.1.0
+milestone and today: multi-agent tabs on independent models, session persistence and restore,
+context snapshots that carry a conversation across models, a notes workspace with an AI assistant,
+MCP server support, themes with chat backgrounds, a music player, and the reliability work that
+made small local models genuinely usable — a per-request context window, pre-flight compaction,
+and a 16k floor.
 
 ### Changed
 - **The context-window floor is now 16k** (harness 0.14.3). Live testing on a small local model
