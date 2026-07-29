@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="src/MandoCode.Desktop/Assets/images/mandocode-desktop-icon.png" width="110" alt="MandoCode Desktop icon">
-</p>
-
 <h1 align="center">MandoCode Desktop</h1>
 <p align="center"><b>An AI coding assistant built on open-weight models, not someone else's closed one.</b></p>
 
@@ -30,11 +26,7 @@ It's built on the exact same engine as the [MandoCode CLI](https://github.com/De
 literally the same code, pinned in as a submodule — so nothing about how it thinks is different.
 Only the interface is.
 
-## Screenshots
-
-https://github.com/user-attachments/assets/c62cd34f-b421-4b43-9c15-4f735b8682f6
-
-*(Drop your images into `docs/screenshots/` with the filenames below and they'll show up here.)*
+https://github.com/user-attachments/assets/fba824e2-c86f-4999-a13f-0174ed23de72
 
 <p align="center">
   <img src="docs/screenshots/chat-and-agents.png" width="100%" alt="Chat with multiple agent tabs">
