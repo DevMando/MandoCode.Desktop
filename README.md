@@ -55,7 +55,7 @@ Two problems, one app:
   Ollama: swap models per agent, run one entirely on your own hardware for free, or reach for a
   hosted model when you want more ceiling. You're never locked to a single closed API.
 - **A coding assistant is something you live in all day, not a popup.** So it gets a real native
-  app built on C#, WinUI 3, and Semantic Kernel's Ollama connector — multiple agents open at once,
+  app built on C#, WinUI 3, and Microsoft's Agent Framework over Ollama — multiple agents open at once,
   a real shell, a file tree that actually knows about git, a place to jot down a thought without
   opening a text editor, and a look you can make your own instead of one fixed dark theme.
 

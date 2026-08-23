@@ -108,6 +108,6 @@ In rough order of value:
 - **CLI `--continue`** — `ExportHistoryJson`/`TryRestoreHistoryJson` live in the harness
   precisely so the CLI can grow its own resume without new plumbing.
 - **Cross-provider carry verification** — verbatim history with function-call content moving
-  between Ollama and cloud connectors should map cleanly through Semantic Kernel's generic
-  content types; it deserves a deliberate test before "Keep memory" is treated as guaranteed
-  across providers (the graceful fallback already handles failure).
+  between Ollama and cloud connectors should map cleanly through Microsoft.Extensions.AI's
+  generic content types; it deserves a deliberate test before "Keep memory" is treated as
+  guaranteed across providers (the graceful fallback already handles failure).
