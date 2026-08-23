@@ -56,6 +56,17 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.2.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.2" />
+    <!-- Declared here on purpose, even though the harness already brings both in: the Desktop
+         services below (NoteAssistant, SnapshotEnhancer, SkillAuthor) call Ollama directly and
+         name these types themselves. Relying on the harness's transitive copies is what broke
+         this project when the harness dropped Semantic Kernel — a dependency we compiled against
+         but never declared. Keep the versions in step with MandoCode/src/MandoCode.csproj.
+         OllamaSharp's analyzers are excluded for the same reason they are in the harness: its
+         source generator targets a newer Roslyn than current VS/SDK builds ship (CS9057), and it
+         only generates code for [OllamaTool] types, which nothing here uses. -->
+    <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="10.9.0" />
+    <PackageReference Include="Microsoft.Extensions.AI" Version="10.9.0" />
+    <PackageReference Include="OllamaSharp" Version="5.4.30" ExcludeAssets="analyzers" />
   </ItemGroup>
 
   <ItemGroup>

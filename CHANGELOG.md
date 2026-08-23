@@ -27,7 +27,12 @@ it moves 0.14.1 → 0.15.0.
   Desktop from source, where the engine project now resolves its .NET 10 build.
 - **Engine dependencies moved to current releases**, including Model Context Protocol 2.2.0 and
   YamlDotNet 18.1.0.
-- **Pinned engine commit: `6eb3fc3`** (engine 0.15.0). The exact engine each Desktop release
+- **Desktop moved off Semantic Kernel too.** The notes assistant, the snapshot summarizer, and
+  the skill author each opened their own connection to Ollama through Semantic Kernel; they now
+  use the same Microsoft.Extensions.AI client the engine standardized on. Same prompts, same
+  temperatures, same behavior — but Desktop no longer depends on a framework the engine has
+  removed. Snapshot recaps and note replies are the surfaces to sanity-check.
+- **Pinned engine commit: `3b5f667`** (engine 0.15.0). The exact engine each Desktop release
   ships is recorded by the `MandoCode` submodule.
 
 ## [0.14.1] — 2026-07-28

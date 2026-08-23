@@ -1,7 +1,6 @@
 using System.Text;
-using Microsoft.SemanticKernel;
-using Microsoft.SemanticKernel.ChatCompletion;
-using Microsoft.SemanticKernel.Connectors.Ollama;
+using Microsoft.Extensions.AI;
+using OllamaSharp;
 
 namespace MandoCode.Desktop.Services;
 
@@ -71,23 +70,19 @@ public static class SnapshotEnhancer
     public static async Task<string> SummarizeAsync(
         string endpoint, string model, string rawHistory, CancellationToken ct = default)
     {
-        var kernel = Kernel.CreateBuilder()
-            .AddOllamaChatCompletion(modelId: model, endpoint: new Uri(endpoint))
-            .Build();
-
-        var chat = kernel.GetRequiredService<IChatCompletionService>();
+        using IChatClient chat = new OllamaApiClient(new Uri(endpoint), model);
 
         var chunks = Chunk(rawHistory);
 
         // Short conversation — one pass, straight to a final-shaped recap.
         if (chunks.Count <= 1)
-            return await SummarizeOneAsync(chat, kernel, SinglePrompt, rawHistory, ct);
+            return await SummarizeOneAsync(chat, SinglePrompt, rawHistory, ct);
 
         // Map: summarize each segment independently.
         var partials = new List<string>(chunks.Count);
         for (int i = 0; i < chunks.Count; i++)
         {
-            var part = await SummarizeOneAsync(chat, kernel, MapPrompt, chunks[i], ct);
+            var part = await SummarizeOneAsync(chat, MapPrompt, chunks[i], ct);
             if (!string.IsNullOrWhiteSpace(part))
                 partials.Add($"Segment {i + 1}/{chunks.Count}:\n{part}");
         }
@@ -95,7 +90,7 @@ public static class SnapshotEnhancer
         if (partials.Count == 0) return "";
 
         // Reduce: fold the segment summaries into one recap.
-        return await SummarizeOneAsync(chat, kernel, ReducePrompt, string.Join("\n\n", partials), ct);
+        return await SummarizeOneAsync(chat, ReducePrompt, string.Join("\n\n", partials), ct);
     }
 
     private const string NamePrompt =
@@ -115,10 +110,7 @@ public static class SnapshotEnhancer
         {
             if (string.IsNullOrWhiteSpace(recap)) return null;
 
-            var kernel = Kernel.CreateBuilder()
-                .AddOllamaChatCompletion(modelId: model, endpoint: new Uri(endpoint))
-                .Build();
-            var chat = kernel.GetRequiredService<IChatCompletionService>();
+            using IChatClient chat = new OllamaApiClient(new Uri(endpoint), model);
 
             var instruction = NamePrompt;
             if (avoid.Count > 0)
@@ -126,7 +118,7 @@ public static class SnapshotEnhancer
                              + string.Join("; ", avoid.Take(40)) + ".";
 
             // A touch of warmth so titles aren't all phrased alike, but still grounded in the recap.
-            var raw = await SummarizeOneAsync(chat, kernel, instruction, recap, ct, temperature: 0.4f);
+            var raw = await SummarizeOneAsync(chat, instruction, recap, ct, temperature: 0.4f);
             return SnapshotNaming.Clean(raw);
         }
         catch
@@ -138,18 +130,20 @@ public static class SnapshotEnhancer
     /// <summary>One chat round: system instruction + the text to summarize. Stateless — a fresh
     /// history each call, so nothing leaks between chunks.</summary>
     private static async Task<string> SummarizeOneAsync(
-        IChatCompletionService chat, Kernel kernel, string instruction, string text, CancellationToken ct,
+        IChatClient chat, string instruction, string text, CancellationToken ct,
         float temperature = 0.2f)
     {
-        var history = new ChatHistory();
-        history.AddSystemMessage(instruction);
-        history.AddUserMessage(text);
+        var history = new List<ChatMessage>
+        {
+            new(ChatRole.System, instruction),
+            new(ChatRole.User, text)
+        };
 
         // Low temperature by default — a recap should be faithful, not creative. Naming nudges higher.
-        var settings = new OllamaPromptExecutionSettings { Temperature = temperature };
+        var options = new ChatOptions { Temperature = temperature };
 
-        var result = await chat.GetChatMessageContentAsync(history, settings, kernel, ct);
-        return result.Content?.Trim() ?? "";
+        var result = await chat.GetResponseAsync(history, options, ct);
+        return result.Text?.Trim() ?? "";
     }
 
     /// <summary>Splits the history into chunks on line boundaries. Chunk size grows if needed so the

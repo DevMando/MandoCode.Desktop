@@ -1,6 +1,6 @@
 using MandoCode.Models;
 using MandoCode.Services;
-using Microsoft.SemanticKernel;
+using Microsoft.Extensions.AI;
 
 namespace MandoCode.Desktop.Services;
 
@@ -40,5 +40,5 @@ public interface IAiService
     int TryRestoreHistoryJson(string json);
     Task EnterLearnModeAsync();
     Task ClearHistoryAsync();
-    Task<IReadOnlyList<ChatMessageContent>> GetHistoryAsync();
+    Task<IReadOnlyList<ChatMessage>> GetHistoryAsync();
 }

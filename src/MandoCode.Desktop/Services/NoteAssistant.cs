@@ -1,7 +1,6 @@
 using System.Text;
-using Microsoft.SemanticKernel;
-using Microsoft.SemanticKernel.ChatCompletion;
-using Microsoft.SemanticKernel.Connectors.Ollama;
+using Microsoft.Extensions.AI;
+using OllamaSharp;
 
 namespace MandoCode.Desktop.Services;
 
@@ -10,7 +9,7 @@ namespace MandoCode.Desktop.Services;
 /// that's open, and asking about the pad as a whole.
 ///
 /// <b>It has no tools, and that is the design.</b> Like <see cref="SnapshotEnhancer"/>, this builds a
-/// bare Ollama kernel with no plugins, filters, or shared history — so it cannot read or write a
+/// bare Ollama chat client with no tools, middleware, or shared history — so it cannot read or write a
 /// single file. "No agent ever touches your note" is therefore true by construction rather than by
 /// policy: the only route from a reply into a note is the user pressing Insert or Replace. That's also
 /// why it isn't an <c>AIService</c> agent — those exist to change your files, which is the opposite of
@@ -163,9 +162,9 @@ public static class NoteAssistant
     }
 
     /// <summary>
-    /// One streamed round on a throwaway kernel. Stateless by construction: a fresh
-    /// <see cref="ChatHistory"/> per call, built from the system prompt, the recent thread, and this
-    /// message. Deltas arrive on a background thread — the caller marshals.
+    /// One streamed round on a throwaway chat client. Stateless by construction: a fresh message
+    /// list per call, built from the system prompt, the recent thread, and this message. Deltas
+    /// arrive on a background thread — the caller marshals.
     /// </summary>
     private static async Task StreamAsync(
         string endpoint,
@@ -176,33 +175,25 @@ public static class NoteAssistant
         Action<string> onDelta,
         CancellationToken ct)
     {
-        var kernel = Kernel.CreateBuilder()
-            .AddOllamaChatCompletion(modelId: model, endpoint: new Uri(endpoint))
-            .Build();
+        using IChatClient chat = new OllamaApiClient(new Uri(endpoint), model);
 
-        var chat = kernel.GetRequiredService<IChatCompletionService>();
-
-        var history = new ChatHistory();
-        history.AddSystemMessage(systemPrompt);
+        var history = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
 
         foreach (var turn in thread.TakeLast(ThreadTurns))
-        {
-            if (turn.FromUser) history.AddUserMessage(turn.Text);
-            else history.AddAssistantMessage(turn.Text);
-        }
+            history.Add(new ChatMessage(turn.FromUser ? ChatRole.User : ChatRole.Assistant, turn.Text));
 
-        history.AddUserMessage(message);
+        history.Add(new ChatMessage(ChatRole.User, message));
 
         // Low temperature: this rewrites the user's own words, so faithful beats inventive.
-        var settings = new OllamaPromptExecutionSettings { Temperature = 0.3f };
+        var options = new ChatOptions { Temperature = 0.3f };
 
         // ConfigureAwait(false): per-chunk continuations must not hop through the caller's UI
         // dispatcher — a small model can stream hundreds of chunks a second.
-        await foreach (var chunk in chat.GetStreamingChatMessageContentsAsync(history, settings, kernel, ct)
+        await foreach (var update in chat.GetStreamingResponseAsync(history, options, ct)
                            .ConfigureAwait(false))
         {
             if (ct.IsCancellationRequested) return;
-            if (!string.IsNullOrEmpty(chunk.Content)) onDelta(chunk.Content);
+            if (!string.IsNullOrEmpty(update.Text)) onDelta(update.Text);
         }
     }
 }

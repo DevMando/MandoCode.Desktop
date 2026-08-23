@@ -72,7 +72,7 @@ public sealed partial class ChatTabView
     {
         try
         {
-            // 1) Full fidelity: rehydrate the harness's ChatHistory verbatim.
+            // 1) Full fidelity: rehydrate the harness's chat history verbatim.
             var historyJson = SessionHistoryStore.Load(Session.PersistKey);
             if (historyJson != null)
             {
