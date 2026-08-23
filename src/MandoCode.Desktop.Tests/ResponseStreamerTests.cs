@@ -3,7 +3,7 @@ using MandoCode.Desktop.Services;
 using MandoCode.Desktop.ViewModels;
 using MandoCode.Models;
 using MandoCode.Services;
-using Microsoft.SemanticKernel;
+using Microsoft.Extensions.AI;
 using Xunit;
 
 namespace MandoCode.Desktop.Tests;
@@ -66,7 +66,7 @@ public sealed class ResponseStreamerTests
         public int TryRestoreHistoryJson(string json) => throw new NotSupportedException();
         public Task EnterLearnModeAsync() => throw new NotSupportedException();
         public Task ClearHistoryAsync() => throw new NotSupportedException();
-        public Task<IReadOnlyList<ChatMessageContent>> GetHistoryAsync() => throw new NotSupportedException();
+        public Task<IReadOnlyList<ChatMessage>> GetHistoryAsync() => throw new NotSupportedException();
     }
 
     private static (ResponseStreamer streamer, List<string> blocks) Make(FakeAiService ai)

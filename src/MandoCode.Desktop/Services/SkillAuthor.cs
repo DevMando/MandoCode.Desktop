@@ -1,6 +1,5 @@
-using Microsoft.SemanticKernel;
-using Microsoft.SemanticKernel.ChatCompletion;
-using Microsoft.SemanticKernel.Connectors.Ollama;
+using Microsoft.Extensions.AI;
+using OllamaSharp;
 
 namespace MandoCode.Desktop.Services;
 
@@ -58,19 +57,18 @@ public static class SkillAuthor
     private static async Task<string> CompleteAsync(
         string endpoint, string model, string system, string user, CancellationToken ct)
     {
-        var kernel = Kernel.CreateBuilder()
-            .AddOllamaChatCompletion(modelId: model, endpoint: new Uri(endpoint))
-            .Build();
-        var chat = kernel.GetRequiredService<IChatCompletionService>();
+        using IChatClient chat = new OllamaApiClient(new Uri(endpoint), model);
 
-        var history = new ChatHistory();
-        history.AddSystemMessage(system);
-        history.AddUserMessage(user);
+        var history = new List<ChatMessage>
+        {
+            new(ChatRole.System, system),
+            new(ChatRole.User, user)
+        };
 
         // A touch of latitude helps phrasing without drifting off-spec.
-        var settings = new OllamaPromptExecutionSettings { Temperature = 0.4f };
-        var result = await chat.GetChatMessageContentAsync(history, settings, kernel, ct);
-        return result.Content?.Trim() ?? "";
+        var options = new ChatOptions { Temperature = 0.4f };
+        var result = await chat.GetResponseAsync(history, options, ct);
+        return result.Text?.Trim() ?? "";
     }
 
     /// <summary>Strips a wrapping ```fenced block if the model added one despite instructions.</summary>

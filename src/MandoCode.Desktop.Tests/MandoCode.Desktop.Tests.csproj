@@ -11,13 +11,17 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <!-- ChatMessage / ChatRole / FunctionCallContent, named directly by the HistorySummarizer
+         tests and the fake IAiService. Declared rather than taken transitively from the harness,
+         for the reason spelled out in MandoCode.Desktop.csproj. -->
+    <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="10.9.0" />
   </ItemGroup>
 
   <!-- The MandoCode harness is plain net8.0 (no Windows App SDK), so referencing it does NOT
        pull the WinUI dependency this project exists to avoid. It supplies MandoCodeConfig (for the
-       config-clone tests) and Semantic Kernel's ChatMessageContent (for the HistorySummarizer
-       tests), and DiffModels transitively — which is why the direct DiffModels compile-include
-       below was removed. -->
+       config-clone tests) and DiffModels transitively — which is why the direct DiffModels
+       compile-include below was removed. (Chat history types now come from the
+       Microsoft.Extensions.AI.Abstractions reference above, not from the harness.) -->
   <ItemGroup>
     <ProjectReference Include="..\..\MandoCode\src\MandoCode\MandoCode.csproj" />
   </ItemGroup>

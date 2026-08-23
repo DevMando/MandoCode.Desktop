@@ -1,6 +1,5 @@
 using MandoCode.Desktop.Services;
-using Microsoft.SemanticKernel;
-using Microsoft.SemanticKernel.ChatCompletion;
+using Microsoft.Extensions.AI;
 using Xunit;
 
 namespace MandoCode.Desktop.Tests;
@@ -12,22 +11,22 @@ namespace MandoCode.Desktop.Tests;
 /// </summary>
 public sealed class HistorySummarizerTests
 {
-    private static ChatMessageContent Sys(string t) => new(AuthorRole.System, t);
-    private static ChatMessageContent Usr(string t) => new(AuthorRole.User, t);
-    private static ChatMessageContent Asst(string t) => new(AuthorRole.Assistant, t);
+    private static ChatMessage Sys(string t) => new(ChatRole.System, t);
+    private static ChatMessage Usr(string t) => new(ChatRole.User, t);
+    private static ChatMessage Asst(string t) => new(ChatRole.Assistant, t);
 
     [Fact]
     public void HasContent_False_WhenOnlySystemPrompt()
-        => Assert.False(HistorySummarizer.HasContent(new List<ChatMessageContent> { Sys("you are helpful") }));
+        => Assert.False(HistorySummarizer.HasContent(new List<ChatMessage> { Sys("you are helpful") }));
 
     [Fact]
     public void HasContent_True_WhenUserSpoke()
-        => Assert.True(HistorySummarizer.HasContent(new List<ChatMessageContent> { Sys("sys"), Usr("hello") }));
+        => Assert.True(HistorySummarizer.HasContent(new List<ChatMessage> { Sys("sys"), Usr("hello") }));
 
     [Fact]
     public void Full_SkipsSystemPrompt_AndKeepsBothTurns()
     {
-        var history = new List<ChatMessageContent> { Sys("SECRET SYSTEM"), Usr("hi there"), Asst("hey back") };
+        var history = new List<ChatMessage> { Sys("SECRET SYSTEM"), Usr("hi there"), Asst("hey back") };
 
         var text = HistorySummarizer.Full(history);
 
@@ -39,16 +38,16 @@ public sealed class HistorySummarizerTests
     [Fact]
     public void Full_ReturnsPlaceholder_WhenNothingToSummarize()
         => Assert.Equal("(no prior activity captured)",
-            HistorySummarizer.Full(new List<ChatMessageContent> { Sys("sys") }));
+            HistorySummarizer.Full(new List<ChatMessage> { Sys("sys") }));
 
     [Fact]
     public void Full_DescribesFunctionCall_WhenTextIsEmpty()
     {
-        var toolTurn = new ChatMessageContent(AuthorRole.Assistant, content: null)
+        var toolTurn = new ChatMessage(ChatRole.Assistant, new List<AIContent>
         {
-            Items = { new FunctionCallContent("read_file", arguments: new KernelArguments { ["path"] = "Program.cs" }) }
-        };
-        var history = new List<ChatMessageContent> { Sys("sys"), toolTurn };
+            new FunctionCallContent("call-1", "read_file", new Dictionary<string, object?> { ["path"] = "Program.cs" })
+        });
+        var history = new List<ChatMessage> { Sys("sys"), toolTurn };
 
         var text = HistorySummarizer.Full(history);
 
