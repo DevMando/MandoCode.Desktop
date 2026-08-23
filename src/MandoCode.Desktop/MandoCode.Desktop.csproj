@@ -14,7 +14,7 @@
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>0.14.1</Version>
+    <Version>0.15.0</Version>
     <Authors>Armando Fernandez (DevMando)</Authors>
     <Description>MandoCode Desktop — the MandoCode AI coding agent with a native WinUI 3 interface.</Description>
     <!-- Embedded in the exe → taskbar, Alt-Tab, and Explorer icon. The title-bar icon is set at

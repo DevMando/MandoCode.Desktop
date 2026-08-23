@@ -6,6 +6,30 @@ ships (the engine drives 0.14 → 0.15; each product's patch number advances
 independently). The exact pinned engine commit is recorded by the `MandoCode`
 submodule.
 
+## [Unreleased]
+
+A new engine underneath, the same app on top. Desktop moves onto engine generation 0.15, whose
+headline change is a foundation swap rather than a feature: the orchestration layer that routes
+a message to a model, runs tools, and streams the reply back moved off Semantic Kernel and onto
+Microsoft's Agent Framework. Same models, same tools, same approval prompts, same context
+snapshots — there is no new button to find. Desktop's version follows the engine generation, so
+it moves 0.14.1 → 0.15.0.
+
+### Changed
+- **The engine now runs on Microsoft Agent Framework.** Semantic Kernel is gone from the
+  codebase entirely; chat history moved onto the new framework's own types. The new path was
+  built alongside the old one and verified against real models before the cutover, and the old
+  one was only deleted once nothing depended on it. Because this touches every chat turn, it is
+  the thing to watch after updating — streaming, tool approval prompts, and model switching all
+  ride on it now.
+- **The engine builds for .NET 10 and .NET 8 side by side.** Desktop targets .NET 10 and ships
+  self-contained, so this changes nothing for anyone running the app; it matters if you build
+  Desktop from source, where the engine project now resolves its .NET 10 build.
+- **Engine dependencies moved to current releases**, including Model Context Protocol 2.2.0 and
+  YamlDotNet 18.1.0.
+- **Pinned engine commit: `6eb3fc3`** (engine 0.15.0). The exact engine each Desktop release
+  ships is recorded by the `MandoCode` submodule.
+
 ## [0.14.1] — 2026-07-28
 
 First-five-minutes polish from watching 0.14.0's fresh-machine debut, plus honest guidance
