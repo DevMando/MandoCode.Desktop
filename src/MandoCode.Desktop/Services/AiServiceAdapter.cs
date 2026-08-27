@@ -55,6 +55,8 @@ public sealed class AiServiceAdapter : IAiService
     public Task<(bool IsValid, string? ErrorMessage)> ValidateModelAsync() => _ai.ValidateModelAsync();
     public IAsyncEnumerable<string> ChatStreamAsync(string userMessage, CancellationToken cancellationToken = default) => _ai.ChatStreamAsync(userMessage, cancellationToken);
     public string? ExportHistoryJson() => _ai.ExportHistoryJson();
+
+    public void AppendAssistantNote(string text) => _ai.AppendAssistantNote(text);
     public int TryRestoreHistoryJson(string json) => _ai.TryRestoreHistoryJson(json);
     public Task EnterLearnModeAsync() => _ai.EnterLearnModeAsync();
     public Task ClearHistoryAsync() => _ai.ClearHistoryAsync();

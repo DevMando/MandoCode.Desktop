@@ -479,6 +479,12 @@ public sealed partial class ChatController
         {
             var response = await _streamer.StreamAsync(input, token);
             if (!string.IsNullOrEmpty(response)) _lastAiResponse = response;
+
+            // propose_plan now only queues a plan; the host runs it once the turn has drained, so
+            // the plan is a peer of the chat turn rather than something nested inside a tool call.
+            // Without this call a proposed plan would simply never execute.
+            var manifest = await _planHandoff.RunPendingPlanAsync(token);
+            if (!string.IsNullOrWhiteSpace(manifest)) _ai.AppendAssistantNote(manifest);
         }
         finally
         {

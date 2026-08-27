@@ -63,6 +63,7 @@ public sealed class ResponseStreamerTests
         public Task AttachMcpPluginsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<(bool IsValid, string? ErrorMessage)> ValidateModelAsync() => throw new NotSupportedException();
         public string? ExportHistoryJson() => throw new NotSupportedException();
+        public void AppendAssistantNote(string text) => throw new NotSupportedException();
         public int TryRestoreHistoryJson(string json) => throw new NotSupportedException();
         public Task EnterLearnModeAsync() => throw new NotSupportedException();
         public Task ClearHistoryAsync() => throw new NotSupportedException();

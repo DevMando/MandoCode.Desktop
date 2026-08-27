@@ -37,6 +37,12 @@ public interface IAiService
     Task<(bool IsValid, string? ErrorMessage)> ValidateModelAsync();
     IAsyncEnumerable<string> ChatStreamAsync(string userMessage, CancellationToken cancellationToken = default);
     string? ExportHistoryJson();
+
+    /// <summary>
+    /// Appends an assistant message without calling the model. Used to record a completed plan's
+    /// manifest, which must land in history without giving the model an open turn to redo the work in.
+    /// </summary>
+    void AppendAssistantNote(string text);
     int TryRestoreHistoryJson(string json);
     Task EnterLearnModeAsync();
     Task ClearHistoryAsync();
