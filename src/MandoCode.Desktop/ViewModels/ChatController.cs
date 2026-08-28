@@ -481,6 +481,12 @@ public sealed partial class ChatController
 
         _requestCts = new CancellationTokenSource();
         var token = _requestCts.Token;
+
+        // A proposal belongs to the turn that produced it. Without this, a plan proposed during a
+        // turn the user then cancelled would sit in the slot and execute at the end of some later,
+        // unrelated turn.
+        _planHandoff.ClearPendingProposal();
+
         try
         {
             var response = await _streamer.StreamAsync(input, token);
@@ -489,8 +495,22 @@ public sealed partial class ChatController
             // propose_plan now only queues a plan; the host runs it once the turn has drained, so
             // the plan is a peer of the chat turn rather than something nested inside a tool call.
             // Without this call a proposed plan would simply never execute.
-            var manifest = await _planHandoff.RunPendingPlanAsync(token);
-            if (!string.IsNullOrWhiteSpace(manifest)) _ai.AppendAssistantNote(manifest);
+            if (token.IsCancellationRequested)
+            {
+                _planHandoff.ClearPendingProposal();
+            }
+            else
+            {
+                var manifest = await _planHandoff.RunPendingPlanAsync(token);
+                if (!string.IsNullOrWhiteSpace(manifest)) _ai.AppendAssistantNote(manifest);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The streamer already reports cancellation to the transcript. Letting this escape
+            // reached the caller's catch-all and reported it a second time as
+            // "Unexpected error: A task was canceled." — observed live.
+            _planHandoff.ClearPendingProposal();
         }
         finally
         {
