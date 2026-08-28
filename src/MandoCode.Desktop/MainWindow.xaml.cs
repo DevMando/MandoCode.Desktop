@@ -60,7 +60,7 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        Title = $"MandoCode Desktop v{UiUpdateCheckService.CurrentVersion}";
+        Title = $"MandoCode Desktop {UiUpdateCheckService.DisplayVersion}";
 
         ThemeManager.Initialize(Root);
         // ONE window-level subscription to the static ThemeChanged event. Chat tabs must not

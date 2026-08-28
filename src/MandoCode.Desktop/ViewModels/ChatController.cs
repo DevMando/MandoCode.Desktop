@@ -22,6 +22,10 @@ public sealed partial class ChatController
     private readonly TokenTrackingService _tokenTracker;
     private readonly PlanHandoff _planHandoff;
     private readonly TaskPlannerService _taskPlanner;
+    // Which engine runs a plan is re-read per plan, so `planner` can be flipped
+    // mid-session. _taskPlanner is still needed for RequiresPlanning, which is a
+    // planning-trigger heuristic rather than part of IPlanRunner.
+    private readonly PlanRunnerSelector _planRunners;
     private readonly McpClientManager _mcpManager;
     private readonly McpApprovalGate _mcpGate;
     private readonly SkillLoader _skills;
@@ -147,6 +151,7 @@ public sealed partial class ChatController
         TokenTrackingService tokenTracker,
         PlanHandoff planHandoff,
         TaskPlannerService taskPlanner,
+        PlanRunnerSelector planRunners,
         McpClientManager mcpManager,
         McpApprovalGate mcpGate,
         SkillLoader skills,
@@ -169,6 +174,7 @@ public sealed partial class ChatController
         _tokenTracker = tokenTracker;
         _planHandoff = planHandoff;
         _taskPlanner = taskPlanner;
+        _planRunners = planRunners;
         _mcpManager = mcpManager;
         _mcpGate = mcpGate;
         _skills = skills;
@@ -725,7 +731,7 @@ public sealed partial class ChatController
 
         try
         {
-            await foreach (var progressEvent in _taskPlanner.ExecutePlanAsync(plan, ct))
+            await foreach (var progressEvent in _planRunners.Current.ExecutePlanAsync(plan, ct))
             {
                 await HandleProgressEventAsync(progressEvent, plan, ui);
             }
@@ -733,7 +739,7 @@ public sealed partial class ChatController
         catch (OperationCanceledException)
         {
             _busy.Stop();
-            _taskPlanner.CancelPlan(plan);
+            _planRunners.Current.CancelPlan(plan);
         }
         finally
         {
@@ -799,12 +805,12 @@ public sealed partial class ChatController
 
                 if (failChoice == CancelPlanLabel)
                 {
-                    _taskPlanner.CancelPlan(plan);
+                    _planRunners.Current.CancelPlan(plan);
                 }
                 else
                 {
                     var failedStep = plan.Steps.FirstOrDefault(s => s.StepNumber == progressEvent.CurrentStep);
-                    if (failedStep != null) _taskPlanner.SkipStep(plan, failedStep);
+                    if (failedStep != null) _planRunners.Current.SkipStep(plan, failedStep);
                 }
                 _busy.Start();
                 break;

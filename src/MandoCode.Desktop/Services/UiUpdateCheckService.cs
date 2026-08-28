@@ -30,6 +30,10 @@ public sealed class UiUpdateCheckService
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "MandoCode.Desktop", "update-check.json");
 
+    /// <summary>
+    /// Numeric version, for comparing against published releases. Never carries a prerelease tag —
+    /// see <see cref="DisplayVersion"/> for what a human should be shown.
+    /// </summary>
     public static string CurrentVersion
     {
         get
@@ -38,6 +42,18 @@ public sealed class UiUpdateCheckService
             return v == null ? "0.0.0" : $"{v.Major}.{v.Minor}.{v.Build}";
         }
     }
+
+    /// <summary>
+    /// Version for display, including any prerelease tag (e.g. "v0.15.0-plan-test").
+    /// </summary>
+    /// <remarks>
+    /// Kept separate from <see cref="CurrentVersion"/>, which feeds version comparison and must stay
+    /// numeric. The window title used the numeric one, so a tagged test build was indistinguishable
+    /// from the release it was cut from — exactly the confusion that makes a stale binary hard to
+    /// spot. Shares the CLI's formatting so both products label builds the same way.
+    /// </remarks>
+    public static string DisplayVersion =>
+        MandoCode.Services.VersionLabel.ForAssembly(Assembly.GetExecutingAssembly());
 
     public async Task<UiUpdateInfo?> CheckForUpdateAsync(CancellationToken cancellationToken = default)
     {

@@ -59,6 +59,7 @@ public sealed class AgentSession
     public McpApprovalGate McpGate { get; }
     public AIService Ai { get; }
     public TaskPlannerService Planner { get; }
+    public PlanRunnerSelector PlanRunners { get; }
     public FileAutocompleteProvider FileProvider { get; }
     public BusyStateService Busy { get; }
     public TranscriptWriter Transcript { get; }
@@ -103,6 +104,7 @@ public sealed class AgentSession
 
         Ai = new AIService(ProjectRoot, Config, Tokens, PlanHandoff, Skills, mcpManager, McpGate, spinner);
         Planner = new TaskPlannerService(Ai, Config);
+        PlanRunners = new PlanRunnerSelector(Config, Planner, new AiServicePlanStepExecutor(Ai));
 
         var ignoreDirs = new HashSet<string>(MandoCodeConfig.DefaultIgnoreDirectories);
         foreach (var dir in Config.IgnoreDirectories) ignoreDirs.Add(dir);
@@ -124,7 +126,7 @@ public sealed class AgentSession
         Shell = new ShellRunner(ProjectRoot, Transcript, html);
 
         Controller = new ChatController(
-            new AiServiceAdapter(Ai), Config, Tokens, PlanHandoff, Planner,
+            new AiServiceAdapter(Ai), Config, Tokens, PlanHandoff, Planner, PlanRunners,
             mcpManager, McpGate, Skills, FileProvider, ProjectRoot,
             music, updateCheck, Approvals, Transcript, html, Busy, Shell, PromptGate,
             configs, mcp, Snapshots);
