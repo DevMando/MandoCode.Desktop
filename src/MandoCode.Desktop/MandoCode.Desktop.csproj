@@ -14,11 +14,7 @@
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <!-- Prerelease tag for the MAF workflow-planner branch, so the window title makes it obvious
-         which binary is running while both planner engines are selectable. UiUpdateCheckService
-         compares the numeric CurrentVersion, so update checks are unaffected.
-         Drop the suffix before release. -->
-    <Version>0.15.0-plan-test</Version>
+    <Version>0.15.0</Version>
     <Authors>Armando Fernandez (DevMando)</Authors>
     <Description>MandoCode Desktop — the MandoCode AI coding agent with a native WinUI 3 interface.</Description>
     <!-- Embedded in the exe → taskbar, Alt-Tab, and Explorer icon. The title-bar icon is set at

@@ -44,7 +44,7 @@ public sealed class UiUpdateCheckService
     }
 
     /// <summary>
-    /// Version for display, including any prerelease tag (e.g. "v0.15.0-plan-test").
+    /// Version for display, including any prerelease tag (e.g. "v0.16.0-rc.1").
     /// </summary>
     /// <remarks>
     /// Kept separate from <see cref="CurrentVersion"/>, which feeds version comparison and must stay
