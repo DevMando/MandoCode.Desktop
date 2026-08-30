@@ -36,7 +36,20 @@ public interface IAiService
     Task AttachMcpPluginsAsync(CancellationToken cancellationToken = default);
     Task<(bool IsValid, string? ErrorMessage)> ValidateModelAsync();
     IAsyncEnumerable<string> ChatStreamAsync(string userMessage, CancellationToken cancellationToken = default);
+    Task<GeneratedPlan> GeneratePlanAsync(
+        string request,
+        string? revisionContext = null,
+        CancellationToken cancellationToken = default);
     string? ExportHistoryJson();
+
+    /// <summary>Restores the authoritative request used by isolated plan-step histories.</summary>
+    void SetRequestContext(string? request) { }
+
+    /// <summary>
+    /// Appends an assistant message without calling the model. Used to record a completed plan's
+    /// manifest, which must land in history without giving the model an open turn to redo the work in.
+    /// </summary>
+    void AppendAssistantNote(string text);
     int TryRestoreHistoryJson(string json);
     Task EnterLearnModeAsync();
     Task ClearHistoryAsync();

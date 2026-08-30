@@ -198,7 +198,7 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
 
             // File-path links in transcript cards post "open-file:<path>" messages
             // (see TranscriptHtmlBuilder.FileLink).
-            core.WebMessageReceived += (_, e) =>
+            core.WebMessageReceived += (sender, e) =>
             {
                 string? msg = null;
                 try { msg = e.TryGetWebMessageAsString(); } catch { /* non-string message — not ours */ }
@@ -214,6 +214,10 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
                     ShowDropOverlay();   // a drag crossed onto the WebView surface — see DropOverlay
                 else if (msg != null && msg.StartsWith("undo-file:", StringComparison.Ordinal))
                     UndoFileFromCard(msg["undo-file:".Length..]);   // interactive diff card's Undo chip
+                else if (msg == "plan-resume")
+                    _ = _controller.SubmitAsync("/plan-resume");
+                else if (msg == "plan-discard")
+                    _ = _controller.SubmitAsync("/plan-discard");
             };
 
             // Serve bundled web assets (highlight.js) to the transcript document.

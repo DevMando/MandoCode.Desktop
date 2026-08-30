@@ -8,14 +8,32 @@ submodule.
 
 ## [Unreleased]
 
-A new engine underneath, the same app on top. Desktop moves onto engine generation 0.15, whose
-headline change is a foundation swap rather than a feature: the orchestration layer that routes
-a message to a model, runs tools, and streams the reply back moved off Semantic Kernel and onto
-Microsoft's Agent Framework. Same models, same tools, same approval prompts, same context
-snapshots — there is no new button to find. Desktop's version follows the engine generation, so
-it moves 0.14.1 → 0.15.0.
+A new engine underneath, and a planner users can actually steer. Desktop moves onto engine
+generation 0.15 and Microsoft's Agent Framework, then uses that foundation to make plans durable:
+review the work before it starts, edit a step, recover after a restart, and change course when a
+failure proves the remaining plan wrong. The workflow planner stays opt-in for this release while
+the long-running model soak and local-model token measurements finish. Desktop's version follows
+the engine generation, so it moves 0.14.1 → 0.15.0.
+
+### Added
+- **An Unfinished Plan card appears when an agent has checkpointed work.** Resume continues at the
+  first unsettled step; Discard forgets the saved run. The card reflects current checkpoint state
+  rather than transcript history, so an obsolete Resume button cannot come back after restart.
+- **`/plan <goal>` forces a reviewable plan.** This gives short but cross-cutting work the same
+  planning path as a long request, without depending on a message-length heuristic. A one-step plan
+  can still be sent straight through with One-shot it.
+- **Failed work can produce a revised remaining plan.** Completed steps stay settled, the proposed
+  replacement is shown for review, and execution resumes only after approval.
 
 ### Changed
+- **Plan review shows what every step will actually do.** Selecting Edit a step opens a prefilled
+  editor. When an early step changes a file name, value, or expectation, Desktop refreshes only the
+  dependent steps and shows the complete plan again before execution.
+- **Step failures offer clear decisions.** Retry, revise the remaining plan, skip, and cancel are
+  separate choices. Retried instructions stay attached to the failed step rather than becoming a
+  new chat request.
+- **Plan progress and recovery use the engine's durable workflow cursor.** Restarting does not rerun
+  completed steps, and the agent is briefed with the restored plan context before it continues.
 - **The engine now runs on Microsoft Agent Framework.** Semantic Kernel is gone from the
   codebase entirely; chat history moved onto the new framework's own types. The new path was
   built alongside the old one and verified against real models before the cutover, and the old
@@ -32,8 +50,22 @@ it moves 0.14.1 → 0.15.0.
   use the same Microsoft.Extensions.AI client the engine standardized on. Same prompts, same
   temperatures, same behavior — but Desktop no longer depends on a framework the engine has
   removed. Snapshot recaps and note replies are the surfaces to sanity-check.
-- **Pinned engine commit: `3b5f667`** (engine 0.15.0). The exact engine each Desktop release
-  ships is recorded by the `MandoCode` submodule.
+- **Engine PR review pin: `e058399`** (engine 0.15.0). This will be replaced by the CLI PR's merge
+  commit before the Desktop PR lands; the final release pin remains the exact shipped engine.
+
+### Fixed
+- **Partial completion is no longer called a full success.** A plan that reaches the end after
+  skipped or failed work says how many steps completed and reports “completed with issues.”
+- **Cancelling a plan no longer produces a second, contradictory error path.** Desktop stops at the
+  user's decision instead of showing retry choices or reporting an unexpected failure afterward.
+- **Approval and recovery cards stay out of persisted transcript history.** They are live controls,
+  not conversation messages, so stale actions are not replayed into a restored session.
+
+### Test coverage
+239 Desktop tests pass. New host-level coverage exercises deferred plan execution, instruction
+editing, dependent-step revision, checkpoint cards, Resume/Discard actions, semantic step outcomes,
+and truthful completion status. The same workflows were also exercised with real models, including
+closing the process between steps and resuming from the saved cursor.
 
 ## [0.14.1] — 2026-07-28
 

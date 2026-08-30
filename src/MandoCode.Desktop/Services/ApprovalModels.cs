@@ -65,10 +65,16 @@ public interface IApprovalUi
 
     /// <summary>
     /// Free-text input — used by the "Provide new instructions" approval path and by the
-    /// wizard flows. When <paramref name="allowCancel"/> is true a Cancel button (and Esc)
+    /// wizard flows. <paramref name="initialValue"/> pre-populates the editor for true edit
+    /// scenarios. When <paramref name="allowCancel"/> is true a Cancel button (and Esc)
     /// resolves to <see cref="ApprovalSignals.Cancelled"/>.
     /// </summary>
-    Task<string> ShowInstructionInputAsync(string prompt, string placeholder = "", bool allowCancel = false, CancellationToken ct = default);
+    Task<string> ShowInstructionInputAsync(
+        string prompt,
+        string placeholder = "",
+        string initialValue = "",
+        bool allowCancel = false,
+        CancellationToken ct = default);
 }
 
 /// <summary>Sentinel values passed back through the string-based prompt contract.</summary>
