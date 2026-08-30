@@ -16,14 +16,18 @@ the long-running model soak and local-model token measurements finish. Desktop's
 the engine generation, so it moves 0.14.1 → 0.15.0.
 
 ### Added
-- **Separate tags for Skills and MCP servers.** Add tags in each item's editor, then use the new
-  tag dropdown alongside the status filters to narrow the list. The `+` button opens a tag-management
-  dialog for that surface, so a Skill tag never appears among MCP tags (or vice versa). Tags are
-  Desktop organization metadata and do not alter shared server configuration or portable SKILL.md
-  files.
+- **Separate tags for Skills and MCP servers.** Use the new gear-icon **Tags** button on each row
+  to assign tags from a checkbox menu; assigned tags appear as colored chips beside that button.
+  The `+` button in Filters opens a tag-management dialog where new tags receive a chosen color.
+  Skill tags and MCP tags remain separate, and tags do not alter shared server configuration or
+  portable SKILL.md files.
 - **Filtered bulk enable/disable.** The Filters group now includes an action that reads **Disable
   all** whenever any matching item is active, or **Enable all** when every matching item is disabled.
-  It applies only to the current search, status, and tag result.
+  It applies only to the current search, status, and tag result. The visible rows stay in place
+  while their switches update; MCP servers are saved and reloaded once for the full filtered set.
+- **Responsive management filters.** The Filters group stays right-aligned beside the action buttons
+  when both fit. On a narrow window, it moves as a complete second row below those actions instead
+  of overlapping or partially wrapping.
 - **An Unfinished Plan card appears when an agent has checkpointed work.** Resume continues at the
   first unsettled step; Discard forgets the saved run. The card reflects current checkpoint state
   rather than transcript history, so an obsolete Resume button cannot come back after restart.

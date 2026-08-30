@@ -1424,10 +1424,12 @@
                                         <ColumnDefinition Width="200"/>
                                         <ColumnDefinition Width="60"/>
                                         <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
                                     <!-- Per-server on/off (shared by every agent). Tag carries the name
                                          so the handler knows which server without relying on selection. -->
-                                    <ToggleSwitch IsOn="{x:Bind Enabled}" Tag="{x:Bind Name}"
+                                    <ToggleSwitch IsOn="{x:Bind Enabled, Mode=OneWay}" Tag="{x:Bind Name}"
                                                   Toggled="McpEnabled_Toggled" OnContent="" OffContent=""
                                                   MinWidth="0" VerticalAlignment="Center"
                                                   ToolTipService.ToolTip="Enable or disable this server for every agent"/>
@@ -1437,6 +1439,25 @@
                                                VerticalAlignment="Center"/>
                                     <TextBlock Grid.Column="3" Text="{x:Bind Status}" Foreground="{x:Bind StatusBrush}"
                                                FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                                    <ItemsControl Grid.Column="4" ItemsSource="{x:Bind TagChips}" VerticalAlignment="Center">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4"/></ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="local:TagChip">
+                                                <Border Background="{x:Bind Brush}" CornerRadius="8" Padding="6,2">
+                                                    <TextBlock Text="{x:Bind Name}" FontSize="10" Foreground="White"/>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <Button Grid.Column="5" Click="McpRowTags_Click" Padding="8,4" Margin="6,0,0,0"
+                                            ToolTipService.ToolTip="Assign tags">
+                                        <StackPanel Orientation="Horizontal" Spacing="4">
+                                            <FontIcon Glyph="&#xE713;" FontSize="12"/>
+                                            <TextBlock Text="Tags" FontSize="11"/>
+                                        </StackPanel>
+                                    </Button>
                                 </Grid>
                             </DataTemplate>
                         </ListView.ItemTemplate>
@@ -1445,12 +1466,16 @@
                     <!-- Each button's content is an icon + label panel, so it exposes no accessible
                          name on its own. AutomationProperties.Name gives screen readers (and UI
                          tests) something to address. -->
-                    <Grid Grid.Row="2">
+                    <Grid x:Name="McpToolbar" Grid.Row="2" SizeChanged="ManagementToolbar_SizeChanged">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <StackPanel x:Name="McpActions" Orientation="Horizontal" Spacing="8">
                         <Button x:Name="McpAddButton" Click="McpAdd_Click" Style="{StaticResource AccentButtonStyle}"
                                 AutomationProperties.Name="Add MCP Server"
                                 ToolTipService.ToolTip="Add a new MCP server">
@@ -1489,7 +1514,7 @@
                             <FontIcon Glyph="&#xE72C;" FontSize="14"/>
                         </Button>
                         </StackPanel>
-                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                        <StackPanel x:Name="McpFilters" Grid.Column="1" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
                         <TextBlock Text="Filters" FontSize="12" FontWeight="SemiBold" Opacity="0.6"
                                    VerticalAlignment="Center" Margin="0,0,2,0"/>
                         <Border Width="1" Margin="0,4" VerticalAlignment="Stretch"
@@ -1580,10 +1605,12 @@
                                         <ColumnDefinition Width="200"/>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
                                     <!-- Tag carries the folder path so the Toggled handler knows which
                                          skill to flip without depending on list selection. -->
-                                    <ToggleSwitch IsOn="{x:Bind Enabled}" Tag="{x:Bind FolderPath}"
+                                    <ToggleSwitch IsOn="{x:Bind Enabled, Mode=OneWay}" Tag="{x:Bind FolderPath}"
                                                   Toggled="SkillEnabled_Toggled" OnContent="" OffContent=""
                                                   MinWidth="0" VerticalAlignment="Center"
                                                   ToolTipService.ToolTip="Enable or disable this skill for every agent"/>
@@ -1597,17 +1624,40 @@
                                     <TextBlock Grid.Column="3" Text="{x:Bind SizeLabel}" Foreground="{x:Bind SizeBrush}"
                                                FontSize="11" VerticalAlignment="Center" TextAlignment="Right"
                                                ToolTipService.ToolTip="Approximate tokens added to the prompt when this skill loads. Larger = heavier for the model."/>
+                                    <ItemsControl Grid.Column="4" ItemsSource="{x:Bind TagChips}" VerticalAlignment="Center">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4"/></ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="local:TagChip">
+                                                <Border Background="{x:Bind Brush}" CornerRadius="8" Padding="6,2">
+                                                    <TextBlock Text="{x:Bind Name}" FontSize="10" Foreground="White"/>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <Button Grid.Column="5" Click="SkillRowTags_Click" Padding="8,4" Margin="6,0,0,0"
+                                            ToolTipService.ToolTip="Assign tags">
+                                        <StackPanel Orientation="Horizontal" Spacing="4">
+                                            <FontIcon Glyph="&#xE713;" FontSize="12"/>
+                                            <TextBlock Text="Tags" FontSize="11"/>
+                                        </StackPanel>
+                                    </Button>
                                 </Grid>
                             </DataTemplate>
                         </ListView.ItemTemplate>
                     </ListView>
 
-                    <Grid Grid.Row="2">
+                    <Grid x:Name="SkillToolbar" Grid.Row="2" SizeChanged="ManagementToolbar_SizeChanged">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <StackPanel x:Name="SkillActions" Orientation="Horizontal" Spacing="8">
                         <Button x:Name="SkillNewButton" Click="SkillNew_Click" Style="{StaticResource AccentButtonStyle}"
                                 AutomationProperties.Name="New Skill"
                                 ToolTipService.ToolTip="Write a new global skill">
@@ -1654,7 +1704,7 @@
                             <FontIcon Glyph="&#xE72C;" FontSize="14"/>
                         </Button>
                         </StackPanel>
-                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                        <StackPanel x:Name="SkillFilters" Grid.Column="1" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
                         <TextBlock Text="Filters" FontSize="12" FontWeight="SemiBold" Opacity="0.6"
                                    VerticalAlignment="Center" Margin="0,0,2,0"/>
                         <Border Width="1" Margin="0,4" VerticalAlignment="Stretch"
@@ -1769,9 +1819,6 @@
                                      PlaceholderText="Authorization=Bearer …" FontFamily="Cascadia Code,Consolas"/>
                         </StackPanel>
 
-                        <TextBlock Text="Tags (comma-separated)" FontSize="13" Opacity="0.8"/>
-                        <TextBox x:Name="M_Tags" PlaceholderText="e.g. database, local, research"
-                                 ToolTipService.ToolTip="Use tags to organize and filter MCP servers"/>
                         <ToggleSwitch x:Name="M_Disabled" Header="Disabled (keep configured, don't connect)"/>
 
                         <!-- One status surface for the whole modal: validation errors (red),
@@ -1944,11 +1991,6 @@
                                        FontSize="13" Opacity="0.8" TextWrapping="Wrap" Margin="0,6,0,0"/>
                             <TextBox x:Name="Sk_Description" TextWrapping="Wrap" AcceptsReturn="False"
                                      PlaceholderText="Write a Conventional Commits message from staged changes"/>
-
-                            <TextBlock Text="Tags (comma-separated)" FontSize="13" Opacity="0.8"
-                                       TextWrapping="Wrap" Margin="0,6,0,0"/>
-                            <TextBox x:Name="Sk_Tags" PlaceholderText="e.g. git, documentation, review"
-                                     ToolTipService.ToolTip="Use tags to organize and filter skills"/>
 
                             <Grid Margin="0,6,0,0">
                                 <Grid.ColumnDefinitions>

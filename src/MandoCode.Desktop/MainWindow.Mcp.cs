@@ -45,6 +45,7 @@ public sealed partial class MainWindow
 
         var green = (SolidColorBrush)Application.Current.Resources["MandoGreenBrush"];
         var gold = (SolidColorBrush)Application.Current.Resources["MandoGoldBrush"];
+        var definitions = _itemTags.GetTags(TagScope.Mcps);
         _allMcpRows = rows.Select(r => new McpRow
         {
             Name = r.Name,
@@ -53,6 +54,7 @@ public sealed partial class MainWindow
             StatusBrush = r.Connected ? green : gold,
             Enabled = !r.Disabled,
             Tags = _itemTags.GetItemTags(TagScope.Mcps, r.Name),
+            TagChips = TagChips(_itemTags.GetItemTags(TagScope.Mcps, r.Name), definitions),
         }).ToList();
 
         PopulateMcpTagFilter();
@@ -67,7 +69,7 @@ public sealed partial class MainWindow
     private void PopulateMcpTagFilter()
     {
         var choices = new List<TagFilterOption> { new() };
-        choices.AddRange(_itemTags.GetTags(TagScope.Mcps).Select(tag => new TagFilterOption { Label = tag, Tag = tag }));
+        choices.AddRange(_itemTags.GetTags(TagScope.Mcps).Select(tag => new TagFilterOption { Label = tag.Name, Tag = tag.Name }));
         McpTagFilter.ItemsSource = choices;
         McpTagFilter.SelectedItem = choices.FirstOrDefault(choice =>
             string.Equals(choice.Tag, _mcpTagFilter, StringComparison.OrdinalIgnoreCase)) ?? choices[0];
@@ -148,14 +150,17 @@ public sealed partial class MainWindow
         var targets = FilteredMcpRows();
         var enable = !targets.Any(row => row.Enabled);
         McpPageStatus.Text = enable ? "Enabling filtered servers…" : "Disabling filtered servers…";
-        foreach (var row in targets)
+        var result = await _controller.SetMcpServersEnabledAsync(targets.Select(row => row.Name), enable);
+        if (!result.Ok)
         {
-            if (!_configs.Defaults.McpServers.TryGetValue(row.Name, out var server)) continue;
-            server.Disabled = !enable;
-            await Task.Run(() => _controller.SaveMcpServerAsync(row.Name, row.Name, server));
+            McpPageStatus.Text = result.Message;
+            return;
         }
-        await RefreshMcpListAsync();
-        McpPageStatus.Text = enable ? $"Enabled {targets.Count} filtered server(s)." : $"Disabled {targets.Count} filtered server(s).";
+
+        // Keep the current filtered layout stable. The next explicit refresh re-groups rows.
+        foreach (var row in targets) row.Enabled = enable;
+        McpBulkToggleButton.Content = enable ? "Disable all" : "Enable all";
+        McpPageStatus.Text = result.Message;
     }
 
     private List<McpRow> FilteredMcpRows()
@@ -187,12 +192,20 @@ public sealed partial class MainWindow
         if (sw.IsOn == row.Enabled) return;
 
         // Edit the canonical defaults entry (what SaveMcpServerAsync persists), flip Disabled, save.
-        if (!_configs.Defaults.McpServers.TryGetValue(row.Name, out var server)) return;
-        server.Disabled = !sw.IsOn;
+        if (!_configs.Defaults.McpServers.ContainsKey(row.Name)) return;
 
         McpPageStatus.Text = sw.IsOn ? $"Enabling “{row.Name}”…" : $"Disabling “{row.Name}”…";
-        await Task.Run(() => _controller.SaveMcpServerAsync(row.Name, row.Name, server));
-        await RefreshMcpListAsync();
+        var result = await _controller.SetMcpServersEnabledAsync([row.Name], sw.IsOn);
+        if (!result.Ok)
+        {
+            sw.IsOn = row.Enabled;
+            McpPageStatus.Text = result.Message;
+            return;
+        }
+
+        row.Enabled = sw.IsOn;
+        McpBulkToggleButton.Content = sw.IsOn ? "Disable all" : "Enable all";
+        McpPageStatus.Text = result.Message;
     }
 
     /// <summary>Runs a slash command through the normal pipeline (transcript echo, wizard
@@ -272,7 +285,6 @@ public sealed partial class MainWindow
             M_Url.Text = cfg.Url ?? "";
             M_Headers.Text = string.Join("\n", cfg.Headers.Select(kv => $"{kv.Key}={kv.Value}"));
             M_Disabled.IsOn = cfg.Disabled;
-            M_Tags.Text = string.Join(", ", _itemTags.GetItemTags(TagScope.Mcps, serverName));
         }
         else
         {
@@ -286,7 +298,6 @@ public sealed partial class MainWindow
             M_Url.Text = "";
             M_Headers.Text = "";
             M_Disabled.IsOn = false;
-            M_Tags.Text = "";
         }
 
         UpdateMcpTransportPanels();
@@ -447,7 +458,6 @@ public sealed partial class MainWindow
         var originalName = _mcpEditOriginalName;
         var (_, message) = await Task.Run(() => _controller.SaveMcpServerAsync(originalName, name, server));
         if (!string.IsNullOrWhiteSpace(originalName)) _itemTags.RenameItem(TagScope.Mcps, originalName, name);
-        _itemTags.SetItemTags(TagScope.Mcps, name, SplitTags(M_Tags.Text));
         McpPageStatus.Text = message;
         await RefreshMcpListAsync();
         McpPageStatus.Text = message;

@@ -34,6 +34,7 @@ public sealed partial class MainWindow
 
     private void RefreshSkillsList()
     {
+        var definitions = _itemTags.GetTags(TagScope.Skills);
         _allSkillRows = _skillCoordinator.ListGlobalSkills().Select(s => new SkillRow
         {
             Name = s.Name,
@@ -42,6 +43,7 @@ public sealed partial class MainWindow
             FolderPath = s.FolderPath,
             Enabled = s.Enabled,
             Tags = _itemTags.GetItemTags(TagScope.Skills, s.FolderPath),
+            TagChips = TagChips(_itemTags.GetItemTags(TagScope.Skills, s.FolderPath), definitions),
         }).ToList();
 
         PopulateSkillTagFilter();
@@ -56,7 +58,7 @@ public sealed partial class MainWindow
     private void PopulateSkillTagFilter()
     {
         var choices = new List<TagFilterOption> { new() };
-        choices.AddRange(_itemTags.GetTags(TagScope.Skills).Select(tag => new TagFilterOption { Label = tag, Tag = tag }));
+        choices.AddRange(_itemTags.GetTags(TagScope.Skills).Select(tag => new TagFilterOption { Label = tag.Name, Tag = tag.Name }));
         SkillTagFilter.ItemsSource = choices;
         SkillTagFilter.SelectedItem = choices.FirstOrDefault(choice =>
             string.Equals(choice.Tag, _skillTagFilter, StringComparison.OrdinalIgnoreCase)) ?? choices[0];
@@ -141,7 +143,9 @@ public sealed partial class MainWindow
             _skillCoordinator.SetEnabled(row.FolderPath, enable);
 
         await _skillCoordinator.ReloadAllAsync();
-        RefreshSkillsList();
+        // Keep the current filtered layout stable. The next explicit refresh re-groups rows.
+        foreach (var row in targets) row.Enabled = enable;
+        SkillBulkToggleButton.Content = enable ? "Disable all" : "Enable all";
         SkillsPageStatus.Text = enable ? $"Enabled {targets.Count} filtered skill(s)." : $"Disabled {targets.Count} filtered skill(s).";
     }
 
@@ -197,7 +201,10 @@ public sealed partial class MainWindow
         try
         {
             _skillCoordinator.SetEnabled(row.FolderPath, sw.IsOn);
-            await ApplySkillChangeAsync(sw.IsOn ? $"Enabled “{row.Name}”." : $"Disabled “{row.Name}”.");
+            await _skillCoordinator.ReloadAllAsync();
+            row.Enabled = sw.IsOn;
+            SkillBulkToggleButton.Content = sw.IsOn ? "Disable all" : "Enable all";
+            SkillsPageStatus.Text = sw.IsOn ? $"Enabled “{row.Name}”." : $"Disabled “{row.Name}”.";
         }
         catch (Exception ex)
         {
@@ -258,7 +265,6 @@ public sealed partial class MainWindow
             Sk_Name.Text = "";
             Sk_Description.Text = "";
             Sk_Body.Text = "";
-            Sk_Tags.Text = "";
         }
         else
         {
@@ -267,7 +273,6 @@ public sealed partial class MainWindow
             Sk_Name.Text = row.Name;
             Sk_Description.Text = row.Description;
             Sk_Body.Text = row.Body;
-            Sk_Tags.Text = string.Join(", ", row.Tags);
         }
 
         // Reset the AI panel and default its model to the active agent's (still changeable).
@@ -403,7 +408,6 @@ public sealed partial class MainWindow
             var folder = _skillCoordinator.SaveSkill(_editingSkillFolder, name, Sk_Description.Text, Sk_Body.Text);
             if (!string.IsNullOrWhiteSpace(_editingSkillFolder))
                 _itemTags.RenameItem(TagScope.Skills, _editingSkillFolder, folder);
-            _itemTags.SetItemTags(TagScope.Skills, folder, SplitTags(Sk_Tags.Text));
             SkillEditorOverlay.Visibility = Visibility.Collapsed;
             await ApplySkillChangeAsync($"Saved “{name}”.");
         }

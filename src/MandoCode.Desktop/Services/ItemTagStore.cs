@@ -6,6 +6,9 @@ namespace MandoCode.Desktop.Services;
 /// boundary: a skill category is not implicitly an MCP-server category.</summary>
 public enum TagScope { Skills, Mcps }
 
+/// <summary>A reusable tag label and its display color.</summary>
+public sealed record ItemTag(string Name, string Color);
+
 /// <summary>
 /// Desktop-owned tags for the Skills and MCP management pages. The shared engine config and a
 /// skill's portable SKILL.md remain unchanged; this is organization metadata for this Desktop
@@ -23,9 +26,9 @@ public sealed class ItemTagStore
             "MandoCode.Desktop", "item-tags.json");
     }
 
-    public IReadOnlyList<string> GetTags(TagScope scope)
+    public IReadOnlyList<ItemTag> GetTags(TagScope scope)
     {
-        lock (_gate) return Catalog(Load(), scope).Tags.OrderBy(tag => tag, StringComparer.OrdinalIgnoreCase).ToList();
+        lock (_gate) return Catalog(Load(), scope).Tags.OrderBy(tag => tag.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     public IReadOnlyList<string> GetItemTags(TagScope scope, string itemKey)
@@ -47,7 +50,7 @@ public sealed class ItemTagStore
             var catalog = Catalog(state, scope);
             var normalized = Normalize(tags);
             foreach (var tag in normalized)
-                AddIfMissing(catalog.Tags, tag);
+                AddIfMissing(catalog.Tags, new ItemTag(tag, DefaultColor));
 
             if (normalized.Count == 0) catalog.Assignments.Remove(itemKey);
             else catalog.Assignments[itemKey] = normalized;
@@ -55,14 +58,14 @@ public sealed class ItemTagStore
         }
     }
 
-    public void AddTag(TagScope scope, string tag)
+    public void AddTag(TagScope scope, string tag, string color)
     {
         lock (_gate)
         {
             var normalized = Normalize([tag]);
             if (normalized.Count == 0) return;
             var state = Load();
-            AddIfMissing(Catalog(state, scope).Tags, normalized[0]);
+            AddIfMissing(Catalog(state, scope).Tags, new ItemTag(normalized[0], color));
             Save(state);
         }
     }
@@ -73,7 +76,7 @@ public sealed class ItemTagStore
         {
             var state = Load();
             var catalog = Catalog(state, scope);
-            catalog.Tags.RemoveAll(existing => string.Equals(existing, tag, StringComparison.OrdinalIgnoreCase));
+            catalog.Tags.RemoveAll(existing => string.Equals(existing.Name, tag, StringComparison.OrdinalIgnoreCase));
             foreach (var (key, assigned) in catalog.Assignments.ToList())
             {
                 assigned.RemoveAll(existing => string.Equals(existing, tag, StringComparison.OrdinalIgnoreCase));
@@ -135,10 +138,12 @@ public sealed class ItemTagStore
         .Distinct(StringComparer.OrdinalIgnoreCase)
         .ToList();
 
-    private static void AddIfMissing(List<string> tags, string tag)
+    private static void AddIfMissing(List<ItemTag> tags, ItemTag tag)
     {
-        if (!tags.Contains(tag, StringComparer.OrdinalIgnoreCase)) tags.Add(tag);
+        if (!tags.Any(existing => string.Equals(existing.Name, tag.Name, StringComparison.OrdinalIgnoreCase))) tags.Add(tag);
     }
+
+    private const string DefaultColor = "#3B82F6";
 
     private sealed class ItemTagState
     {
@@ -157,7 +162,7 @@ public sealed class ItemTagStore
 
     private sealed class ItemTagCatalog
     {
-        public List<string> Tags { get; set; } = [];
+        public List<ItemTag> Tags { get; set; } = [];
         public Dictionary<string, List<string>> Assignments { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
         public void Normalize()

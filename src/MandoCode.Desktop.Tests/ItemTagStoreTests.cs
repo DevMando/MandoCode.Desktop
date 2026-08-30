@@ -20,8 +20,8 @@ public sealed class ItemTagStoreTests : IDisposable
         _store.SetItemTags(TagScope.Skills, "C:\\skills\\review", ["quality"]);
         _store.SetItemTags(TagScope.Mcps, "database", ["production"]);
 
-        Assert.Equal(["quality"], _store.GetTags(TagScope.Skills));
-        Assert.Equal(["production"], _store.GetTags(TagScope.Mcps));
+        Assert.Equal(["quality"], _store.GetTags(TagScope.Skills).Select(tag => tag.Name));
+        Assert.Equal(["production"], _store.GetTags(TagScope.Mcps).Select(tag => tag.Name));
         Assert.Equal(["quality"], _store.GetItemTags(TagScope.Skills, "C:\\skills\\review"));
         Assert.DoesNotContain("quality", _store.GetItemTags(TagScope.Mcps, "database"));
     }
@@ -47,7 +47,17 @@ public sealed class ItemTagStoreTests : IDisposable
 
         Assert.Equal(["review"], _store.GetItemTags(TagScope.Skills, "one"));
         Assert.Empty(_store.GetItemTags(TagScope.Skills, "two"));
-        Assert.Equal(["review"], _store.GetTags(TagScope.Skills));
+        Assert.Equal(["review"], _store.GetTags(TagScope.Skills).Select(tag => tag.Name));
+    }
+
+    [Fact]
+    public void Added_tag_keeps_its_selected_color()
+    {
+        _store.AddTag(TagScope.Skills, "release", "#A855F7");
+
+        var tag = Assert.Single(_store.GetTags(TagScope.Skills));
+        Assert.Equal("release", tag.Name);
+        Assert.Equal("#A855F7", tag.Color);
     }
 
     public void Dispose()

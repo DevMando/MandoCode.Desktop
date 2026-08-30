@@ -1982,6 +1982,53 @@ public sealed partial class ChatController
         return (true, $"'{name}' saved but did not appear in active clients.");
     }
 
+    /// <summary>
+    /// Changes the enabled state for a set of existing MCP servers as one app-wide update.
+    /// Persisting and reloading once matters here: a reload restarts the shared servers and
+    /// refreshes every open agent's tool registration.
+    /// </summary>
+    public async Task<(bool Ok, string Message)> SetMcpServersEnabledAsync(IEnumerable<string> names, bool enabled)
+    {
+        var servers = _configs.Defaults.McpServers;
+        var affected = names.Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(servers.ContainsKey)
+            .ToList();
+        if (affected.Count == 0)
+            return (true, "No matching MCP servers.");
+
+        var prior = affected.ToDictionary(name => name, name => servers[name].Disabled,
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var name in affected)
+            servers[name].Disabled = !enabled;
+
+        try
+        {
+            _configs.SaveDefaults();
+            _configs.SyncMcpServersToAgents();
+        }
+        catch (Exception ex)
+        {
+            foreach (var (name, disabled) in prior)
+                servers[name].Disabled = disabled;
+            _transcript.Append(_html.Error($"Failed to save config: {ex.Message}"));
+            return (false, $"Failed to save config: {ex.Message}");
+        }
+
+        _busy.Start(enabled ? "Enabling MCP servers..." : "Disabling MCP servers...");
+        try
+        {
+            await _mcp.ReloadAllAsync();
+        }
+        finally
+        {
+            _busy.Reset();
+        }
+
+        return (true, enabled
+            ? $"Enabled {affected.Count} MCP server(s)."
+            : $"Disabled {affected.Count} MCP server(s).");
+    }
+
     public sealed record McpToolInfo(string Name, string? Description);
     public sealed record McpTestResult(bool Ok, string Message, IReadOnlyList<McpToolInfo> Tools);
 
