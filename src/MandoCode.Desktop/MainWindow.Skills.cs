@@ -30,6 +30,7 @@ public sealed partial class MainWindow
 
     // Full unfiltered set; the ListView shows whatever matches the search box (see ApplySkillFilter).
     private List<SkillRow> _allSkillRows = new();
+    private string? _skillTagFilter;
 
     private void RefreshSkillsList()
     {
@@ -40,8 +41,10 @@ public sealed partial class MainWindow
             Body = s.Body,
             FolderPath = s.FolderPath,
             Enabled = s.Enabled,
+            Tags = _itemTags.GetItemTags(TagScope.Skills, s.FolderPath),
         }).ToList();
 
+        PopulateSkillTagFilter();
         ApplySkillFilter();
     }
 
@@ -49,6 +52,21 @@ public sealed partial class MainWindow
         ApplySkillFilter();
 
     private string _skillFilter = "all";
+
+    private void PopulateSkillTagFilter()
+    {
+        var choices = new List<TagFilterOption> { new() };
+        choices.AddRange(_itemTags.GetTags(TagScope.Skills).Select(tag => new TagFilterOption { Label = tag, Tag = tag }));
+        SkillTagFilter.ItemsSource = choices;
+        SkillTagFilter.SelectedItem = choices.FirstOrDefault(choice =>
+            string.Equals(choice.Tag, _skillTagFilter, StringComparison.OrdinalIgnoreCase)) ?? choices[0];
+    }
+
+    private void SkillTagFilter_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        _skillTagFilter = (SkillTagFilter.SelectedItem as TagFilterOption)?.Tag;
+        ApplySkillFilter();
+    }
 
     private void SkillFilter_Click(object sender, RoutedEventArgs e)
     {
@@ -78,6 +96,8 @@ public sealed partial class MainWindow
             "large" => filtered.Where(r => r.IsLarge),
             _ => filtered,
         };
+        if (!string.IsNullOrWhiteSpace(_skillTagFilter))
+            filtered = filtered.Where(row => row.Tags.Contains(_skillTagFilter, StringComparer.OrdinalIgnoreCase));
         var shown = filtered.ToList();
 
         // Group by state — Enabled first, Disabled below; empty sections omitted.
@@ -93,16 +113,55 @@ public sealed partial class MainWindow
         // Resetting ItemsSource clears the selection, so the selection-scoped buttons go with it.
         SkillEditButton.IsEnabled = false;
         SkillDeleteButton.IsEnabled = false;
+        SkillBulkToggleButton.IsEnabled = shown.Count > 0;
+        SkillBulkToggleButton.Content = shown.Any(row => row.Enabled) ? "Disable all" : "Enable all";
 
         var total = _allSkillRows.Count;
         var enabledTotal = _allSkillRows.Count(r => r.Enabled);
-        var active = q.Length > 0 || _skillFilter != "all";
+        var active = q.Length > 0 || _skillFilter != "all" || !string.IsNullOrWhiteSpace(_skillTagFilter);
         if (total == 0)
             SkillsPageStatus.Text = $"No global skills yet — “New Skill” or “Install from…” to add one.  ({_skillCoordinator.UserSkillsDirectory})";
         else if (active)
             SkillsPageStatus.Text = $"{shown.Count} of {total} shown  ·  {enabledTotal} enabled";
         else
             SkillsPageStatus.Text = $"{total} skill{(total == 1 ? "" : "s")}, {enabledTotal} enabled  ·  {_skillCoordinator.UserSkillsDirectory}";
+    }
+
+    private async void SkillManageTags_Click(object sender, RoutedEventArgs e)
+    {
+        await ShowTagManagerAsync(TagScope.Skills, "Skill tags");
+        RefreshSkillsList();
+    }
+
+    private async void SkillBulkToggle_Click(object sender, RoutedEventArgs e)
+    {
+        var targets = FilteredSkillRows();
+        var enable = !targets.Any(row => row.Enabled);
+        foreach (var row in targets)
+            _skillCoordinator.SetEnabled(row.FolderPath, enable);
+
+        await _skillCoordinator.ReloadAllAsync();
+        RefreshSkillsList();
+        SkillsPageStatus.Text = enable ? $"Enabled {targets.Count} filtered skill(s)." : $"Disabled {targets.Count} filtered skill(s).";
+    }
+
+    private List<SkillRow> FilteredSkillRows()
+    {
+        var q = SkillSearchBox.Text?.Trim() ?? "";
+        IEnumerable<SkillRow> rows = _allSkillRows;
+        if (q.Length > 0)
+            rows = rows.Where(row => row.Name.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                                     row.Description.Contains(q, StringComparison.OrdinalIgnoreCase));
+        rows = _skillFilter switch
+        {
+            "enabled" => rows.Where(row => row.Enabled),
+            "disabled" => rows.Where(row => !row.Enabled),
+            "large" => rows.Where(row => row.IsLarge),
+            _ => rows,
+        };
+        return string.IsNullOrWhiteSpace(_skillTagFilter)
+            ? rows.ToList()
+            : rows.Where(row => row.Tags.Contains(_skillTagFilter, StringComparer.OrdinalIgnoreCase)).ToList();
     }
 
     /// <summary>Reload every agent's skill set + prompt, then re-render the list and report.</summary>
@@ -199,6 +258,7 @@ public sealed partial class MainWindow
             Sk_Name.Text = "";
             Sk_Description.Text = "";
             Sk_Body.Text = "";
+            Sk_Tags.Text = "";
         }
         else
         {
@@ -207,6 +267,7 @@ public sealed partial class MainWindow
             Sk_Name.Text = row.Name;
             Sk_Description.Text = row.Description;
             Sk_Body.Text = row.Body;
+            Sk_Tags.Text = string.Join(", ", row.Tags);
         }
 
         // Reset the AI panel and default its model to the active agent's (still changeable).
@@ -339,7 +400,10 @@ public sealed partial class MainWindow
 
         try
         {
-            _skillCoordinator.SaveSkill(_editingSkillFolder, name, Sk_Description.Text, Sk_Body.Text);
+            var folder = _skillCoordinator.SaveSkill(_editingSkillFolder, name, Sk_Description.Text, Sk_Body.Text);
+            if (!string.IsNullOrWhiteSpace(_editingSkillFolder))
+                _itemTags.RenameItem(TagScope.Skills, _editingSkillFolder, folder);
+            _itemTags.SetItemTags(TagScope.Skills, folder, SplitTags(Sk_Tags.Text));
             SkillEditorOverlay.Visibility = Visibility.Collapsed;
             await ApplySkillChangeAsync($"Saved “{name}”.");
         }

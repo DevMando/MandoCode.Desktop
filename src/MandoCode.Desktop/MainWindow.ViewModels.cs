@@ -193,6 +193,14 @@ public sealed class McpRow
     public SolidColorBrush StatusBrush { get; init; } = new(Colors.Gray);
     /// <summary>Per-server on/off (the config's Disabled flag, inverted). Shared by every agent.</summary>
     public bool Enabled { get; init; }
+    public IReadOnlyList<string> Tags { get; init; } = [];
+}
+
+/// <summary>One choice in a Skills or MCP tag filter. A null tag means no tag constraint.</summary>
+public sealed class TagFilterOption
+{
+    public string Label { get; init; } = "All tags";
+    public string? Tag { get; init; }
 }
 
 /// <summary>A section of the skills list (e.g. "Enabled (12)"). A List subclass so a
@@ -219,6 +227,7 @@ public sealed class SkillRow
     public string Body { get; init; } = "";
     public string FolderPath { get; init; } = "";
     public bool Enabled { get; init; }
+    public IReadOnlyList<string> Tags { get; init; } = [];
 
     // Size of the instructions body — what gets injected into the prompt on load, so it's the cost
     // that spins a local model up. ~4 chars/token is the usual rough estimate.

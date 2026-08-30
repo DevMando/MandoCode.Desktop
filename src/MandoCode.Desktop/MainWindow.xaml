@@ -1445,7 +1445,12 @@
                     <!-- Each button's content is an icon + label panel, so it exposes no accessible
                          name on its own. AutomationProperties.Name gives screen readers (and UI
                          tests) something to address. -->
-                    <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8">
+                    <Grid Grid.Row="2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
                         <Button x:Name="McpAddButton" Click="McpAdd_Click" Style="{StaticResource AccentButtonStyle}"
                                 AutomationProperties.Name="Add MCP Server"
                                 ToolTipService.ToolTip="Add a new MCP server">
@@ -1483,7 +1488,10 @@
                                 ToolTipService.ToolTip="Refresh this status list only — doesn't touch the servers">
                             <FontIcon Glyph="&#xE72C;" FontSize="14"/>
                         </Button>
-                        <!-- Divider between the action group and the filter group. -->
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                        <TextBlock Text="Filters" FontSize="12" FontWeight="SemiBold" Opacity="0.6"
+                                   VerticalAlignment="Center" Margin="0,0,2,0"/>
                         <Border Width="1" Margin="0,4" VerticalAlignment="Stretch"
                                 Background="{StaticResource MandoBorderBrush}" Opacity="0.6"/>
                         <ToggleButton x:Name="McpFilterAll" Content="All" IsChecked="True" Tag="all" Click="McpFilter_Click"
@@ -1494,7 +1502,16 @@
                                       ToolTipService.ToolTip="Show only disabled servers (turned off, not connected)"/>
                         <ToggleButton x:Name="McpFilterFailed" Content="Failed" Tag="failed" Click="McpFilter_Click"
                                       ToolTipService.ToolTip="Show only servers that failed to connect"/>
-                    </StackPanel>
+                        <ComboBox x:Name="McpTagFilter" MinWidth="120" DisplayMemberPath="Label"
+                                  SelectionChanged="McpTagFilter_SelectionChanged"
+                                  ToolTipService.ToolTip="Filter MCP servers by tag"/>
+                        <Button Click="McpManageTags_Click" Padding="8,4" ToolTipService.ToolTip="Manage MCP tags">
+                            <FontIcon Glyph="&#xE710;" FontSize="12"/>
+                        </Button>
+                        <Button x:Name="McpBulkToggleButton" Click="McpBulkToggle_Click"
+                                ToolTipService.ToolTip="Enable or disable every MCP server currently shown"/>
+                        </StackPanel>
+                    </Grid>
 
                     <!-- Footer status bar: server count / connection status / filter matches. -->
                     <TextBlock Grid.Row="4" x:Name="McpPageStatus" Text="" Opacity="0.55" FontSize="11"
@@ -1585,7 +1602,12 @@
                         </ListView.ItemTemplate>
                     </ListView>
 
-                    <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8">
+                    <Grid Grid.Row="2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
                         <Button x:Name="SkillNewButton" Click="SkillNew_Click" Style="{StaticResource AccentButtonStyle}"
                                 AutomationProperties.Name="New Skill"
                                 ToolTipService.ToolTip="Write a new global skill">
@@ -1631,7 +1653,10 @@
                                 ToolTipService.ToolTip="Re-scan the skills folder">
                             <FontIcon Glyph="&#xE72C;" FontSize="14"/>
                         </Button>
-                        <!-- Divider between the action group and the filter group. -->
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                        <TextBlock Text="Filters" FontSize="12" FontWeight="SemiBold" Opacity="0.6"
+                                   VerticalAlignment="Center" Margin="0,0,2,0"/>
                         <Border Width="1" Margin="0,4" VerticalAlignment="Stretch"
                                 Background="{StaticResource MandoBorderBrush}" Opacity="0.6"/>
                         <ToggleButton x:Name="SkillFilterAll" Content="All" IsChecked="True" Tag="all" Click="SkillFilter_Click"
@@ -1642,7 +1667,16 @@
                                       ToolTipService.ToolTip="Show only disabled skills (turned off, not in any prompt)"/>
                         <ToggleButton x:Name="SkillFilterLarge" Content="Large" Tag="large" Click="SkillFilter_Click"
                                       ToolTipService.ToolTip="Show only large skills — a big instructions body is heavier every time it loads"/>
-                    </StackPanel>
+                        <ComboBox x:Name="SkillTagFilter" MinWidth="120" DisplayMemberPath="Label"
+                                  SelectionChanged="SkillTagFilter_SelectionChanged"
+                                  ToolTipService.ToolTip="Filter skills by tag"/>
+                        <Button Click="SkillManageTags_Click" Padding="8,4" ToolTipService.ToolTip="Manage skill tags">
+                            <FontIcon Glyph="&#xE710;" FontSize="12"/>
+                        </Button>
+                        <Button x:Name="SkillBulkToggleButton" Click="SkillBulkToggle_Click"
+                                ToolTipService.ToolTip="Enable or disable every skill currently shown"/>
+                        </StackPanel>
+                    </Grid>
 
                     <!-- Footer status bar: skill count + folder path (and filter matches). Quiet and
                          right-aligned below the list, out of the header's way. -->
@@ -1735,6 +1769,9 @@
                                      PlaceholderText="Authorization=Bearer …" FontFamily="Cascadia Code,Consolas"/>
                         </StackPanel>
 
+                        <TextBlock Text="Tags (comma-separated)" FontSize="13" Opacity="0.8"/>
+                        <TextBox x:Name="M_Tags" PlaceholderText="e.g. database, local, research"
+                                 ToolTipService.ToolTip="Use tags to organize and filter MCP servers"/>
                         <ToggleSwitch x:Name="M_Disabled" Header="Disabled (keep configured, don't connect)"/>
 
                         <!-- One status surface for the whole modal: validation errors (red),
@@ -1907,6 +1944,11 @@
                                        FontSize="13" Opacity="0.8" TextWrapping="Wrap" Margin="0,6,0,0"/>
                             <TextBox x:Name="Sk_Description" TextWrapping="Wrap" AcceptsReturn="False"
                                      PlaceholderText="Write a Conventional Commits message from staged changes"/>
+
+                            <TextBlock Text="Tags (comma-separated)" FontSize="13" Opacity="0.8"
+                                       TextWrapping="Wrap" Margin="0,6,0,0"/>
+                            <TextBox x:Name="Sk_Tags" PlaceholderText="e.g. git, documentation, review"
+                                     ToolTipService.ToolTip="Use tags to organize and filter skills"/>
 
                             <Grid Margin="0,6,0,0">
                                 <Grid.ColumnDefinitions>

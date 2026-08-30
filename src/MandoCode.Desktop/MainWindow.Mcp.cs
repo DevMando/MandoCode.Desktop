@@ -30,6 +30,7 @@ public sealed partial class MainWindow
     // Full unfiltered set; the list shows what matches the search box (see ApplyMcpFilter).
     private List<McpRow> _allMcpRows = new();
     private bool _loadingMcp;
+    private string? _mcpTagFilter;
 
     private async Task RefreshMcpListAsync()
     {
@@ -51,8 +52,10 @@ public sealed partial class MainWindow
             Status = r.Status,
             StatusBrush = r.Connected ? green : gold,
             Enabled = !r.Disabled,
+            Tags = _itemTags.GetItemTags(TagScope.Mcps, r.Name),
         }).ToList();
 
+        PopulateMcpTagFilter();
         ApplyMcpFilter();
     }
 
@@ -60,6 +63,21 @@ public sealed partial class MainWindow
         ApplyMcpFilter();
 
     private string _mcpFilter = "all";
+
+    private void PopulateMcpTagFilter()
+    {
+        var choices = new List<TagFilterOption> { new() };
+        choices.AddRange(_itemTags.GetTags(TagScope.Mcps).Select(tag => new TagFilterOption { Label = tag, Tag = tag }));
+        McpTagFilter.ItemsSource = choices;
+        McpTagFilter.SelectedItem = choices.FirstOrDefault(choice =>
+            string.Equals(choice.Tag, _mcpTagFilter, StringComparison.OrdinalIgnoreCase)) ?? choices[0];
+    }
+
+    private void McpTagFilter_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        _mcpTagFilter = (McpTagFilter.SelectedItem as TagFilterOption)?.Tag;
+        ApplyMcpFilter();
+    }
 
     private void McpFilter_Click(object sender, RoutedEventArgs e)
     {
@@ -88,6 +106,8 @@ public sealed partial class MainWindow
             "failed" => filtered.Where(r => r.Status.StartsWith("failed", StringComparison.OrdinalIgnoreCase)),
             _ => filtered,
         };
+        if (!string.IsNullOrWhiteSpace(_mcpTagFilter))
+            filtered = filtered.Where(row => row.Tags.Contains(_mcpTagFilter, StringComparer.OrdinalIgnoreCase));
         var shown = filtered.ToList();
 
         var groups = new List<McpRowGroup>();
@@ -103,16 +123,58 @@ public sealed partial class MainWindow
 
         McpEditButton.IsEnabled = false;
         McpRemoveButton.IsEnabled = false;
+        McpBulkToggleButton.IsEnabled = shown.Count > 0;
+        McpBulkToggleButton.Content = shown.Any(row => row.Enabled) ? "Disable all" : "Enable all";
 
         var total = _allMcpRows.Count;
         var enabledTotal = _allMcpRows.Count(r => r.Enabled);
-        var active = q.Length > 0 || _mcpFilter != "all";
+        var active = q.Length > 0 || _mcpFilter != "all" || !string.IsNullOrWhiteSpace(_mcpTagFilter);
         if (total == 0)
             McpPageStatus.Text = "No MCP servers configured yet — “Add MCP Server” to connect one.";
         else if (active)
             McpPageStatus.Text = $"{shown.Count} of {total} shown  ·  {enabledTotal} enabled";
         else
             McpPageStatus.Text = $"{total} server{(total == 1 ? "" : "s")}, {enabledTotal} enabled";
+    }
+
+    private async void McpManageTags_Click(object sender, RoutedEventArgs e)
+    {
+        await ShowTagManagerAsync(TagScope.Mcps, "MCP tags");
+        await RefreshMcpListAsync();
+    }
+
+    private async void McpBulkToggle_Click(object sender, RoutedEventArgs e)
+    {
+        var targets = FilteredMcpRows();
+        var enable = !targets.Any(row => row.Enabled);
+        McpPageStatus.Text = enable ? "Enabling filtered servers…" : "Disabling filtered servers…";
+        foreach (var row in targets)
+        {
+            if (!_configs.Defaults.McpServers.TryGetValue(row.Name, out var server)) continue;
+            server.Disabled = !enable;
+            await Task.Run(() => _controller.SaveMcpServerAsync(row.Name, row.Name, server));
+        }
+        await RefreshMcpListAsync();
+        McpPageStatus.Text = enable ? $"Enabled {targets.Count} filtered server(s)." : $"Disabled {targets.Count} filtered server(s).";
+    }
+
+    private List<McpRow> FilteredMcpRows()
+    {
+        var q = McpSearchBox.Text?.Trim() ?? "";
+        IEnumerable<McpRow> rows = _allMcpRows;
+        if (q.Length > 0)
+            rows = rows.Where(row => row.Name.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                                     row.Transport.Contains(q, StringComparison.OrdinalIgnoreCase));
+        rows = _mcpFilter switch
+        {
+            "enabled" => rows.Where(row => row.Enabled),
+            "disabled" => rows.Where(row => !row.Enabled),
+            "failed" => rows.Where(row => row.Status.StartsWith("failed", StringComparison.OrdinalIgnoreCase)),
+            _ => rows,
+        };
+        return string.IsNullOrWhiteSpace(_mcpTagFilter)
+            ? rows.ToList()
+            : rows.Where(row => row.Tags.Contains(_mcpTagFilter, StringComparer.OrdinalIgnoreCase)).ToList();
     }
 
     /// <summary>Per-server on/off. Flips the shared config's Disabled flag and saves, which restarts
@@ -210,6 +272,7 @@ public sealed partial class MainWindow
             M_Url.Text = cfg.Url ?? "";
             M_Headers.Text = string.Join("\n", cfg.Headers.Select(kv => $"{kv.Key}={kv.Value}"));
             M_Disabled.IsOn = cfg.Disabled;
+            M_Tags.Text = string.Join(", ", _itemTags.GetItemTags(TagScope.Mcps, serverName));
         }
         else
         {
@@ -223,6 +286,7 @@ public sealed partial class MainWindow
             M_Url.Text = "";
             M_Headers.Text = "";
             M_Disabled.IsOn = false;
+            M_Tags.Text = "";
         }
 
         UpdateMcpTransportPanels();
@@ -382,6 +446,8 @@ public sealed partial class MainWindow
 
         var originalName = _mcpEditOriginalName;
         var (_, message) = await Task.Run(() => _controller.SaveMcpServerAsync(originalName, name, server));
+        if (!string.IsNullOrWhiteSpace(originalName)) _itemTags.RenameItem(TagScope.Mcps, originalName, name);
+        _itemTags.SetItemTags(TagScope.Mcps, name, SplitTags(M_Tags.Text));
         McpPageStatus.Text = message;
         await RefreshMcpListAsync();
         McpPageStatus.Text = message;
