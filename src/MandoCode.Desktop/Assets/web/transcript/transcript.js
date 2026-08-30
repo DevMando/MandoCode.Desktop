@@ -415,6 +415,22 @@
       window.chrome.webview.postMessage('undo-file:' + undo.getAttribute('data-file'));
   });
 
+  // Unfinished-plan card actions. The host owns the actual checkpoint operation; this only
+  // provides immediate click feedback and prevents a double-submit while the command starts.
+  document.addEventListener('click', function (e) {
+    const resume = e.target.closest('.checkpoint-resume');
+    const discard = e.target.closest('.checkpoint-discard');
+    if (!resume && !discard) return;
+    const card = (resume || discard).closest('.checkpoint-card');
+    if (!card || card.dataset.submitted) return;
+    card.dataset.submitted = '1';
+    card.querySelectorAll('.checkpoint-btn').forEach(function (button) { button.disabled = true; });
+    const state = card.querySelector('.checkpoint-state');
+    if (state) state.textContent = resume ? 'Resuming…' : 'Discarding…';
+    if (window.chrome && window.chrome.webview)
+      window.chrome.webview.postMessage(resume ? 'plan-resume' : 'plan-discard');
+  });
+
   // --- drag hand-off: Chromium owns drags over the transcript surface, so XAML never sees
   // them. On dragenter we alert the host, which mounts its drop overlay over this WebView;
   // the OS then retargets the drag (and the drop, with real file paths) to that overlay.

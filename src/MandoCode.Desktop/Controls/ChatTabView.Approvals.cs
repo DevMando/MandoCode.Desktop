@@ -168,7 +168,12 @@ public sealed partial class ChatTabView
         }
     }
 
-    public Task<string> ShowInstructionInputAsync(string prompt, string placeholder = "", bool allowCancel = false, CancellationToken ct = default)
+    public Task<string> ShowInstructionInputAsync(
+        string prompt,
+        string placeholder = "",
+        string initialValue = "",
+        bool allowCancel = false,
+        CancellationToken ct = default)
     {
         var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         _instructionTcs = tcs;
@@ -187,7 +192,7 @@ public sealed partial class ChatTabView
             ApprovalBodyScroll.Visibility = Visibility.Collapsed;
             ApprovalButtons.Visibility = Visibility.Collapsed;
 
-            InstructionBox.Text = "";
+            InstructionBox.Text = initialValue;
             InstructionBox.PlaceholderText = string.IsNullOrEmpty(placeholder)
                 ? "Type your answer and press Enter"
                 : placeholder;
@@ -196,6 +201,7 @@ public sealed partial class ChatTabView
             SetApprovalCardSize(instructionMode: true);
             ShowApprovalOverlay();
             InstructionBox.Focus(FocusState.Programmatic);
+            if (!string.IsNullOrEmpty(initialValue)) InstructionBox.SelectAll();
         });
 
         return tcs.Task;

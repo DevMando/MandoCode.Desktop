@@ -104,7 +104,15 @@ public sealed class AgentSession
 
         Ai = new AIService(ProjectRoot, Config, Tokens, PlanHandoff, Skills, mcpManager, McpGate, spinner);
         Planner = new TaskPlannerService(Ai, Config);
-        PlanRunners = new PlanRunnerSelector(Config, Planner, new AiServicePlanStepExecutor(Ai));
+        // PersistKey is the durable tab identity. Including it in the checkpoint key prevents two
+        // agents working in the same project from overwriting each other's unfinished plans.
+        PlanRunners = new PlanRunnerSelector(
+            Config,
+            Planner,
+            new AiServicePlanStepExecutor(Ai),
+            PlanHandoff,
+            ProjectRoot,
+            PersistKey);
 
         var ignoreDirs = new HashSet<string>(MandoCodeConfig.DefaultIgnoreDirectories);
         foreach (var dir in Config.IgnoreDirectories) ignoreDirs.Add(dir);

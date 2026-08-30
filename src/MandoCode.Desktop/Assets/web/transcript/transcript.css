@@ -289,6 +289,17 @@
   .panel-header { padding: 6px 12px; font-weight: 600; border-bottom: 1px solid var(--border);
     font-family: "Cascadia Code", Consolas, monospace; font-size: 13px; }
   .panel-footer { padding: 4px 12px 8px 12px; color: var(--dim); font-size: 12px; }
+  .checkpoint-body { padding: 10px 12px 7px; }
+  .checkpoint-goal { color: var(--fg); font-weight: 600; overflow-wrap: anywhere; }
+  .checkpoint-progress { margin-top: 4px; color: var(--dim); font-size: 12px; }
+  .checkpoint-actions { display: flex; align-items: center; gap: 8px; padding: 2px 12px 11px; }
+  .checkpoint-btn { cursor: pointer; border: 1px solid var(--border); border-radius: 7px;
+    padding: 4px 12px; color: var(--fg); background: var(--bg); font: 600 12px "Segoe UI", sans-serif; }
+  .checkpoint-resume { color: var(--green); border-color: color-mix(in srgb, var(--green) 65%, var(--border)); }
+  .checkpoint-discard { color: var(--red); }
+  .checkpoint-btn:hover:not(:disabled) { border-color: var(--accent); }
+  .checkpoint-btn:disabled { cursor: default; opacity: .5; }
+  .checkpoint-state { color: var(--dim); font-size: 12px; }
   pre.cmd, pre.cmd-out, pre.diff, pre.mono-block, pre.raw {
     margin: 0; padding: 8px 12px; overflow-x: auto; white-space: pre;
     font-family: "Cascadia Code", "Cascadia Mono", Consolas, monospace; font-size: 13px;

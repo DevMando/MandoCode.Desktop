@@ -62,6 +62,7 @@ public sealed class ResponseStreamerTests
         public Task RefreshSettingsAsync(MandoCodeConfig config) => throw new NotSupportedException();
         public Task AttachMcpPluginsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<(bool IsValid, string? ErrorMessage)> ValidateModelAsync() => throw new NotSupportedException();
+        public Task<GeneratedPlan> GeneratePlanAsync(string request, string? revisionContext = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public string? ExportHistoryJson() => throw new NotSupportedException();
         public void AppendAssistantNote(string text) => throw new NotSupportedException();
         public int TryRestoreHistoryJson(string json) => throw new NotSupportedException();

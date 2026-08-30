@@ -21,6 +21,7 @@ public sealed partial class ChatController
     private readonly MandoCodeConfig _config;
     private readonly TokenTrackingService _tokenTracker;
     private readonly PlanHandoff _planHandoff;
+    private readonly DeferredPlanCompletion _deferredPlans;
     private readonly TaskPlannerService _taskPlanner;
     // Which engine runs a plan is re-read per plan, so `planner` can be flipped
     // mid-session. _taskPlanner is still needed for RequiresPlanning, which is a
@@ -173,6 +174,7 @@ public sealed partial class ChatController
         _config = config;
         _tokenTracker = tokenTracker;
         _planHandoff = planHandoff;
+        _deferredPlans = new DeferredPlanCompletion(_planHandoff);
         _taskPlanner = taskPlanner;
         _planRunners = planRunners;
         _mcpManager = mcpManager;
@@ -306,6 +308,7 @@ public sealed partial class ChatController
                 _transcript.Append(_html.StatusChip(ModelName, "ready", "ok"));
         }
 
+        ShowUnfinishedPlanNotice();
         StateChanged?.Invoke();
 
         // Fire-and-forget update check against MandoCode.Desktop's own GitHub releases —
@@ -452,7 +455,7 @@ public sealed partial class ChatController
             _pendingReactions.Clear();
             _pendingWorkspaceNotes.Clear();
 
-            await ProcessDirectRequestAsync(processedInput);
+            await ProcessDirectRequestAsync(processedInput, input);
         }
         finally
         {
@@ -472,7 +475,7 @@ public sealed partial class ChatController
     // Direct AI request (port of ProcessDirectRequestAsync)
     // ============================================================
 
-    private async Task ProcessDirectRequestAsync(string input)
+    private async Task ProcessDirectRequestAsync(string input, string? originalRequest = null)
     {
         // Reset the per-request operation tracking the function-call event handlers read.
         _recentReadCount = 0;
@@ -492,6 +495,11 @@ public sealed partial class ChatController
             var response = await _streamer.StreamAsync(input, token);
             if (!string.IsNullOrEmpty(response)) _lastAiResponse = response;
 
+            // AIService sees the expanded/preambled model input. Before the queued plan is taken,
+            // replace that fallback with the user's actual text so checkpoints preserve paths and
+            // intent without persisting attachment dumps or internal planning nudges.
+            _planHandoff.SetRequestContext(originalRequest ?? input);
+
             // propose_plan now only queues a plan; the host runs it once the turn has drained, so
             // the plan is a peer of the chat turn rather than something nested inside a tool call.
             // Without this call a proposed plan would simply never execute.
@@ -501,8 +509,11 @@ public sealed partial class ChatController
             }
             else
             {
-                var manifest = await _planHandoff.RunPendingPlanAsync(token);
-                if (!string.IsNullOrWhiteSpace(manifest)) _ai.AppendAssistantNote(manifest);
+                var completion = await _deferredPlans.CompleteAsync(token, _streamer.StreamAsync);
+                if (!string.IsNullOrEmpty(completion.FollowUpResponse))
+                    _lastAiResponse = completion.FollowUpResponse;
+                if (!string.IsNullOrWhiteSpace(completion.Manifest))
+                    _ai.AppendAssistantNote(completion.Manifest);
             }
         }
         catch (OperationCanceledException)
@@ -694,10 +705,17 @@ public sealed partial class ChatController
     // ============================================================
 
     private const string ExecutePlanLabel = "Execute plan";
+    private const string EditPlanStepLabel = "Edit a step";
     private const string RejectPlanLabel = "One-shot it";
     private const string CancelRequestLabel = "Cancel request";
+    private const string RetryStepLabel = "Retry this step";
+    private const string EditAndRetryStepLabel = "Edit instruction and retry";
+    private const string ReviseRemainingPlanLabel = "Revise the remaining plan";
+    private const string UseRevisedPlanLabel = "Use revised plan";
+    private const string KeepCurrentPlanLabel = "Keep current plan and skip this step";
     private const string SkipStepLabel = "Skip this step and continue";
     private const string CancelPlanLabel = "Cancel the plan";
+    private const string BackLabel = "Back";
 
     private async Task<string> HandleProposedPlanAsync(TaskPlan plan, CancellationToken ct)
     {
@@ -709,29 +727,37 @@ public sealed partial class ChatController
         using (await _promptGate.AcquireAsync(ct))
         {
             _busy.Stop();
-            _transcript.Append(_html.PlanCard(plan));
-
-            choice = await ui.ShowApprovalAsync(new ApprovalRequest
+            while (true)
             {
-                Title = "The assistant proposes this plan. What would you like to do?",
-                // Bottom bar, not the centered modal — the plan card above stays readable.
-                BottomBar = true,
-                ToastSummary = "Wants to run a proposed plan",
-                Options = new[]
-                {
-                    new ApprovalOption(ExecutePlanLabel, ApprovalOptionKind.Proceed),
-                    new ApprovalOption(RejectPlanLabel, ApprovalOptionKind.Redirect,
-                        Description: "Skip the step-by-step plan — the model attempts the whole request in one shot."),
-                    // Destructive (red) so the hard "stop" reads differently from "one-shot it".
-                    new ApprovalOption(CancelRequestLabel, ApprovalOptionKind.Destructive)
-                }
-            }, ct);
+                _transcript.Append(_html.PlanCard(plan));
 
-            _transcript.Append(_html.UserEcho(choice));
+                choice = await ui.ShowApprovalAsync(new ApprovalRequest
+                {
+                    Title = "The assistant proposes this plan. What would you like to do?",
+                    // Bottom bar, not the centered modal — the plan card above stays readable.
+                    BottomBar = true,
+                    ToastSummary = "Wants to run a proposed plan",
+                    Options = new[]
+                    {
+                        new ApprovalOption(ExecutePlanLabel, ApprovalOptionKind.Proceed),
+                        new ApprovalOption(EditPlanStepLabel, ApprovalOptionKind.Redirect),
+                        new ApprovalOption(RejectPlanLabel, ApprovalOptionKind.Redirect,
+                            Description: "Skip the step-by-step plan — the model attempts the whole request in one shot."),
+                        // Destructive (red) so the hard "stop" reads differently from "one-shot it".
+                        new ApprovalOption(CancelRequestLabel, ApprovalOptionKind.Destructive)
+                    }
+                }, ct);
+
+                _transcript.Append(_html.UserEcho(choice));
+                if (choice != EditPlanStepLabel) break;
+
+                await EditPlanStepAsync(plan, ui, ct);
+            }
         }
 
         if (choice == CancelRequestLabel)
         {
+            _deferredPlans.Outcome = DeferredPlanOutcome.Cancelled;
             _transcript.Append(_html.Dim("Request cancelled — stopping here."));
             // Cancel the request token so the turn mechanically unwinds — the return
             // string alone is a polite request small models ignore (see App.razor).
@@ -741,11 +767,13 @@ public sealed partial class ChatController
 
         if (choice == RejectPlanLabel)
         {
+            _deferredPlans.Outcome = DeferredPlanOutcome.Rejected;
             _transcript.Append(_html.Dim("Plan skipped — one-shotting your request."));
             return "User declined the step-by-step plan and wants you to one-shot it: attempt the full "
                  + "request in a single pass. Do not call propose_plan again.";
         }
 
+        _deferredPlans.Outcome = DeferredPlanOutcome.Executed;
         _transcript.Append(_html.Success("Executing plan..."));
         PlanProgressChanged?.Invoke(0, plan.Steps.Count, true);
 
@@ -753,7 +781,7 @@ public sealed partial class ChatController
         {
             await foreach (var progressEvent in _planRunners.Current.ExecutePlanAsync(plan, ct))
             {
-                await HandleProgressEventAsync(progressEvent, plan, ui);
+                await HandleProgressEventAsync(progressEvent, plan, ui, ct);
             }
         }
         catch (OperationCanceledException)
@@ -768,6 +796,8 @@ public sealed partial class ChatController
 
         if (plan.Status == TaskPlanStatus.Completed)
             _transcript.Append(_html.Success("Plan completed successfully!"));
+        else if (plan.Status == TaskPlanStatus.CompletedWithIssues)
+            _transcript.Append(_html.Warn("Plan completed with skipped or failed steps."));
         else if (plan.Status == TaskPlanStatus.Cancelled)
             _transcript.Append(_html.Warn("Plan was cancelled."));
         else
@@ -782,7 +812,114 @@ public sealed partial class ChatController
                "Do NOT create more files, call more tools, or propose another plan.";
     }
 
-    private async Task HandleProgressEventAsync(TaskProgressEvent progressEvent, TaskPlan plan, IApprovalUi ui)
+    private async Task<bool> EditPlanStepAsync(
+        TaskPlan plan,
+        IApprovalUi ui,
+        CancellationToken ct,
+        int minimumStepNumber = 1,
+        bool reviseFollowingSteps = true)
+    {
+        var choices = plan.Steps
+            .Where(step => step.StepNumber >= minimumStepNumber)
+            .ToDictionary(
+            step => $"Step {step.StepNumber}: {step.Description}",
+            step => step);
+
+        var selected = await ui.ShowApprovalAsync(new ApprovalRequest
+        {
+            Title = "Which plan step do you want to edit?",
+            Options = choices.Keys
+                .Select(label => new ApprovalOption(label, ApprovalOptionKind.Proceed))
+                .Append(new ApprovalOption(BackLabel, ApprovalOptionKind.Redirect))
+                .ToArray()
+        }, ct);
+
+        if (selected == BackLabel || !choices.TryGetValue(selected, out var step))
+            return false;
+
+        if (!await EditPlanStepAsync(step, ui, ct))
+            return false;
+
+        if (reviseFollowingSteps && plan.Steps.Any(candidate => candidate.StepNumber > step.StepNumber))
+            await ReviseFollowingStepsAfterEditAsync(plan, step, ct);
+
+        return true;
+    }
+
+    private async Task<bool> EditPlanStepAsync(TaskStep step, IApprovalUi ui, CancellationToken ct)
+    {
+        var revised = await ui.ShowInstructionInputAsync(
+            $"Edit step {step.StepNumber}\nModify the existing instruction below.",
+            "Enter the step instruction",
+            initialValue: step.Instruction,
+            allowCancel: true,
+            ct: ct);
+
+        if (revised == ApprovalSignals.Cancelled || !PlanInstructionEditor.Apply(step, revised))
+        {
+            _transcript.Append(_html.Dim($"Step {step.StepNumber} left unchanged."));
+            return false;
+        }
+
+        _transcript.Append(_html.Success($"Step {step.StepNumber} updated."));
+        return true;
+    }
+
+    private async Task ReviseFollowingStepsAfterEditAsync(
+        TaskPlan plan,
+        TaskStep editedStep,
+        CancellationToken ct)
+    {
+        _busy.Start("Updating dependent steps...");
+        _transcript.Append(_html.Dim(
+            $"Updating steps after {editedStep.StepNumber} so they stay consistent with your edit..."));
+
+        try
+        {
+            var earlier = plan.Steps
+                .Where(step => step.StepNumber < editedStep.StepNumber)
+                .Select(step => $"Step {step.StepNumber}: {step.Description}\nInstruction: {step.Instruction}");
+            var later = plan.Steps
+                .Where(step => step.StepNumber > editedStep.StepNumber)
+                .Select(step => $"Step {step.StepNumber}: {step.Description}\nInstruction: {step.Instruction}");
+            var context =
+                $"The user edited step {editedStep.StepNumber}. Their edited instruction is authoritative and must not be changed:\n" +
+                $"{editedStep.Instruction}\n\n" +
+                "Earlier steps that must remain unchanged:\n" + string.Join("\n\n", earlier) + "\n\n" +
+                "Return only replacement steps that come after the edited step. Update paths, values, and verification " +
+                "expectations so they are consistent with the edit. State each replacement as the actual work to execute; " +
+                "never say to replace, update, or revise a plan step, and never refer to old step numbers. " +
+                "Do not repeat earlier or edited steps.\n\n" +
+                "Current later steps to replace:\n" + string.Join("\n\n", later);
+
+            var revision = await _ai.GeneratePlanAsync(plan.OriginalRequest, context, ct);
+            if (revision.Steps.Length == 1 &&
+                revision.Steps[0].description == "Complete the requested goal" &&
+                revision.Steps[0].instruction == plan.OriginalRequest.Trim())
+                throw new InvalidOperationException("The model did not return a usable dependent-step revision.");
+
+            var candidate = PlanRevision.CreateFollowingCandidate(plan, editedStep.StepNumber, revision);
+            PlanRevision.ApplyFollowing(plan, editedStep.StepNumber, candidate);
+            _transcript.Append(_html.Success(
+                "Dependent steps updated. Review the complete plan before executing it."));
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _transcript.Append(_html.Warn(
+                $"Could not update dependent steps automatically: {ex.Message} Review the later steps manually."));
+        }
+        finally
+        {
+            _busy.Stop();
+        }
+    }
+
+    private async Task HandleProgressEventAsync(
+        TaskProgressEvent progressEvent,
+        TaskPlan plan,
+        IApprovalUi ui,
+        CancellationToken ct)
     {
         switch (progressEvent.ProgressType)
         {
@@ -809,27 +946,74 @@ public sealed partial class ChatController
                 _busy.Stop();
                 _transcript.Append(_html.Error($"Step {progressEvent.CurrentStep} failed: {progressEvent.Message ?? "Unknown error"}"));
 
+                // Cancellation is already a terminal decision, not another failure choice. Asking
+                // retry/skip/cancel here would make a diff-approval cancel look ineffective.
+                if (plan.Status == TaskPlanStatus.Cancelled || ct.IsCancellationRequested)
+                    break;
+
                 // Must resolve before enumeration continues — same semantics as the
                 // CLI's blocking prompt: SkipStep/CancelPlan mutate plan.Status before
                 // ExecutePlanAsync's next iteration reconciles.
-                var failChoice = await ui.ShowApprovalAsync(new ApprovalRequest
+                var failedStep = plan.Steps.FirstOrDefault(s => s.StepNumber == progressEvent.CurrentStep);
+                string failChoice;
+
+                // Retry is a workflow-engine capability: its triage node re-dispatches a failed
+                // step when the UI changes its state back to Pending. The legacy foreach runner
+                // has already advanced and therefore cannot truthfully offer it.
+                while (true)
                 {
-                    Title = "How would you like to proceed?",
-                    Subtitle = $"Step {progressEvent.CurrentStep} failed",
-                    Options = new[]
+                    var options = new List<ApprovalOption>();
+                    if (_planRunners.UsingWorkflowEngine)
                     {
-                        new ApprovalOption(SkipStepLabel, ApprovalOptionKind.Redirect),
-                        new ApprovalOption(CancelPlanLabel, ApprovalOptionKind.Destructive)
+                        options.Add(new ApprovalOption(RetryStepLabel, ApprovalOptionKind.Proceed));
+                        options.Add(new ApprovalOption(EditAndRetryStepLabel, ApprovalOptionKind.Redirect));
+                        options.Add(new ApprovalOption(ReviseRemainingPlanLabel, ApprovalOptionKind.Redirect,
+                            Description: "Generate a replacement for this step and all remaining steps, then review it."));
                     }
-                });
+                    options.Add(new ApprovalOption(SkipStepLabel, ApprovalOptionKind.Redirect));
+                    options.Add(new ApprovalOption(CancelPlanLabel, ApprovalOptionKind.Destructive));
+
+                    failChoice = await ui.ShowApprovalAsync(new ApprovalRequest
+                    {
+                        Title = "How would you like to proceed?",
+                        Subtitle = $"Step {progressEvent.CurrentStep} failed",
+                        Options = options
+                    }, ct);
+
+                    if (failChoice != EditAndRetryStepLabel || failedStep == null)
+                        break;
+
+                    if (await EditPlanStepAsync(failedStep, ui, ct))
+                    {
+                        failedStep.Status = TaskStepStatus.Pending;
+                        break;
+                    }
+                }
 
                 if (failChoice == CancelPlanLabel)
                 {
                     _planRunners.Current.CancelPlan(plan);
                 }
+                else if (failChoice == ReviseRemainingPlanLabel && failedStep != null)
+                {
+                    var revisionDecision = await ReplanAfterFailureAsync(
+                        plan, failedStep, progressEvent.Message ?? "Unknown error", ui, ct);
+                    if (revisionDecision == ReplanDecision.Cancel)
+                        _planRunners.Current.CancelPlan(plan);
+                    else if (revisionDecision == ReplanDecision.KeepCurrent)
+                        _planRunners.Current.SkipStep(plan, failedStep);
+                }
+                else if (failChoice == RetryStepLabel && failedStep != null)
+                {
+                    failedStep.Status = TaskStepStatus.Pending;
+                    _transcript.Append(_html.Dim($"Retrying step {progressEvent.CurrentStep}..."));
+                }
+                else if (failChoice == EditAndRetryStepLabel && failedStep != null)
+                {
+                    _transcript.Append(_html.Dim($"Retrying step {progressEvent.CurrentStep} with the revised instruction..."));
+                }
                 else
                 {
-                    var failedStep = plan.Steps.FirstOrDefault(s => s.StepNumber == progressEvent.CurrentStep);
                     if (failedStep != null) _planRunners.Current.SkipStep(plan, failedStep);
                 }
                 _busy.Start();
@@ -839,6 +1023,85 @@ public sealed partial class ChatController
             case TaskProgressType.PlanCancelled:
                 _busy.Stop();
                 break;
+        }
+    }
+
+    private enum ReplanDecision { Applied, KeepCurrent, Cancel }
+
+    private async Task<ReplanDecision> ReplanAfterFailureAsync(
+        TaskPlan plan,
+        TaskStep failedStep,
+        string error,
+        IApprovalUi ui,
+        CancellationToken ct)
+    {
+        _busy.Start("Revising plan...");
+        _transcript.Append(_html.Dim("Revising the unfinished portion of the plan..."));
+
+        TaskPlan candidate;
+        try
+        {
+            var completed = plan.Steps
+                .Where(step => step.StepNumber < failedStep.StepNumber)
+                .Select(step => $"Step {step.StepNumber} [{step.Status}]: {step.Description}\nResult: {step.Result ?? "(none)"}");
+            var remaining = plan.Steps
+                .Where(step => step.StepNumber >= failedStep.StepNumber)
+                .Select(step => $"Step {step.StepNumber}: {step.Description}\nInstruction: {step.Instruction}");
+            var context =
+                $"Failed step {failedStep.StepNumber}: {failedStep.Description}\n" +
+                $"Failure: {error}\n\n" +
+                "Settled earlier steps:\n" + string.Join("\n\n", completed) + "\n\n" +
+                "Return final executable steps, not instructions about changing the plan. Never say to replace, update, " +
+                "or revise a step, and never refer to old step numbers.\n\n" +
+                "Current failed and remaining steps to replace:\n" + string.Join("\n\n", remaining);
+
+            var revision = await _ai.GeneratePlanAsync(plan.OriginalRequest, context, ct);
+            candidate = PlanRevision.CreateCandidate(plan, failedStep.StepNumber, revision);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _transcript.Append(_html.Error($"Could not revise the plan: {ex.Message}"));
+            _transcript.Append(_html.Dim("Keeping the current plan and skipping the failed step."));
+            return ReplanDecision.KeepCurrent;
+        }
+        finally
+        {
+            _busy.Stop();
+        }
+
+        while (true)
+        {
+            _transcript.Append(_html.PlanCard(candidate));
+            var choice = await ui.ShowApprovalAsync(new ApprovalRequest
+            {
+                Title = "Review the revised remaining plan",
+                Subtitle = $"Steps before {failedStep.StepNumber} are already settled and will not run again.",
+                BottomBar = true,
+                ToastSummary = "Revised plan is ready",
+                Options = new[]
+                {
+                    new ApprovalOption(UseRevisedPlanLabel, ApprovalOptionKind.Proceed),
+                    new ApprovalOption(EditPlanStepLabel, ApprovalOptionKind.Redirect),
+                    new ApprovalOption(KeepCurrentPlanLabel, ApprovalOptionKind.Redirect),
+                    new ApprovalOption(CancelPlanLabel, ApprovalOptionKind.Destructive)
+                }
+            }, ct);
+            _transcript.Append(_html.UserEcho(choice));
+
+            if (choice == EditPlanStepLabel)
+            {
+                await EditPlanStepAsync(candidate, ui, ct, failedStep.StepNumber, reviseFollowingSteps: false);
+                continue;
+            }
+            if (choice == CancelPlanLabel) return ReplanDecision.Cancel;
+            if (choice == KeepCurrentPlanLabel) return ReplanDecision.KeepCurrent;
+
+            PlanRevision.ApplyApproved(plan, failedStep.StepNumber, candidate);
+            _transcript.Append(_html.Success(
+                $"Revised plan approved — resuming at step {failedStep.StepNumber} of {plan.Steps.Count}."));
+            PlanProgressChanged?.Invoke(failedStep.StepNumber - 1, plan.Steps.Count, true);
+            return ReplanDecision.Applied;
         }
     }
 
@@ -900,6 +1163,18 @@ public sealed partial class ChatController
 
             case "retry":
                 await HandleRetryCommandAsync();
+                return;
+
+            case "plan":
+                await HandlePlanCommandAsync(rawArgs);
+                return;
+
+            case "plan-resume":
+                await HandlePlanCommandAsync("resume");
+                return;
+
+            case "plan-discard":
+                await HandlePlanCommandAsync("discard");
                 return;
 
             case "copy":
@@ -965,6 +1240,9 @@ public sealed partial class ChatController
             ("/model", "Quick switch — pick a different model (/model <tag> skips the picker)"),
             ("/config", "Adjust settings — guided wizard (/config set <key> <value> inline)"),
             ("/retry", "Retry Ollama connection"),
+            ("/plan <goal>", "Force a step-by-step plan; without a goal, inspect an unfinished plan"),
+            ("/plan-resume", "Continue this agent's unfinished plan"),
+            ("/plan-discard", "Forget this agent's unfinished plan"),
             ("/learn", "Learn about LLMs and local AI models"),
             ("/music", "Play coding music (also /music-lofi, /music-synthwave for a specific genre)"),
             ("/music-stop", "Stop music playback"),

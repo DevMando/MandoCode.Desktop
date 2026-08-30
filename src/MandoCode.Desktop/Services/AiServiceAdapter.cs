@@ -54,7 +54,10 @@ public sealed class AiServiceAdapter : IAiService
     public Task AttachMcpPluginsAsync(CancellationToken cancellationToken = default) => _ai.AttachMcpPluginsAsync(cancellationToken);
     public Task<(bool IsValid, string? ErrorMessage)> ValidateModelAsync() => _ai.ValidateModelAsync();
     public IAsyncEnumerable<string> ChatStreamAsync(string userMessage, CancellationToken cancellationToken = default) => _ai.ChatStreamAsync(userMessage, cancellationToken);
+    public Task<GeneratedPlan> GeneratePlanAsync(string request, string? revisionContext = null, CancellationToken cancellationToken = default) =>
+        _ai.GeneratePlanAsync(request, revisionContext, cancellationToken);
     public string? ExportHistoryJson() => _ai.ExportHistoryJson();
+    public void SetRequestContext(string? request) => _ai.SetRequestContext(request);
 
     public void AppendAssistantNote(string text) => _ai.AppendAssistantNote(text);
     public int TryRestoreHistoryJson(string json) => _ai.TryRestoreHistoryJson(json);

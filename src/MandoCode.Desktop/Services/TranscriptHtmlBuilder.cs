@@ -1,6 +1,8 @@
 using System.Net;
 using System.Text;
 using MandoCode.Models;
+using MandoCode.Services;
+using MandoCode.Desktop.ViewModels;
 using Markdig;
 
 namespace MandoCode.Desktop.Services;
@@ -71,6 +73,7 @@ public sealed class TranscriptHtmlBuilder : ITranscriptHtml
     /// capture stays dumb and faithful; the judgment lives at replay.</summary>
     public static bool IsEphemeralStatus(string blockHtml) =>
         blockHtml.StartsWith("<div class=\"chip-row\"", StringComparison.Ordinal)
+        || blockHtml.StartsWith("<div class=\"panel checkpoint-card\"", StringComparison.Ordinal)
         // Boot/progress narration — true only while it was happening. ("Project root
         // changed to: X" is deliberately NOT here: that's a real event, kept as history.)
         || blockHtml.Contains(">Rebuilding the AI session for the new project…<", StringComparison.Ordinal)
@@ -254,16 +257,9 @@ public sealed class TranscriptHtmlBuilder : ITranscriptHtml
         return sb.ToString();
     }
 
-    public string PlanCard(TaskPlan plan)
-    {
-        var sb = new StringBuilder();
-        sb.Append("<div class=\"panel\"><div class=\"panel-header sky\">Proposed plan</div><table class=\"plan\">");
-        sb.Append("<tr><th>Step</th><th>Description</th></tr>");
-        foreach (var step in plan.Steps)
-            sb.Append($"<tr><td class=\"sky\">{step.StepNumber}</td><td>{E(step.Description)}</td></tr>");
-        sb.Append("</table></div>");
-        return sb.ToString();
-    }
+    public string PlanCard(TaskPlan plan) => PlanCardHtml.Build(plan);
+
+    public string CheckpointCard(PlanRunState saved) => CheckpointCardHtml.Build(saved);
 
     public string StepStarted(int current, int total, string description) =>
         $"<div class=\"line\"><span class=\"sky\">Step {current}/{total}:</span> {E(description)}</div>";
