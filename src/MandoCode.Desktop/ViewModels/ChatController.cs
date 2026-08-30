@@ -139,6 +139,10 @@ public sealed partial class ChatController
     /// <summary>The UI should put this text on the clipboard (must marshal to UI thread).</summary>
     public event Action<string>? ClipboardCopyRequested;
 
+    /// <summary>Raised after /compact replaces the model history, so the tab can persist the
+    /// compacted state immediately instead of restoring stale full history after a restart.</summary>
+    public event Action? HistoryCompacted;
+
     /// <summary>/exit — the UI should close the window.</summary>
     public event Action? ExitRequested;
 
@@ -782,7 +786,7 @@ public sealed partial class ChatController
         }
 
         _deferredPlans.Outcome = DeferredPlanOutcome.Executed;
-        _transcript.Append(_html.Success("Executing plan..."));
+        _transcript.Append(_html.PlanStarted(plan.Steps.Count));
         PlanProgressChanged?.Invoke(0, plan.Steps.Count, true);
 
         try
@@ -802,17 +806,14 @@ public sealed partial class ChatController
             PlanProgressChanged?.Invoke(plan.CompletedStepsCount, plan.Steps.Count, false);
         }
 
-        if (plan.Status == TaskPlanStatus.Completed)
-            _transcript.Append(_html.Success("Plan completed successfully!"));
-        else if (plan.Status == TaskPlanStatus.CompletedWithIssues)
-            _transcript.Append(_html.Warn("Plan completed with skipped or failed steps."));
-        else if (plan.Status == TaskPlanStatus.Cancelled)
-            _transcript.Append(_html.Warn("Plan was cancelled."));
-        else
-            _transcript.Append(_html.Error("Plan completed with errors."));
-
-        if (!string.IsNullOrEmpty(plan.ExecutionSummary))
-            _transcript.Append(_html.Dim(plan.ExecutionSummary));
+        var (outcomeTitle, outcomeDetail, outcomeState) = plan.Status switch
+        {
+            TaskPlanStatus.Completed => ("Plan completed", plan.ExecutionSummary ?? "All steps completed successfully.", "success"),
+            TaskPlanStatus.CompletedWithIssues => ("Plan completed with issues", plan.ExecutionSummary ?? "Some steps were skipped or failed.", "warning"),
+            TaskPlanStatus.Cancelled => ("Plan cancelled", plan.ExecutionSummary ?? "No more plan steps will run.", "warning"),
+            _ => ("Plan completed with errors", plan.ExecutionSummary ?? "One or more steps could not be completed.", "error"),
+        };
+        _transcript.Append(_html.PlanFinished(outcomeTitle, outcomeDetail, outcomeState));
 
         var summary = plan.ExecutionSummary ?? $"Plan finished with status {plan.Status}.";
         return summary +
@@ -944,15 +945,18 @@ public sealed partial class ChatController
                 PlanProgressChanged?.Invoke(progressEvent.CurrentStep, progressEvent.TotalSteps, true);
                 if (!string.IsNullOrEmpty(progressEvent.Message))
                 {
-                    _transcript.Append(_html.AssistantCard(progressEvent.Message, _config.AgentName));
+                    _transcript.Append(_html.PlanStepResult(progressEvent.Message, _config.AgentName));
                     ConversationLogger?.Invoke("a", progressEvent.Message!);
                 }
-                _transcript.Append(_html.Success($"Step {progressEvent.CurrentStep} completed."));
+                _transcript.Append(_html.StepCompleted(progressEvent.CurrentStep, progressEvent.TotalSteps));
                 break;
 
             case TaskProgressType.StepFailed:
                 _busy.Stop();
-                _transcript.Append(_html.Error($"Step {progressEvent.CurrentStep} failed: {progressEvent.Message ?? "Unknown error"}"));
+                _transcript.Append(_html.StepFailed(
+                    progressEvent.CurrentStep,
+                    progressEvent.TotalSteps,
+                    progressEvent.Message ?? "Unknown error"));
 
                 // Cancellation is already a terminal decision, not another failure choice. Asking
                 // retry/skip/cancel here would make a diff-approval cancel look ineffective.
@@ -1146,7 +1150,19 @@ public sealed partial class ChatController
                 await _ai.ClearHistoryAsync();
                 _lastAiResponse = null;
                 _transcript.Clear();
-                _transcript.Append(_html.Dim("Conversation cleared."));
+                _transcript.Append(_html.Dim("Conversation context wiped completely. Start a new conversation."));
+                return;
+
+            case "compact":
+                if (await _ai.CompactHistoryAsync())
+                {
+                    HistoryCompacted?.Invoke();
+                    _transcript.Append(_html.Dim("Conversation context compacted into a recap. This transcript remains visible."));
+                }
+                else
+                {
+                    _transcript.Append(_html.Dim("Not enough conversation context to compact yet."));
+                }
                 return;
 
             case "help":
@@ -1269,7 +1285,8 @@ public sealed partial class ChatController
             ("/mcp remove <name>", "Remove an MCP server from config"),
             ("/mcp tools [server]", "List tools exposed by connected MCP servers"),
             ("/mcp-reload", "Restart MCP servers and re-register their tools"),
-            ("/clear", "Clear conversation history"),
+            ("/compact", "Compress context into a recap; keeps this transcript"),
+            ("/clear", "Wipe all conversation context and start fresh"),
             ("/exit", "Exit MandoCode")
         };
         _transcript.Append(_html.HelpCard(rows));

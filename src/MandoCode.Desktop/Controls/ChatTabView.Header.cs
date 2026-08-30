@@ -22,6 +22,7 @@ public sealed partial class ChatTabView
 
     public void UpdateHeader()
     {
+        InputBox.PlaceholderText = $"Message Agent {Session.Title}…   /commands · @file · !shell";
         ModelText.Text = _controller.ModelName;
         ProjectRootText.Text = _controller.ProjectRootPath;
         ConnectionDot.Fill = new SolidColorBrush(

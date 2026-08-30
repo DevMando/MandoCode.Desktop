@@ -111,6 +111,7 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         _transcript.BlockAdded += OnTranscriptBlock;
         _transcript.Cleared += OnTranscriptCleared;
         Session.Busy.Changed += OnBusyChanged;
+        Session.TitleChanged += OnAgentTitleChanged;
 
         _controller.StateChanged += OnControllerStateChanged;
         _controller.PlanProgressChanged += OnPlanProgress;
@@ -119,6 +120,7 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         _controller.ClipboardCopyRequested += OnClipboardCopy;
         _controller.ExitRequested += OnExitRequested;
         _controller.SnapshotOfferChanged += OnSnapshotOfferChanged;
+        _controller.HistoryCompacted += OnHistoryCompacted;
 
         UpdateHeader();
     }
@@ -127,12 +129,15 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
     private void OnTranscriptBlock(string html) => OnUi(() => AppendHtml(html));
     private void OnTranscriptCleared() => OnUi(ClearTranscript);
     private void OnBusyChanged(bool busy, string? activity) => OnUi(() => UpdateBusy(busy, activity));
+    private void OnAgentTitleChanged(string _) => OnUi(UpdateHeader);
     private void OnControllerStateChanged() => OnUi(UpdateHeader);
     private void OnPlanProgress(int done, int total, bool active) => OnUi(() => UpdatePlanProgress(done, total, active));
     private void OnSetupNeeded() => OnUi(() => SetupRequested?.Invoke());
     private void OnMcpEditorRequested(string? name) => OnUi(() => McpEditorRequested?.Invoke(name));
     private void OnClipboardCopy(string text) => OnUi(() => ClipboardCopyRequested?.Invoke(text));
     private void OnExitRequested() => OnUi(() => ExitRequested?.Invoke());
+    private void OnHistoryCompacted() => _ = Task.Run(() =>
+        SessionHistoryStore.Save(Session.PersistKey, Session.Ai.ExportHistoryJson()));
     private void OnSnapshotOfferChanged() => OnUi(RefreshSnapshotOffer);
 
     private void OnUi(Action action)
@@ -329,6 +334,7 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         _transcript.BlockAdded -= OnTranscriptBlock;
         _transcript.Cleared -= OnTranscriptCleared;
         Session.Busy.Changed -= OnBusyChanged;
+        Session.TitleChanged -= OnAgentTitleChanged;
         _controller.StateChanged -= OnControllerStateChanged;
         _controller.PlanProgressChanged -= OnPlanProgress;
         _controller.SetupNeeded -= OnSetupNeeded;
@@ -336,6 +342,7 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         _controller.ClipboardCopyRequested -= OnClipboardCopy;
         _controller.ExitRequested -= OnExitRequested;
         _controller.SnapshotOfferChanged -= OnSnapshotOfferChanged;
+        _controller.HistoryCompacted -= OnHistoryCompacted;
 
         _controller.CancelActiveRequest();
 

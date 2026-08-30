@@ -124,8 +124,8 @@
                     <FontIcon Glyph="&#xE8B7;" FontSize="15"/>
                 </Button>
                 <Button x:Name="ExplorerButton" Click="ExplorerButton_Click" Padding="8,5"
-                        ToolTipService.ToolTip="Show or hide the file explorer">
-                    <FontIcon Glyph="&#xEC50;" FontSize="15"/>
+                        ToolTipService.ToolTip="Show or hide the files list">
+                    <FontIcon Glyph="&#xE8FD;" FontSize="15"/>
                 </Button>
             </StackPanel>
         </Grid>
@@ -175,7 +175,7 @@
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <FontIcon Glyph="&#xEC50;" FontSize="14" VerticalAlignment="Center"
+                    <FontIcon Glyph="&#xE8FD;" FontSize="14" VerticalAlignment="Center"
                               Foreground="{StaticResource MandoAccentBrush}"/>
                     <TextBlock x:Name="ExplorerRootText" Grid.Column="1" FontWeight="SemiBold"
                                FontSize="13" VerticalAlignment="Center"
@@ -575,7 +575,7 @@
             </Border>
 
             <TextBox x:Name="InputBox" Grid.Row="1" Grid.Column="0"
-                     PlaceholderText="Message MandoCode…   /commands · @file · !shell"
+                     PlaceholderText="Message Agent…   /commands · @file · !shell"
                      AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="140"
                      AllowDrop="True" DragOver="InputBox_DragOver" Drop="InputBox_Drop"
                      PreviewKeyDown="InputBox_PreviewKeyDown" TextChanged="InputBox_TextChanged"/>

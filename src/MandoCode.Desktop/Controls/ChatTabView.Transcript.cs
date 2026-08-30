@@ -53,7 +53,10 @@ public sealed partial class ChatTabView
             // called by MainWindow after any saved model is re-selected — a model switch clears
             // history, so restoring memory here would risk it being wiped moments later).
             _replayedBlockCount = blocks.Count;
-            await AppendRawAsync(_html.Dim("— restored from your previous session —"));
+            await AppendRawAsync(_html.StatusCard(
+                "Previous session restored",
+                "This transcript was restored from your previous session.",
+                "success"));
         }
         catch { /* a failed replay must never block a fresh conversation */ }
     }
@@ -79,8 +82,10 @@ public sealed partial class ChatTabView
                 var restored = await Task.Run(() => Session.Ai.TryRestoreHistoryJson(historyJson));
                 if (restored > 0)
                 {
-                    await AppendRawAsync(_html.Dim(
-                        $"Conversation memory restored — the agent remembers this session ({restored} messages)."));
+                    await AppendRawAsync(_html.StatusCard(
+                        "Conversation memory restored",
+                        $"The agent remembers this session ({restored} messages).",
+                        "success"));
                     return;
                 }
             }

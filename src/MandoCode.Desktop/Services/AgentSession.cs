@@ -41,9 +41,18 @@ public sealed class AgentSession
     public string Title
     {
         get => _title;
-        set { _title = value; Config.AgentName = value; }
+        set
+        {
+            if (_title == value) return;
+            _title = value;
+            Config.AgentName = value;
+            TitleChanged?.Invoke(value);
+        }
     }
     private string _title = "";
+
+    /// <summary>Raised when the user renames this tab's agent.</summary>
+    public event Action<string>? TitleChanged;
 
     /// <summary>Durable identity across app launches (unlike <see cref="Id"/>, a process-local
     /// counter). Names this session's transcript journal on disk; a restored tab passes its
@@ -108,7 +117,6 @@ public sealed class AgentSession
         // agents working in the same project from overwriting each other's unfinished plans.
         PlanRunners = new PlanRunnerSelector(
             Config,
-            Planner,
             new AiServicePlanStepExecutor(Ai),
             PlanHandoff,
             ProjectRoot,

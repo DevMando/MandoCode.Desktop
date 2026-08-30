@@ -76,6 +76,7 @@ public sealed class ResponseStreamerTests
         public void AppendUserNote(string text) => throw new NotSupportedException();
         public int TryRestoreHistoryJson(string json) => throw new NotSupportedException();
         public Task EnterLearnModeAsync() => throw new NotSupportedException();
+        public Task<bool> CompactHistoryAsync() => throw new NotSupportedException();
         public Task ClearHistoryAsync() => throw new NotSupportedException();
         public Task<IReadOnlyList<ChatMessage>> GetHistoryAsync() => throw new NotSupportedException();
     }

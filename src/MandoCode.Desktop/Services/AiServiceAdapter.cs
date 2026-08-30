@@ -65,6 +65,7 @@ public sealed class AiServiceAdapter : IAiService
     public void AppendUserNote(string text) => _ai.AppendUserNote(text);
     public int TryRestoreHistoryJson(string json) => _ai.TryRestoreHistoryJson(json);
     public Task EnterLearnModeAsync() => _ai.EnterLearnModeAsync();
+    public Task<bool> CompactHistoryAsync() => _ai.CompactHistoryAsync();
     public Task ClearHistoryAsync() => _ai.ClearHistoryAsync();
     public Task<IReadOnlyList<ChatMessage>> GetHistoryAsync() => _ai.GetHistoryAsync();
 }

@@ -57,6 +57,7 @@ public interface IAiService
     void AppendUserNote(string text);
     int TryRestoreHistoryJson(string json);
     Task EnterLearnModeAsync();
+    Task<bool> CompactHistoryAsync();
     Task ClearHistoryAsync();
     Task<IReadOnlyList<ChatMessage>> GetHistoryAsync();
 }

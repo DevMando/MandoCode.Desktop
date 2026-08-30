@@ -24,7 +24,9 @@ public sealed partial class ChatController
         if (outstanding == 0) return;
 
         _transcript.Append(_html.CheckpointCard(saved));
-        _transcript.Append(_html.Dim("Resume or discard it here, or use /plan to inspect every step."));
+        _transcript.Append(_html.StatusCard(
+            "Unfinished plan ready",
+            "Resume or discard it here, or use /plan to inspect every step."));
     }
 
     private async Task HandlePlanCommandAsync(string action)
@@ -32,13 +34,6 @@ public sealed partial class ChatController
         if (!string.IsNullOrWhiteSpace(action) && action is not "resume" and not "discard")
         {
             await ForcePlanAsync(action);
-            return;
-        }
-
-        if (!_planRunners.SupportsResume)
-        {
-            _transcript.Append(_html.Warn("Plan resume requires the workflow planner."));
-            _transcript.Append(_html.Dim("Enable it for this agent with: /config set planner workflow"));
             return;
         }
 
