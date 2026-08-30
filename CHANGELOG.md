@@ -50,8 +50,9 @@ the engine generation, so it moves 0.14.1 → 0.15.0.
   use the same Microsoft.Extensions.AI client the engine standardized on. Same prompts, same
   temperatures, same behavior — but Desktop no longer depends on a framework the engine has
   removed. Snapshot recaps and note replies are the surfaces to sanity-check.
-- **Engine PR review pin: `e058399`** (engine 0.15.0). This will be replaced by the CLI PR's merge
-  commit before the Desktop PR lands; the final release pin remains the exact shipped engine.
+- **Engine merge pin: `d9ad12a`** (engine 0.15.0), the merge commit from MandoCode CLI PR #79.
+  The large-root context guard is following in CLI PR #80; Desktop will move to that merge commit
+  before its PR lands so the reviewed host and engine stay together.
 
 ### Fixed
 - **Partial completion is no longer called a full success.** A plan that reaches the end after
