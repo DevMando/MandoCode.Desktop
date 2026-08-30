@@ -248,6 +248,73 @@
   .red { color: var(--red); }
   .token-summary { text-align: right; font-size: 12px; }
 
+  /* Live plan status is operationally important, not ordinary transcript narration. Give it a
+     high-opacity themed surface so a bright or busy chat wallpaper cannot wash out the active
+     step. The panel/border/accent variables keep it native to every appearance; backdrop blur
+     preserves contrast while still letting a little of the selected image show through. */
+  .plan-activity { display: flex; align-items: flex-start; gap: 10px;
+    max-width: 720px; padding: 10px 12px; border: 1px solid var(--border);
+    border-left: 3px solid var(--accent); border-radius: 10px;
+    background: var(--panel);
+    background: color-mix(in srgb, var(--panel) 82%, transparent);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    box-shadow: 0 5px 18px rgba(0, 0, 0, 0.20); }
+  .plan-activity-dot { flex: 0 0 auto; width: 8px; height: 8px; margin-top: 6px;
+    border-radius: 50%; background: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+  .plan-activity-title { color: var(--fg); font-weight: 700; line-height: 1.25; }
+  .plan-activity-emoji { display: inline-block; margin-right: 6px; font-family: "Segoe UI Emoji", "Segoe UI Symbol", sans-serif; }
+  .plan-activity-detail { color: var(--fg); margin-top: 2px; font-size: 13px; line-height: 1.35; }
+  .plan-activity.success { border-left-color: var(--green); }
+  .plan-activity.success .plan-activity-dot { background: var(--green);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 22%, transparent); }
+  .plan-activity.warning { border-left-color: var(--gold); }
+  .plan-activity.warning .plan-activity-dot { background: var(--gold);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--gold) 22%, transparent); }
+  .plan-activity.error { border-left-color: var(--red); }
+  .plan-activity.error .plan-activity-dot { background: var(--red);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 22%, transparent); }
+  .checkpoint-card { background: var(--panel);
+    background: color-mix(in srgb, var(--panel) 82%, transparent);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    box-shadow: 0 5px 18px rgba(0, 0, 0, 0.20); }
+  .assistant.plan-step-result { background: var(--panel);
+    background: color-mix(in srgb, var(--panel) 82%, transparent);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    border: 1px solid var(--border); border-radius: 10px; padding: 6px 12px 8px 12px;
+    box-shadow: 0 5px 18px rgba(0, 0, 0, 0.20); }
+
+  html[data-win98] .plan-activity { background: var(--bg); color: #000; border-radius: 0;
+    border: 2px solid; border-left: 2px solid;
+    border-color: #FFFFFF #404040 #404040 #FFFFFF; box-shadow: none; backdrop-filter: none; }
+  html[data-win98] .plan-activity-title, html[data-win98] .plan-activity-detail { color: #000; }
+  html[data-win98] .plan-activity-dot { background: #1084D0; box-shadow: none; }
+  html[data-win98] .assistant.plan-step-result { border-radius: 0; box-shadow: none;
+    backdrop-filter: none; padding: 0; }
+  html[data-win98] .checkpoint-card { background: var(--bg); box-shadow: none;
+    backdrop-filter: none; }
+
+  /* System notices use a smaller sibling of the plan-activity card. They replace the old bare
+     colored/dim lines, which disappear against bright wallpapers at high image opacity. Pills,
+     command panels, and normal messages keep their existing presentation. */
+  .notice-card { display: flex; align-items: flex-start; gap: 8px; max-width: 720px;
+    padding: 7px 10px; border: 1px solid var(--border); border-left: 3px solid var(--sky);
+    border-radius: 8px; background: var(--panel);
+    background: color-mix(in srgb, var(--panel) 82%, transparent);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16); }
+  .notice-emoji { flex: 0 0 auto; margin-top: 1px;
+    font-family: "Segoe UI Emoji", "Segoe UI Symbol", sans-serif; }
+  .notice-text { color: var(--fg); white-space: pre-wrap; line-height: 1.4; }
+  .notice-card.success { border-left-color: var(--green); }
+  .notice-card.warn { border-left-color: var(--gold); }
+  .notice-card.error { border-left-color: var(--red); }
+  .notice-card.dim { border-left-color: var(--border); }
+  html[data-win98] .notice-card { background: var(--bg); border-radius: 0; box-shadow: none;
+    backdrop-filter: none; border: 2px solid; border-left: 2px solid;
+    border-color: #FFFFFF #404040 #404040 #FFFFFF; }
+  html[data-win98] .notice-text { color: #000; }
+
   /* Status chips — compact pills for session/connection state. A CSS status dot
      (crisp, theme-aware) replaces status emoji; state = ok | warn | err | neutral. */
   /* Centered to match the tool pills: all system/status chrome sits centered, conversation stays left. */

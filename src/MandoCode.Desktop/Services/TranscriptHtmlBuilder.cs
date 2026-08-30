@@ -59,11 +59,28 @@ public sealed class TranscriptHtmlBuilder : ITranscriptHtml
     public string AssistantCard(string markdown, string? speaker = null) =>
         $"<div class=\"assistant\"><div class=\"assistant-label\">{E(speaker ?? "MandoCode")}</div><div class=\"md\">{FromMarkdown(markdown)}</div></div>";
 
-    public string Info(string text) => $"<div class=\"line info\">{E(text)}</div>";
-    public string Success(string text) => $"<div class=\"line success\">{E(text)}</div>";
-    public string Warn(string text) => $"<div class=\"line warn\">{E(text)}</div>";
-    public string Error(string text) => $"<div class=\"line error\">{E(text)}</div>";
-    public string Dim(string text) => $"<div class=\"line dim\">{E(text)}</div>";
+    /// <summary>Step results are part of the live-plan surface, so they retain a solid readable
+    /// panel even when ordinary transcript messages are configured as flat.</summary>
+    public string PlanStepResult(string markdown, string? speaker = null) =>
+        $"<div class=\"assistant plan-step-result\"><div class=\"assistant-label\">{E(speaker ?? "MandoCode")}</div><div class=\"md\">{FromMarkdown(markdown)}</div></div>";
+
+    // System notices need their own surface. A theme can intentionally place a high-opacity image
+    // behind a flat transcript, so color alone is not enough contrast for actions, warnings, or
+    // recovery guidance. Keep ordinary user/assistant messages untouched; only these notices use
+    // the compact card treatment.
+    public string Info(string text) => NoticeCard(text, "info");
+    public string Success(string text) => NoticeCard(text, "success");
+    public string Warn(string text) => NoticeCard(text, "warn");
+    public string Error(string text) => NoticeCard(text, "error");
+    public string Dim(string text) => NoticeCard(text, "dim");
+
+    /// <summary>
+    /// A high-contrast, live plan-status card. Plan execution and step headers must remain readable
+    /// even when a user has turned their chat wallpaper opacity up, so they get a themed surface
+    /// rather than being painted directly on the transcript background.
+    /// </summary>
+    public string PlanStarted(int totalSteps) =>
+        PlanActivity("Executing plan", $"Preparing {totalSteps} step{(totalSteps == 1 ? "" : "s")}");
 
     /// <summary>True for blocks that describe LIVE session state (status chips: connection,
     /// model ready, MCP counts, pending offers) rather than conversation history. Session
@@ -92,6 +109,18 @@ public sealed class TranscriptHtmlBuilder : ITranscriptHtml
         sb.Append("</span></div>");
         return sb.ToString();
     }
+
+    private static string NoticeCard(string text, string state) =>
+        $"<div class=\"notice-card {state}\"><span class=\"notice-emoji\">{NoticeEmoji(state)}</span>" +
+        $"<span class=\"notice-text\">{E(text)}</span></div>";
+
+    private static string NoticeEmoji(string state) => state switch
+    {
+        "success" => "✅",
+        "warn" => "⚠️",
+        "error" => "❌",
+        _ => "ℹ️",
+    };
 
     /// <summary>
     /// A STATIC tool-call pill (no animation — draws once, costs nothing). Replaces the plain
@@ -262,7 +291,33 @@ public sealed class TranscriptHtmlBuilder : ITranscriptHtml
     public string CheckpointCard(PlanRunState saved) => CheckpointCardHtml.Build(saved);
 
     public string StepStarted(int current, int total, string description) =>
-        $"<div class=\"line\"><span class=\"sky\">Step {current}/{total}:</span> {E(description)}</div>";
+        PlanActivity($"Step {current}/{total}", description);
+
+    public string StepCompleted(int current, int total) =>
+        PlanActivity($"Step {current}/{total} complete", "Moving to the next step", "success");
+
+    public string StepFailed(int current, int total, string message) =>
+        PlanActivity($"Step {current}/{total} needs attention", message, "error");
+
+    public string PlanFinished(string title, string detail, string state) =>
+        PlanActivity(title, detail, state);
+
+    /// <summary>A high-contrast, themed status surface for important system notices.</summary>
+    public string StatusCard(string title, string detail, string state = "") =>
+        PlanActivity(title, detail, state);
+
+    private static string PlanActivity(string title, string detail, string state = "") =>
+        $"<div class=\"plan-activity {state}\"><span class=\"plan-activity-dot\"></span>" +
+        $"<div><div class=\"plan-activity-title\"><span class=\"plan-activity-emoji\">{ActivityEmoji(state)}</span>{E(title)}</div>" +
+        $"<div class=\"plan-activity-detail\">{E(detail)}</div></div></div>";
+
+    private static string ActivityEmoji(string state) => state switch
+    {
+        "success" => "✅",
+        "warning" => "⚠️",
+        "error" => "❌",
+        _ => "▶️",
+    };
 
     public string TokenSummary(string text) =>
         $"<div class=\"line dim token-summary\">{E(text)}</div>";
