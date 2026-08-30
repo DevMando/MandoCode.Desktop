@@ -130,7 +130,13 @@ public sealed partial class MainWindow
 
         McpPageStatus.Text = sw.IsOn ? $"Enabling “{row.Name}”…" : $"Disabling “{row.Name}”…";
         await Task.Run(() => _controller.SaveMcpServerAsync(row.Name, row.Name, server));
-        await RefreshMcpListAsync();
+
+        // Do not replace the grouped ItemsSource for a single toggle. Recreating the list makes
+        // every row animate back into place and moves this server between groups while the user is
+        // still looking at it. The durable config and live agent tools are already updated above;
+        // the current view is reconciled when the page is opened again, filtered, or refreshed.
+        row.Enabled = sw.IsOn;
+        McpPageStatus.Text = sw.IsOn ? $"Enabled “{row.Name}”." : $"Disabled “{row.Name}”.";
     }
 
     /// <summary>Runs a slash command through the normal pipeline (transcript echo, wizard

@@ -62,6 +62,10 @@ the engine generation, so it moves 0.14.1 → 0.15.0.
   Desktop against a real `@directory` request.
 
 ### Fixed
+- **Skill and MCP toggles no longer redraw the entire management list.** Enabling or disabling an
+  item now updates that toggle in place while the app applies the change to active agents. The list
+  keeps its current order and scroll position; it is reconciled the next time the page is opened,
+  filtered, or explicitly refreshed.
 - **The token total now reflects what the provider actually processed.** Desktop no longer adds
   rough character-based estimates for reads, searches, web results, writes, or attachments on top
   of the provider's prompt and completion counts. File reads still show their line counts.

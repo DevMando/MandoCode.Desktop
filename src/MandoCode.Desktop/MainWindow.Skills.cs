@@ -105,7 +105,9 @@ public sealed partial class MainWindow
             SkillsPageStatus.Text = $"{total} skill{(total == 1 ? "" : "s")}, {enabledTotal} enabled  ·  {_skillCoordinator.UserSkillsDirectory}";
     }
 
-    /// <summary>Reload every agent's skill set + prompt, then re-render the list and report.</summary>
+    /// <summary>Reload every agent's skill set + prompt, then re-render the list and report.
+    /// Use this after a structural change such as create, edit, install, delete, or an explicit
+    /// refresh. A simple enable/disable change deliberately keeps the current list in place.</summary>
     private async Task ApplySkillChangeAsync(string status)
     {
         await _skillCoordinator.ReloadAllAsync();
@@ -138,7 +140,13 @@ public sealed partial class MainWindow
         try
         {
             _skillCoordinator.SetEnabled(row.FolderPath, sw.IsOn);
-            await ApplySkillChangeAsync(sw.IsOn ? $"Enabled “{row.Name}”." : $"Disabled “{row.Name}”.");
+            // Keep this row exactly where the user toggled it. Reapplying the grouped ItemsSource
+            // would remove and recreate every row, producing a distracting slide animation and
+            // reordering enabled/disabled groups mid-click. The persisted state is reconciled on
+            // the next page open, filter change, or explicit refresh.
+            row.Enabled = sw.IsOn;
+            await _skillCoordinator.ReloadAllAsync();
+            SkillsPageStatus.Text = sw.IsOn ? $"Enabled “{row.Name}”." : $"Disabled “{row.Name}”.";
         }
         catch (Exception ex)
         {
