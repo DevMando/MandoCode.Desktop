@@ -111,7 +111,7 @@ public sealed class ResponseStreamer
                 if (_config.EnableTokenTracking)
                 {
                     var lastOp = _tokenTracker.LastOperation;
-                    if (lastOp != null && !lastOp.IsEstimate)
+                    if (lastOp != null)
                     {
                         var tps = lastOp.TokensPerSecond.HasValue ? $": {lastOp.TokensPerSecond.Value:0.#} tok/s" : "";
                         _transcript.Append(_html.TokenSummary(

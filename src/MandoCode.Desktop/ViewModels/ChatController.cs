@@ -571,9 +571,6 @@ public sealed partial class ChatController
                 contextBlocks.AppendLine();
                 totalExpansionChars += content.Length;
 
-                if (_config.EnableTokenTracking)
-                    _tokenTracker.RecordEstimatedUsage(content.Length, $"@{filePath}");
-
                 _transcript.Append(_html.OperationCard(new OperationDisplayEvent
                 {
                     OperationType = "Read",
