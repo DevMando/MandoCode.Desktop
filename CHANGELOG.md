@@ -11,9 +11,9 @@ submodule.
 A new engine underneath, and a planner users can actually steer. Desktop moves onto engine
 generation 0.15 and Microsoft's Agent Framework, then uses that foundation to make plans durable:
 review the work before it starts, edit a step, recover after a restart, and change course when a
-failure proves the remaining plan wrong. The workflow planner stays opt-in for this release while
-the long-running model soak and local-model token measurements finish. Desktop's version follows
-the engine generation, so it moves 0.14.1 → 0.15.0.
+failure proves the remaining plan wrong. The workflow planner is now the standard execution path
+for every approved plan. Desktop's version follows the engine generation, so it moves 0.14.1 →
+0.15.0.
 
 ### Added
 - **An Unfinished Plan card appears when an agent has checkpointed work.** Resume continues at the
@@ -41,12 +41,10 @@ the engine generation, so it moves 0.14.1 → 0.15.0.
   new chat request.
 - **Plan progress and recovery use the engine's durable workflow cursor.** Restarting does not rerun
   completed steps, and the agent is briefed with the restored plan context before it continues.
-- **The engine now runs on Microsoft Agent Framework.** Semantic Kernel is gone from the
-  codebase entirely; chat history moved onto the new framework's own types. The new path was
-  built alongside the old one and verified against real models before the cutover, and the old
-  one was only deleted once nothing depended on it. Because this touches every chat turn, it is
-  the thing to watch after updating — streaming, tool approval prompts, and model switching all
-  ride on it now.
+- **The engine now runs on Microsoft Agent Framework.** Semantic Kernel is no longer part of the
+  runtime. Chat uses the framework's agent and tool abstractions, while plan execution uses its
+  workflow runtime for progress, retry, and recovery. Streaming, tool approval prompts, and model
+  switching continue to use the same product flows on the new foundation.
 - **The engine builds for .NET 10 and .NET 8 side by side.** Desktop targets .NET 10 and ships
   self-contained, so this changes nothing for anyone running the app; it matters if you build
   Desktop from source, where the engine project now resolves its .NET 10 build.
@@ -57,9 +55,9 @@ the engine generation, so it moves 0.14.1 → 0.15.0.
   use the same Microsoft.Extensions.AI client the engine standardized on. Same prompts, same
   temperatures, same behavior — but Desktop no longer depends on a framework the engine has
   removed. Snapshot recaps and note replies are the surfaces to sanity-check.
-- **Engine safety pin: `d084bbb`** (engine 0.15.0), the merge commit from MandoCode CLI PR #80.
-  This includes the full planner from PR #79 plus the large-root context guard verified through
-  Desktop against a real `@directory` request.
+- **Engine safety pin: `7aede43`** (engine 0.15.0). This includes workflow planning as the default
+  plan runner, manual conversation compaction, automatic planning based on task shape, and the
+  large-root context guard verified through Desktop against a real `@directory` request.
 
 ### Fixed
 - **The token total now reflects what the provider actually processed.** Desktop no longer adds
