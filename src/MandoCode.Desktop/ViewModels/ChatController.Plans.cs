@@ -103,7 +103,9 @@ public sealed partial class ChatController
     /// from the normal agent and can only call <c>propose_plan</c>; the resulting plan then enters
     /// the exact same review/edit/approval flow as a heuristic proposal.
     /// </summary>
-    private async Task ForcePlanAsync(string goal)
+    private Task ForcePlanAsync(string goal) => ForcePlanAsync(goal, goal);
+
+    private async Task ForcePlanAsync(string planningRequest, string originalRequest)
     {
         if (!IsConnected || ModelError)
         {
@@ -118,10 +120,11 @@ public sealed partial class ChatController
 
         try
         {
+            _ai.AppendUserNote(originalRequest);
             _deferredPlans.Outcome = DeferredPlanOutcome.None;
-            var proposal = await _ai.GeneratePlanAsync(goal, cancellationToken: token);
+            var proposal = await _ai.GeneratePlanAsync(planningRequest, cancellationToken: token);
             var result = await _planHandoff.ProcessAsync(
-                proposal.Goal, proposal.Steps, token, originalRequest: goal);
+                proposal.Goal, proposal.Steps, token, originalRequest: originalRequest);
 
             if (_deferredPlans.Outcome == DeferredPlanOutcome.Executed &&
                 !string.IsNullOrWhiteSpace(result))
@@ -134,7 +137,8 @@ public sealed partial class ChatController
                 // "One-shot it" still means what the approval button says even though this
                 // command has no outer model turn waiting to receive the rejection result.
                 var response = await _streamer.StreamAsync(
-                    goal + "\n\n" + DeferredPlanCompletion.RejectionFollowUpPrompt, token);
+                    "Proceed with my original request directly.", token,
+                    DeferredPlanCompletion.RejectionHostInstruction);
                 if (!string.IsNullOrEmpty(response)) _lastAiResponse = response;
                 _planHandoff.ClearPendingProposal();
             }

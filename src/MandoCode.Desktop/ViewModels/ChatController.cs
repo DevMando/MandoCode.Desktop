@@ -433,18 +433,17 @@ public sealed partial class ChatController
             ConversationLogger?.Invoke("u", input);
 
             // Plan heuristic BEFORE @file expansion so attachments don't inflate it.
-            var needsPlanning = _taskPlanner.RequiresPlanning(input);
+            var planning = _taskPlanner.GetPlanningDecision(input);
             var processedInput = ProcessFileReferences(input);
 
             // Fold the invisible ride-alongs (imported recaps, emoji reactions, external workspace
-            // changes) and any planning nudge into the message the model sees. See
+            // changes) into the request context. See
             // RequestPreambleComposer for the exact framing.
             processedInput = RequestPreambleComposer.Compose(
                 processedInput,
                 _armedContexts,
                 _pendingReactions.Select(r => (r.Emoji, r.Snippet)).ToList(),
-                _pendingWorkspaceNotes,
-                needsPlanning);
+                _pendingWorkspaceNotes);
 
             // Ride-alongs are one-shot — clear what we just folded in so it isn't sent twice.
             if (_armedContexts.Count > 0)
@@ -455,7 +454,13 @@ public sealed partial class ChatController
             _pendingReactions.Clear();
             _pendingWorkspaceNotes.Clear();
 
-            await ProcessDirectRequestAsync(processedInput, input);
+            if (planning.Required)
+            {
+                _transcript.Append(_html.Dim($"Planning automatically: {planning.Reason}."));
+                await ForcePlanAsync(processedInput, input);
+            }
+            else
+                await ProcessDirectRequestAsync(processedInput, input);
         }
         finally
         {
@@ -475,7 +480,10 @@ public sealed partial class ChatController
     // Direct AI request (port of ProcessDirectRequestAsync)
     // ============================================================
 
-    private async Task ProcessDirectRequestAsync(string input, string? originalRequest = null)
+    private async Task ProcessDirectRequestAsync(
+        string input,
+        string? originalRequest = null,
+        string? hostInstruction = null)
     {
         // Reset the per-request operation tracking the function-call event handlers read.
         _recentReadCount = 0;
@@ -492,7 +500,7 @@ public sealed partial class ChatController
 
         try
         {
-            var response = await _streamer.StreamAsync(input, token);
+            var response = await _streamer.StreamAsync(input, token, hostInstruction);
             if (!string.IsNullOrEmpty(response)) _lastAiResponse = response;
 
             // AIService sees the expanded/preambled model input. Before the queued plan is taken,
@@ -509,7 +517,10 @@ public sealed partial class ChatController
             }
             else
             {
-                var completion = await _deferredPlans.CompleteAsync(token, _streamer.StreamAsync);
+                var completion = await _deferredPlans.CompleteAsync(
+                    token,
+                    (hostInstruction, ct) => _streamer.StreamAsync(
+                        "Continue with my original request.", ct, hostInstruction));
                 if (!string.IsNullOrEmpty(completion.FollowUpResponse))
                     _lastAiResponse = completion.FollowUpResponse;
                 if (!string.IsNullOrWhiteSpace(completion.Manifest))
@@ -1831,12 +1842,14 @@ public sealed partial class ChatController
         if (!string.IsNullOrWhiteSpace(skill.Description))
             _transcript.Append(_html.Dim(skill.Description));
 
-        var forcedPrompt =
-            $"[system: the user has explicitly forced skill '{skill.Name}' via /force-skill. " +
-            $"Follow these instructions exactly for this turn, even if they differ from your defaults.]\n\n" +
-            $"# Skill: {skill.Name}\n\n{skill.Body}";
+        var hostInstruction =
+            $"The user explicitly selected skill '{skill.Name}' via /force-skill. " +
+            $"Follow these instructions for this turn.\n\n# Skill: {skill.Name}\n\n{skill.Body}";
 
-        await ProcessDirectRequestAsync(forcedPrompt);
+        await ProcessDirectRequestAsync(
+            $"/force-skill {skill.Name}",
+            originalRequest: $"/force-skill {skill.Name}",
+            hostInstruction: hostInstruction);
     }
 
     private async Task HandleMcpCommandAsync(string rawArgs)

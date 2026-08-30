@@ -25,9 +25,9 @@ public sealed record DeferredPlanCompletionResult(string? Manifest, string? Foll
 /// </summary>
 public sealed class DeferredPlanCompletion
 {
-    public const string RejectionFollowUpPrompt =
-        "[system: the user reviewed your proposed plan and chose to skip stepwise " +
-        "execution. Answer their original request directly now. Do not call propose_plan.]";
+    public const string RejectionHostInstruction =
+        "The user reviewed your proposed plan and chose to skip stepwise execution. " +
+        "Answer their original request directly now. Do not call propose_plan.";
 
     private readonly PlanHandoff _planHandoff;
     private int _followUpDepth;
@@ -75,7 +75,7 @@ public sealed class DeferredPlanCompletion
         _followUpDepth++;
         try
         {
-            var response = await runFollowUpAsync(RejectionFollowUpPrompt, cancellationToken);
+            var response = await runFollowUpAsync(RejectionHostInstruction, cancellationToken);
             return new DeferredPlanCompletionResult(null, response);
         }
         finally

@@ -2,11 +2,11 @@ namespace MandoCode.Desktop.ViewModels;
 
 /// <summary>
 /// Assembles the invisible preamble that rides along with a user's message — imported snapshot
-/// recaps, emoji reactions, workspace changes made outside the conversation, and a planning nudge.
+/// recaps, emoji reactions, and workspace changes made outside the conversation.
 /// Extracted from <c>ChatController.SubmitAsync</c> as a pure function so the exact framing (which
 /// the model sees but the user never does) can be unit-tested. Each block that fires wraps the
 /// running text with its own "[Current request:]" boundary, in the order armed → reactions →
-/// workspace; the planning nudge is appended last. All three collections are framed as background
+/// workspace. All three collections are framed as background
 /// facts, never as text the user typed.
 /// </summary>
 public static class RequestPreambleComposer
@@ -15,8 +15,7 @@ public static class RequestPreambleComposer
         string request,
         IReadOnlyList<string> armedContexts,
         IReadOnlyList<(string Emoji, string Snippet)> reactions,
-        IReadOnlyList<string> workspaceNotes,
-        bool needsPlanning)
+        IReadOnlyList<string> workspaceNotes)
     {
         var result = request;
 
@@ -54,12 +53,6 @@ public static class RequestPreambleComposer
                 "Your memory of affected file contents may be stale — re-read before relying on it:]\n" +
                 notes +
                 "\n\n[Current request:]\n" + result;
-        }
-
-        if (needsPlanning)
-        {
-            result += "\n\n[system: this request looks multi-step. " +
-                      "Call propose_plan now with the breakdown before doing any work.]";
         }
 
         return result;

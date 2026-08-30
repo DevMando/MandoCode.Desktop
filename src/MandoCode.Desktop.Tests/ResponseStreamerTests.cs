@@ -30,6 +30,7 @@ public sealed class ResponseStreamerTests
     {
         private readonly string[] _segments;
         private readonly Exception? _throw;
+        public string? LastHostInstruction { get; private set; }
 
         public FakeAiService(string[] segments, Exception? throwOnStream = null)
         {
@@ -52,6 +53,13 @@ public sealed class ResponseStreamerTests
             }
         }
 
+        public IAsyncEnumerable<string> ChatStreamWithHostInstructionAsync(
+            string userMessage, string hostInstruction, CancellationToken cancellationToken = default)
+        {
+            LastHostInstruction = hostInstruction;
+            return ChatStreamAsync(userMessage, cancellationToken);
+        }
+
         // Unused by the streaming loop.
         public event Action<FunctionCall>? OnFunctionInvoked { add { } remove { } }
         public event Action<FunctionExecutionResult>? OnFunctionCompleted { add { } remove { } }
@@ -65,6 +73,7 @@ public sealed class ResponseStreamerTests
         public Task<GeneratedPlan> GeneratePlanAsync(string request, string? revisionContext = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public string? ExportHistoryJson() => throw new NotSupportedException();
         public void AppendAssistantNote(string text) => throw new NotSupportedException();
+        public void AppendUserNote(string text) => throw new NotSupportedException();
         public int TryRestoreHistoryJson(string json) => throw new NotSupportedException();
         public Task EnterLearnModeAsync() => throw new NotSupportedException();
         public Task ClearHistoryAsync() => throw new NotSupportedException();
@@ -95,6 +104,17 @@ public sealed class ResponseStreamerTests
         Assert.Contains("CARD:hello", blocks);
         Assert.Contains("CARD:world", blocks);
         Assert.Equal(new[] { "a:hello", "a:world" }, logged);
+    }
+
+    [Fact]
+    public async Task HostInstruction_UsesSeparateAiServiceChannel()
+    {
+        var ai = new FakeAiService(new[] { "done" });
+        var (s, _) = Make(ai);
+
+        await s.StreamAsync("the user text", CancellationToken.None, "host-owned guidance");
+
+        Assert.Equal("host-owned guidance", ai.LastHostInstruction);
     }
 
     [Fact]
