@@ -26,6 +26,13 @@ the engine generation, so it moves 0.14.1 → 0.15.0.
   replacement is shown for review, and execution resumes only after approval.
 
 ### Changed
+- **Automatic plans now start for the work that actually benefits from them.** Desktop recognizes
+  explicit checklists, cross-cutting changes, and multiple deliverables instead of treating a long
+  message as complex. Questions, research, explanations, and narrow edits stay conversational, and
+  the transcript says why planning started. `/plan <goal>` still forces a plan at any time.
+- **User messages remain the user's own words.** Automatic planning is routed directly by the host;
+  rejected-plan follow-ups and forced skills carry separate, temporary system guidance instead of
+  appending hidden `[system: ...]` text to a user-role message.
 - **Plan review shows what every step will actually do.** Selecting Edit a step opens a prefilled
   editor. When an early step changes a file name, value, or expectation, Desktop refreshes only the
   dependent steps and shows the complete plan again before execution.
@@ -55,6 +62,9 @@ the engine generation, so it moves 0.14.1 → 0.15.0.
   Desktop against a real `@directory` request.
 
 ### Fixed
+- **The token total now reflects what the provider actually processed.** Desktop no longer adds
+  rough character-based estimates for reads, searches, web results, writes, or attachments on top
+  of the provider's prompt and completion counts. File reads still show their line counts.
 - **Partial completion is no longer called a full success.** A plan that reaches the end after
   skipped or failed work says how many steps completed and reports “completed with issues.”
 - **Cancelling a plan no longer produces a second, contradictory error path.** Desktop stops at the

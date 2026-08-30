@@ -36,6 +36,10 @@ public interface IAiService
     Task AttachMcpPluginsAsync(CancellationToken cancellationToken = default);
     Task<(bool IsValid, string? ErrorMessage)> ValidateModelAsync();
     IAsyncEnumerable<string> ChatStreamAsync(string userMessage, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<string> ChatStreamWithHostInstructionAsync(
+        string userMessage,
+        string hostInstruction,
+        CancellationToken cancellationToken = default);
     Task<GeneratedPlan> GeneratePlanAsync(
         string request,
         string? revisionContext = null,
@@ -50,6 +54,7 @@ public interface IAiService
     /// manifest, which must land in history without giving the model an open turn to redo the work in.
     /// </summary>
     void AppendAssistantNote(string text);
+    void AppendUserNote(string text);
     int TryRestoreHistoryJson(string json);
     Task EnterLearnModeAsync();
     Task ClearHistoryAsync();

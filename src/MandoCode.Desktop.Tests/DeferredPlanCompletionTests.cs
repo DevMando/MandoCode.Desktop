@@ -74,7 +74,7 @@ public sealed class DeferredPlanCompletionTests
 
         Assert.Null(result.Manifest);
         Assert.Equal("direct answer", result.FollowUpResponse);
-        Assert.Equal([DeferredPlanCompletion.RejectionFollowUpPrompt], prompts);
+        Assert.Equal([DeferredPlanCompletion.RejectionHostInstruction], prompts);
     }
 
     [Fact]

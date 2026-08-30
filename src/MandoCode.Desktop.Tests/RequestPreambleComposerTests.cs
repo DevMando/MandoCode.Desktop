@@ -16,22 +16,13 @@ public sealed class RequestPreambleComposerTests
     [Fact]
     public void NoRideAlongs_ReturnsRequestUnchanged()
         => Assert.Equal("do the thing",
-            RequestPreambleComposer.Compose("do the thing", None, NoReactions, None, needsPlanning: false));
-
-    [Fact]
-    public void Planning_AppendsProposePlanNudge()
-    {
-        var result = RequestPreambleComposer.Compose("build a feature", None, NoReactions, None, needsPlanning: true);
-
-        Assert.StartsWith("build a feature", result);
-        Assert.Contains("propose_plan", result);
-    }
+            RequestPreambleComposer.Compose("do the thing", None, NoReactions, None));
 
     [Fact]
     public void ArmedContext_IsFramedAsBackground_AndRequestComesLast()
     {
         var result = RequestPreambleComposer.Compose(
-            "current ask", new[] { "earlier recap" }, NoReactions, None, needsPlanning: false);
+            "current ask", new[] { "earlier recap" }, NoReactions, None);
 
         Assert.Contains("Imported context — 1 recap", result);
         Assert.Contains("earlier recap", result);
@@ -43,7 +34,7 @@ public sealed class RequestPreambleComposerTests
     public void MultipleArmedContexts_Pluralize()
     {
         var result = RequestPreambleComposer.Compose(
-            "x", new[] { "a", "b" }, NoReactions, None, needsPlanning: false);
+            "x", new[] { "a", "b" }, NoReactions, None);
 
         Assert.Contains("2 recaps", result);
     }
@@ -52,7 +43,7 @@ public sealed class RequestPreambleComposerTests
     public void Reactions_AreFramedAsFeedbackNotText()
     {
         var result = RequestPreambleComposer.Compose(
-            "next", None, new[] { ("👍", "the part about caching") }, None, needsPlanning: false);
+            "next", None, new[] { ("👍", "the part about caching") }, None);
 
         Assert.Contains("reacted to earlier responses", result);
         Assert.Contains("👍", result);
@@ -63,7 +54,7 @@ public sealed class RequestPreambleComposerTests
     public void WorkspaceNotes_CarryStalenessWarning()
     {
         var result = RequestPreambleComposer.Compose(
-            "keep going", None, NoReactions, new[] { "user ran: git checkout main" }, needsPlanning: false);
+            "keep going", None, NoReactions, new[] { "user ran: git checkout main" });
 
         Assert.Contains("Workspace changes since your last turn", result);
         Assert.Contains("may be stale", result);
@@ -77,16 +68,11 @@ public sealed class RequestPreambleComposerTests
             "the real ask",
             new[] { "recap" },
             new[] { ("🎉", "snippet") },
-            new[] { "external edit" },
-            needsPlanning: true);
+            new[] { "external edit" });
 
         Assert.Contains("Imported context", result);
         Assert.Contains("reacted to earlier responses", result);
         Assert.Contains("Workspace changes since your last turn", result);
-        Assert.Contains("propose_plan", result);
-        // The real ask survives, followed only by the planning nudge.
-        var askIndex = result.LastIndexOf("the real ask", System.StringComparison.Ordinal);
-        Assert.True(askIndex >= 0);
-        Assert.True(result.IndexOf("propose_plan", System.StringComparison.Ordinal) > askIndex);
+        Assert.EndsWith("[Current request:]\nthe real ask", result);
     }
 }

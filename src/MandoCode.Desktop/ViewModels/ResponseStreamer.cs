@@ -50,11 +50,14 @@ public sealed class ResponseStreamer
     /// response text (empty when the model returned nothing, was cancelled, or errored) so the caller
     /// can remember the last response. Never throws — cancellation and errors surface as transcript
     /// lines, matching the original in-controller behavior.</summary>
-    public async Task<string> StreamAsync(string input, CancellationToken token)
+    public async Task<string> StreamAsync(string input, CancellationToken token, string? hostInstruction = null)
     {
         try
         {
-            var enumerator = _ai.ChatStreamAsync(input, token).GetAsyncEnumerator(token);
+            var stream = string.IsNullOrWhiteSpace(hostInstruction)
+                ? _ai.ChatStreamAsync(input, token)
+                : _ai.ChatStreamWithHostInstructionAsync(input, hostInstruction, token);
+            var enumerator = stream.GetAsyncEnumerator(token);
             try
             {
                 _busy.Start("Thinking...");
