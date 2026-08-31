@@ -72,6 +72,7 @@
     <Compile Include="..\MandoCode.Desktop\Services\ConfigCloning.cs" Link="src\ConfigCloning.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\AgentNaming.cs" Link="src\AgentNaming.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\AgentCallsigns.cs" Link="src\AgentCallsigns.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\ItemTagStore.cs" Link="src\ItemTagStore.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\HistorySummarizer.cs" Link="src\HistorySummarizer.cs" />
     <Compile Include="..\MandoCode.Desktop\ViewModels\RequestPreambleComposer.cs" Link="src\RequestPreambleComposer.cs" />
     <Compile Include="..\MandoCode.Desktop\ViewModels\DeferredPlanCompletion.cs" Link="src\DeferredPlanCompletion.cs" />

@@ -26,6 +26,7 @@ public sealed partial class MainWindow : Window
     private readonly SessionArchiveStore _archive;   // app-wide index of closed conversations
     private readonly SkillCoordinator _skillCoordinator;   // app-wide global-skills manager
     private readonly ConfigCoordinator _configs;   // owns the app-wide MCP server list (defaults)
+    private readonly ItemTagStore _itemTags = new(); // Desktop-only organization metadata for Skills/MCPs
     private readonly TranscriptHtmlBuilder _html;   // app-global, stateless formatter
     private readonly Microsoft.UI.Dispatching.DispatcherQueue _dispatcher;
 

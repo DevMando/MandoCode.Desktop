@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.Json;
 using MandoCode.Models;
@@ -185,14 +186,40 @@ public sealed class DiffLineVm
 }
 
 /// <summary>Row model for the MCP servers page.</summary>
-public sealed class McpRow
+public sealed class McpRow : INotifyPropertyChanged
 {
     public string Name { get; init; } = "";
     public string Transport { get; init; } = "";
     public string Status { get; init; } = "";
     public SolidColorBrush StatusBrush { get; init; } = new(Colors.Gray);
     /// <summary>Per-server on/off (the config's Disabled flag, inverted). Shared by every agent.</summary>
-    public bool Enabled { get; init; }
+    private bool _enabled;
+    public bool Enabled
+    {
+        get => _enabled;
+        set
+        {
+            if (_enabled == value) return;
+            _enabled = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Enabled)));
+        }
+    }
+    public IReadOnlyList<string> Tags { get; init; } = [];
+    public IReadOnlyList<TagChip> TagChips { get; init; } = [];
+    public event PropertyChangedEventHandler? PropertyChanged;
+}
+
+/// <summary>One choice in a Skills or MCP tag filter. A null tag means no tag constraint.</summary>
+public sealed class TagFilterOption
+{
+    public string Label { get; init; } = "All tags";
+    public string? Tag { get; init; }
+}
+
+public sealed class TagChip
+{
+    public string Name { get; init; } = "";
+    public SolidColorBrush Brush { get; init; } = new(Colors.Gray);
 }
 
 /// <summary>A section of the skills list (e.g. "Enabled (12)"). A List subclass so a
@@ -212,13 +239,26 @@ public sealed class McpRowGroup : List<McpRow>
 
 /// <summary>Row model for the global-skills page. FolderPath rides along so per-row actions
 /// (the enable toggle) can act on the right skill without leaning on list selection.</summary>
-public sealed class SkillRow
+public sealed class SkillRow : INotifyPropertyChanged
 {
     public string Name { get; init; } = "";
     public string Description { get; init; } = "";
     public string Body { get; init; } = "";
     public string FolderPath { get; init; } = "";
-    public bool Enabled { get; init; }
+    private bool _enabled;
+    public bool Enabled
+    {
+        get => _enabled;
+        set
+        {
+            if (_enabled == value) return;
+            _enabled = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Enabled)));
+        }
+    }
+    public IReadOnlyList<string> Tags { get; init; } = [];
+    public IReadOnlyList<TagChip> TagChips { get; init; } = [];
+    public event PropertyChangedEventHandler? PropertyChanged;
 
     // Size of the instructions body — what gets injected into the prompt on load, so it's the cost
     // that spins a local model up. ~4 chars/token is the usual rough estimate.
