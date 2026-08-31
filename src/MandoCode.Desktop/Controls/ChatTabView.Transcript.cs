@@ -21,6 +21,7 @@ public sealed partial class ChatTabView
     // ============================================================
 
     private bool _journalRestored;
+    private bool _pendingActivityCompletion;
 
     /// <summary>Replays this session's journaled transcript into the fresh WebView — via
     /// ExecuteScript directly, NOT through TranscriptWriter (that would re-journal every
@@ -47,6 +48,7 @@ public sealed partial class ChatTabView
                 }
             }
             if (chunk.Length > 0) await AppendRawAsync(chunk.ToString());
+            await CompleteTranscriptActivityAsync(); // Restored work is history, so it starts collapsed.
 
             // Divider goes through AppendRawAsync too — journaling it would stack one
             // divider per relaunch. Memory restore happens LATER (RestoreConversationMemoryAsync,
@@ -82,10 +84,8 @@ public sealed partial class ChatTabView
                 var restored = await Task.Run(() => Session.Ai.TryRestoreHistoryJson(historyJson));
                 if (restored > 0)
                 {
-                    await AppendRawAsync(_html.StatusCard(
-                        "Conversation memory restored",
-                        $"The agent remembers this session ({restored} messages).",
-                        "success"));
+                    // The preceding “Previous session restored” card is enough on Desktop: the
+                    // replay is already visible, and a second success card only repeats it.
                     return;
                 }
             }
@@ -114,17 +114,25 @@ public sealed partial class ChatTabView
                 _controller.ArmRestoredConversation(
                     "From \"your previous session in this tab\" (verbatim excerpt, not a recap):\n" +
                     sb.ToString().TrimEnd());
-                await AppendRawAsync(_html.Dim(
-                    "Context re-armed — the agent will be briefed on this conversation with your next message."));
+                await AppendRawAsync(_html.StatusCard(
+                    "Conversation context will be re-briefed",
+                    "The agent will receive recent context with your next message.",
+                    "warning"));
                 return;
             }
 
             // 3) Transcript was replayed but no memory of any kind exists — say so to the model.
             if (_replayedBlockCount > 0)
+            {
                 _controller.NoteWorkspaceEvent(
                     "This tab was restored from a previous session. The transcript the user sees above is a replay " +
                     "for their benefit; it is NOT in your context and you have no memory of it. If the user refers " +
                     "to earlier work, say so honestly and re-read files instead of guessing.");
+                await AppendRawAsync(_html.StatusCard(
+                    "Conversation memory unavailable",
+                    "The transcript was restored, but the agent cannot recall it.",
+                    "warning"));
+            }
         }
         catch { /* memory restore is best-effort; a fresh conversation always works */ }
     }
@@ -178,6 +186,29 @@ public sealed partial class ChatTabView
         {
             // A fragment failing to render must never take the app down.
         }
+    }
+
+    /// <summary>Collapses the current group of routine tool/status output without touching visible
+    /// messages that need attention. If a turn ends before WebView initialization, apply it after
+    /// the queued blocks have reached the document.</summary>
+    private void CompleteTranscriptActivity()
+    {
+        if (!CanScript)
+        {
+            _pendingActivityCompletion = true;
+            return;
+        }
+        _ = CompleteTranscriptActivityAsync();
+    }
+
+    private async Task CompleteTranscriptActivityAsync()
+    {
+        // Journal replay deliberately runs before _webViewReady is set, but it still has a live
+        // CoreWebView2 and must be able to close restored activity groups.
+        var core = _shutDown ? null : TranscriptView.CoreWebView2;
+        if (core == null) return;
+        try { await core.ExecuteScriptAsync("window.__completeActivity && window.__completeActivity()"); }
+        catch { /* transient during navigation/teardown */ }
     }
 
     private async void ClearTranscript()

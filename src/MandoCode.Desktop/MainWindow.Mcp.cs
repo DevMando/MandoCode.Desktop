@@ -457,6 +457,7 @@ public sealed partial class MainWindow
 
         var originalName = _mcpEditOriginalName;
         var (_, message) = await Task.Run(() => _controller.SaveMcpServerAsync(originalName, name, server));
+        _controller.CompleteTranscriptActivity();
         if (!string.IsNullOrWhiteSpace(originalName)) _itemTags.RenameItem(TagScope.Mcps, originalName, name);
         McpPageStatus.Text = message;
         await RefreshMcpListAsync();

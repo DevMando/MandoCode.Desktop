@@ -14,7 +14,13 @@ public sealed class TranscriptWriter
     /// <summary>Raised when the transcript should be cleared (e.g. /clear).</summary>
     public event Action? Cleared;
 
+    /// <summary>Raised after routine output for the current interaction is complete. The transcript
+    /// surface uses it to collapse activity while leaving important notices and chat visible.</summary>
+    public event Action? ActivityCompleted;
+
     public void Append(string html) => BlockAdded?.Invoke(html);
 
     public void Clear() => Cleared?.Invoke();
+
+    public void CompleteActivity() => ActivityCompleted?.Invoke();
 }
