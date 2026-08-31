@@ -26,6 +26,27 @@ the engine generation, so it moves 0.14.1 → 0.15.0.
   replacement is shown for review, and execution resumes only after approval.
 
 ### Changed
+- **Completed turns now keep routine activity out of the conversation flow.** File operations,
+  tool calls, and routine connection progress remain visible while work is running,
+  then fold into an expandable Activity section when it completes. Assistant replies, warnings,
+  errors, pending approvals, plans, update notices, and session-restore notices remain visible.
+  Restored activity starts collapsed so old operational detail does not look like fresh work.
+- **Long completed changes now have one Work completed rollup.** Related tool activity, diffs,
+  commands, and approval outcomes collapse together after a turn ends, with the number of files
+  changed, line totals, distinct approval states, and commands shown in the summary. Expanding it
+  preserves the original sequence and individual controls. Auto-approved deletions and MCP tool
+  requests stay part of that routine sequence; destructive warnings remain visible only while a
+  manual decision is needed.
+- **Completed approval notices collapse into a compact state card.** Successful approvals and
+  auto-approval notices keep their full existing appearance while work is active, then summarize
+  each distinct state once (for example, `✅ ⚠️`) with the original cards available on expand.
+  Approval and tool-activity summaries share the same compact card and rotating chevron. Pending
+  prompts, denials, and approval errors remain visible.
+- **Restored Desktop sessions no longer repeat the success message for conversation memory.** The
+  restored transcript is already visible, so full memory recovery is silent. Desktop calls out only
+  reduced-memory restores and unavailable conversation memory.
+- **`@` directory references now render as a normal List operation.** Missing references use a
+  clear warning instead of raw `[Directory]` or `[Not found]` parser-style labels.
 - **Automatic plans now start for the work that actually benefits from them.** Desktop recognizes
   explicit checklists, cross-cutting changes, and multiple deliverables instead of treating a long
   message as complex. Questions, research, explanations, and narrow edits stay conversational, and

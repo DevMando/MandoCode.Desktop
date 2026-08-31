@@ -471,6 +471,7 @@ public sealed partial class ChatController
             _isProcessing = false;
             _busy.Reset();
             StateChanged?.Invoke();
+            _transcript.CompleteActivity();
         }
     }
 
@@ -607,11 +608,15 @@ public sealed partial class ChatController
                     contextBlocks.AppendLine();
                     totalExpansionChars += dirListing.Length;
 
-                    _transcript.Append(_html.Dim($"[Directory] {filePath}/"));
+                    _transcript.Append(_html.OperationCard(new OperationDisplayEvent
+                    {
+                        OperationType = "List",
+                        FilePath = filePath
+                    }));
                 }
                 else
                 {
-                    _transcript.Append(_html.Warn($"[Not found] {filePath}"));
+                    _transcript.Append(_html.Warn($"Couldn't find the referenced file or folder: {filePath}"));
                 }
             }
         }
@@ -1945,7 +1950,7 @@ public sealed partial class ChatController
             return (false, $"Failed to save config: {ex.Message}");
         }
 
-        _transcript.Append(_html.Dim(originalName == null
+        _transcript.Append(_html.Activity(originalName == null
             ? $"MCP server '{name}' added. Connecting..."
             : $"MCP server '{name}' updated. Reconnecting..."));
 
@@ -1963,14 +1968,14 @@ public sealed partial class ChatController
 
         if (server.Disabled)
         {
-            _transcript.Append(_html.Success($"✓ '{name}' saved (disabled)."));
+            _transcript.Append(_html.Activity($"✓ '{name}' saved (disabled).", "success"));
             return (true, $"✓ '{name}' saved (disabled).");
         }
         if (_mcpManager.ActiveClients.TryGetValue(name, out var client))
         {
             var toolCount = "?";
             try { toolCount = (await client.ListToolsAsync()).Count.ToString(); } catch { }
-            _transcript.Append(_html.Success($"✓ Server '{name}' connected ({toolCount} tool(s))."));
+            _transcript.Append(_html.Activity($"✓ Server '{name}' connected ({toolCount} tool(s)).", "success"));
             return (true, $"✓ '{name}' connected ({toolCount} tool(s)).");
         }
         if (_mcpManager.StartupErrors.TryGetValue(name, out var err))
@@ -1982,6 +1987,9 @@ public sealed partial class ChatController
         return (true, $"'{name}' saved but did not appear in active clients.");
     }
 
+    /// <summary>Ends a routine management-action activity group after its final status line has
+    /// been written. Chat turns do this automatically in <see cref="SubmitAsync"/>.</summary>
+    public void CompleteTranscriptActivity() => _transcript.CompleteActivity();
     public sealed record McpToolInfo(string Name, string? Description);
     public sealed record McpTestResult(bool Ok, string Message, IReadOnlyList<McpToolInfo> Tools);
 

@@ -74,6 +74,15 @@ public sealed class TranscriptHtmlBuilder : ITranscriptHtml
     public string Error(string text) => NoticeCard(text, "error");
     public string Dim(string text) => NoticeCard(text, "dim");
 
+    /// <summary>Low-priority operational output. Unlike notices, this is folded into the turn's
+    /// expandable Activity section once the work finishes.</summary>
+    public string Activity(string text, string state = "") => NoticeCard(text, state, " activity-item");
+
+    /// <summary>A completed approval decision. It keeps the existing card while live, then joins
+    /// the compact, distinct-emoji approval summary when the turn finishes.</summary>
+    public string ApprovalNotice(string text, string state = "success") =>
+        NoticeCard(text, state, " approval-activity-item", ActivityEmoji(state));
+
     /// <summary>
     /// A high-contrast, live plan-status card. Plan execution and step headers must remain readable
     /// even when a user has turned their chat wallpaper opacity up, so they get a themed surface
@@ -110,8 +119,8 @@ public sealed class TranscriptHtmlBuilder : ITranscriptHtml
         return sb.ToString();
     }
 
-    private static string NoticeCard(string text, string state) =>
-        $"<div class=\"notice-card {state}\"><span class=\"notice-emoji\">{NoticeEmoji(state)}</span>" +
+    private static string NoticeCard(string text, string state, string extraClass = "", string? activityIcon = null) =>
+        $"<div class=\"notice-card {state}{extraClass}\"{ActivityIconAttribute(activityIcon)}><span class=\"notice-emoji\">{NoticeEmoji(state)}</span>" +
         $"<span class=\"notice-text\">{E(text)}</span></div>";
 
     private static string NoticeEmoji(string state) => state switch
@@ -136,7 +145,7 @@ public sealed class TranscriptHtmlBuilder : ITranscriptHtml
     /// reproduced the CPU/stuck issue and was removed; the dot stays neutral.
     /// </summary>
     public string ToolChip(string label) =>
-        $"<div class=\"tool-pill\"><span class=\"tp-dot\"></span>" +
+        $"<div class=\"tool-pill activity-item\"><span class=\"tp-dot\"></span>" +
         $"<span class=\"tp-label\">{E(label).Replace(".", " · ")}</span></div>";
 
     /// <summary>Pre-formatted block (config listings, model lists) in monospace.</summary>
@@ -156,10 +165,10 @@ public sealed class TranscriptHtmlBuilder : ITranscriptHtml
         $"<a class=\"file-link\" href=\"#\" data-file=\"{E(path)}\" title=\"Open in default app\">{E(path)}</a>";
 
     public string CommandCard(string command) =>
-        $"<div class=\"panel\"><div class=\"panel-header sky\">Command</div><pre class=\"cmd\">$ {E(command)}</pre></div>";
+        $"<div class=\"panel\" data-work-kind=\"command\"><div class=\"panel-header sky\">Command</div><pre class=\"cmd\">$ {E(command)}</pre></div>";
 
     public string CommandOutputCard(string command, string output, bool failed = false) =>
-        $"<div class=\"panel\"><div class=\"panel-header {(failed ? "red" : "sky")}\">$ {E(command)}</div><pre class=\"cmd-out\">{E(output)}</pre></div>";
+        $"<div class=\"panel\"{(failed ? "" : " data-work-kind=\"command-output\"")}><div class=\"panel-header {(failed ? "red" : "sky")}\">$ {E(command)}</div><pre class=\"cmd-out\">{E(output)}</pre></div>";
 
     /// <summary><paramref name="interactive"/> adds Undo-changes / Clear chips to the header —
     /// used ONLY for diffs the user requested from the Changes tab, never for diffs the agent
@@ -172,7 +181,7 @@ public sealed class TranscriptHtmlBuilder : ITranscriptHtml
               "title=\"Discard this file's uncommitted changes (asks first)\">↩ Undo changes</button>" +
               "<button class=\"dv-btn dv-clear\" title=\"Remove this diff card from the transcript\">✕ Clear</button></span>"
             : "";
-        sb.Append($"<div class=\"panel\"><div class=\"panel-header sky\">Diff: {FileLink(relativePath)}{actions}</div><pre class=\"diff\">");
+        sb.Append($"<div class=\"panel\" data-work-kind=\"diff\"><div class=\"panel-header sky\">Diff: {FileLink(relativePath)}{actions}</div><pre class=\"diff\">");
         AppendDiffLines(sb, lines);
         sb.Append("</pre>");
         sb.Append($"<div class=\"panel-footer\">{E(summary)}</div></div>");
@@ -180,7 +189,7 @@ public sealed class TranscriptHtmlBuilder : ITranscriptHtml
     }
 
     public string FolderDeleteCard(string relativePath, string listing) =>
-        $"<div class=\"panel red-border\"><div class=\"panel-header red\">Delete Folder: {FileLink(relativePath)}/</div><pre class=\"cmd-out\">{E(listing)}</pre></div>";
+        $"<div class=\"panel red-border\" data-work-kind=\"folder-delete\"><div class=\"panel-header red\">Delete Folder: {FileLink(relativePath)}/</div><pre class=\"cmd-out\">{E(listing)}</pre></div>";
 
     private static void AppendDiffLines(StringBuilder sb, IReadOnlyList<DiffLine> lines)
     {
@@ -229,7 +238,7 @@ public sealed class TranscriptHtmlBuilder : ITranscriptHtml
             && op.OperationType is "Write" or "Update" or "Read" or "Delete" or "CreateFolder" or "List";
 
         var sb = new StringBuilder();
-        sb.Append("<div class=\"op\">");
+        sb.Append("<div class=\"op activity-item\">");
         sb.Append($"<span class=\"op-head {cls}\">{icon} {E(op.OperationType)}</span> ");
         sb.Append(pathIsOpenable
             ? $"<span class=\"op-path\">{FileLink(op.FilePath!)}</span>"
@@ -306,10 +315,21 @@ public sealed class TranscriptHtmlBuilder : ITranscriptHtml
     public string StatusCard(string title, string detail, string state = "") =>
         PlanActivity(title, detail, state);
 
-    private static string PlanActivity(string title, string detail, string state = "") =>
-        $"<div class=\"plan-activity {state}\"><span class=\"plan-activity-dot\"></span>" +
+    public string ApprovalActivity(string title, string detail, string state) =>
+        PlanActivity(title, detail, state, " approval-activity-item", ActivityEmoji(state));
+
+    private static string PlanActivity(
+        string title,
+        string detail,
+        string state = "",
+        string extraClass = "",
+        string? activityIcon = null) =>
+        $"<div class=\"plan-activity {state}{extraClass}\"{ActivityIconAttribute(activityIcon)}><span class=\"plan-activity-dot\"></span>" +
         $"<div><div class=\"plan-activity-title\"><span class=\"plan-activity-emoji\">{ActivityEmoji(state)}</span>{E(title)}</div>" +
         $"<div class=\"plan-activity-detail\">{E(detail)}</div></div></div>";
+
+    private static string ActivityIconAttribute(string? icon) =>
+        icon == null ? "" : $" data-activity-icon=\"{E(icon)}\"";
 
     private static string ActivityEmoji(string state) => state switch
     {

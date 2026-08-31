@@ -382,6 +382,7 @@ public sealed partial class MainWindow
 
         var originalName = _mcpEditOriginalName;
         var (_, message) = await Task.Run(() => _controller.SaveMcpServerAsync(originalName, name, server));
+        _controller.CompleteTranscriptActivity();
         McpPageStatus.Text = message;
         await RefreshMcpListAsync();
         McpPageStatus.Text = message;

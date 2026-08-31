@@ -75,7 +75,7 @@ public sealed class WinUiApprovalService
 
         if (_globalWriteBypass || _approvedFiles.Contains(relativePath))
         {
-            _transcript.Append(_html.StatusCard("Auto-approved", $"{fileName} was already approved for this session.", "success"));
+            _transcript.Append(_html.ApprovalActivity("Auto-approved", $"{fileName} was already approved for this session.", "success"));
             _busy.Start();
             return new DiffApprovalResult { Response = DiffApprovalResponse.Approved };
         }
@@ -108,21 +108,21 @@ public sealed class WinUiApprovalService
         DiffApprovalResult result;
         if (choice == ApproveLabel)
         {
-            _transcript.Append(_html.StatusCard("Changes approved", $"{fileName} can be updated.", "success"));
+            _transcript.Append(_html.ApprovalActivity("Changes approved", $"{fileName} can be updated.", "success"));
             result = new DiffApprovalResult { Response = DiffApprovalResponse.Approved };
         }
         else if (choice == noAskLabel)
         {
-            _transcript.Append(_html.StatusCard("Changes approved", $"{fileName} can be updated.", "success"));
+            _transcript.Append(_html.ApprovalActivity("Changes approved", $"{fileName} can be updated.", "success"));
             if (isNewFile)
             {
                 _globalWriteBypass = true;
-                _transcript.Append(_html.StatusCard("Auto-approval enabled", "All future writes will be auto-approved for this session.", "warning"));
+                _transcript.Append(_html.ApprovalActivity("Auto-approval enabled", "All future writes will be auto-approved for this session.", "warning"));
             }
             else
             {
                 _approvedFiles.Add(relativePath);
-                _transcript.Append(_html.StatusCard("Auto-approval enabled", $"Future modifications to {fileName} will be auto-approved.", "warning"));
+                _transcript.Append(_html.ApprovalActivity("Auto-approval enabled", $"Future modifications to {fileName} will be auto-approved.", "warning"));
             }
             result = new DiffApprovalResult { Response = DiffApprovalResponse.ApprovedNoAskAgain };
         }
@@ -159,7 +159,7 @@ public sealed class WinUiApprovalService
 
         if (_globalWriteBypass)
         {
-            _transcript.Append(_html.StatusCard("Command auto-approved", "Commands are currently auto-approved for this session.", "success"));
+            _transcript.Append(_html.ApprovalActivity("Command auto-approved", "Commands are currently auto-approved for this session.", "success"));
             _busy.Start();
             return new DiffApprovalResult { Response = DiffApprovalResponse.Approved };
         }
@@ -189,14 +189,14 @@ public sealed class WinUiApprovalService
         DiffApprovalResult result;
         if (choice == ApproveLabel)
         {
-            _transcript.Append(_html.StatusCard("Command approved", "The command can now run.", "success"));
+            _transcript.Append(_html.ApprovalActivity("Command approved", "The command can now run.", "success"));
             result = new DiffApprovalResult { Response = DiffApprovalResponse.Approved };
         }
         else if (choice == ApproveNoAskRunLabel)
         {
-            _transcript.Append(_html.StatusCard("Command approved", "The command can now run.", "success"));
+            _transcript.Append(_html.ApprovalActivity("Command approved", "The command can now run.", "success"));
             _globalWriteBypass = true;
-            _transcript.Append(_html.StatusCard("Auto-approval enabled", "All future writes, deletions, and commands will be auto-approved for this session.", "warning"));
+            _transcript.Append(_html.ApprovalActivity("Auto-approval enabled", "All future writes, deletions, and commands will be auto-approved for this session.", "warning"));
             result = new DiffApprovalResult { Response = DiffApprovalResponse.ApprovedNoAskAgain };
         }
         else if (choice == DenyLabel)
@@ -257,14 +257,16 @@ public sealed class WinUiApprovalService
             _transcript.Append(_html.DiffCard(relativePath, displayLines, $"{diffLines.Count} deletion(s)"));
             warning = $"This will DELETE the file: {relativePath}";
         }
-        _transcript.Append(_html.Error(warning));
-
         if (_globalWriteBypass)
         {
-            _transcript.Append(_html.StatusCard("Deletion auto-approved", "Deletions are currently auto-approved for this session.", "success"));
+            _transcript.Append(_html.ApprovalActivity("Deletion auto-approved", "Deletions are currently auto-approved for this session.", "success"));
             _busy.Start();
             return new DiffApprovalResult { Response = DiffApprovalResponse.Approved };
         }
+
+        // The approval overlay already presents this destructive-action warning while a decision
+        // is needed. Leaving a second error-style card in the transcript after auto-approval made
+        // a completed multi-file delete look like a failure and split its work rollup.
 
         var options = new List<ApprovalOption>
         {
@@ -292,14 +294,14 @@ public sealed class WinUiApprovalService
         DiffApprovalResult result;
         if (choice == ApproveDeletionLabel)
         {
-            _transcript.Append(_html.StatusCard("Deletion approved", "The deletion can now run.", "success"));
+            _transcript.Append(_html.ApprovalActivity("Deletion approved", "The deletion can now run.", "success"));
             result = new DiffApprovalResult { Response = DiffApprovalResponse.Approved };
         }
         else if (choice == ApproveNoAskDeleteLabel)
         {
-            _transcript.Append(_html.StatusCard("Deletion approved", "The deletion can now run.", "success"));
+            _transcript.Append(_html.ApprovalActivity("Deletion approved", "The deletion can now run.", "success"));
             _globalWriteBypass = true;
-            _transcript.Append(_html.StatusCard("Auto-approval enabled", "All future writes and deletions will be auto-approved for this session.", "warning"));
+            _transcript.Append(_html.ApprovalActivity("Auto-approval enabled", "All future writes and deletions will be auto-approved for this session.", "warning"));
             result = new DiffApprovalResult { Response = DiffApprovalResponse.ApprovedNoAskAgain };
         }
         else if (choice == DenyLabel)
@@ -331,14 +333,17 @@ public sealed class WinUiApprovalService
         using var promptHold = await _promptGate.AcquireAsync();
         _busy.Stop();
 
-        _transcript.Append(_html.Info($"MCP tool request: {toolName} (from {serverName})"));
-
         if (_globalWriteBypass)
         {
-            _transcript.Append(_html.StatusCard("MCP tool auto-approved", "MCP tools are currently auto-approved for this session.", "success"));
+            _transcript.Append(_html.Activity($"MCP tool request: {toolName} (from {serverName})"));
+            _transcript.Append(_html.ApprovalActivity("MCP tool auto-approved", "MCP tools are currently auto-approved for this session.", "success"));
             _busy.Start();
             return new DiffApprovalResult { Response = DiffApprovalResponse.Approved };
         }
+
+        // A manual MCP request needs to remain in the conversation while its approval prompt is
+        // open; successful auto-approved requests are routine work and collapse at turn end.
+        _transcript.Append(_html.Info($"MCP tool request: {toolName} (from {serverName})"));
 
         var noAskMcpLabel = $"Approve - don't ask again for {toolName} this session";
         var options = new List<ApprovalOption>
@@ -362,12 +367,12 @@ public sealed class WinUiApprovalService
         DiffApprovalResult result;
         if (choice == ApproveLabel)
         {
-            _transcript.Append(_html.Success("Approved."));
+            _transcript.Append(_html.ApprovalNotice("Approved."));
             result = new DiffApprovalResult { Response = DiffApprovalResponse.Approved };
         }
         else if (choice == noAskMcpLabel)
         {
-            _transcript.Append(_html.Success("Approved for session."));
+            _transcript.Append(_html.ApprovalNotice("Approved for session."));
             result = new DiffApprovalResult { Response = DiffApprovalResponse.ApprovedNoAskAgain };
         }
         else if (choice == CancelPlanLabel)

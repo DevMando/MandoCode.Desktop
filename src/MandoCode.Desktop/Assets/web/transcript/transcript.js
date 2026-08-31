@@ -6,6 +6,135 @@
     const n = d.querySelectorAll(':scope > .op').length;
     d.querySelector('summary').textContent = '⚙ ' + n + ' operation' + (n === 1 ? '' : 's');
   }
+  // Activity renders through the original append path while work is running. Only the explicit
+  // completion signal wraps finished activity, so live operation cards look and behave exactly as
+  // they did before completed-turn collapsing existed.
+  function activitySummary(d) {
+    const ops = d.querySelectorAll('.op').length;
+    const tools = d.querySelectorAll('.tool-pill').length;
+    const status = d.querySelectorAll('.notice-card.activity-item').length;
+    const parts = [];
+    if (ops) parts.push(ops + ' operation' + (ops === 1 ? '' : 's'));
+    if (tools) parts.push(tools + ' tool call' + (tools === 1 ? '' : 's'));
+    if (status) parts.push(status + ' update' + (status === 1 ? '' : 's'));
+    d.querySelector('summary').textContent = 'Activity' + (parts.length ? ' · ' + parts.join(' · ') : '');
+  }
+  function completeActivity() {
+    const items = Array.from(log.querySelectorAll('.activity-item:not([data-activity-completed])'));
+    const tops = [];
+    items.forEach(function (item) {
+      item.setAttribute('data-activity-completed', '1');
+      let top = item;
+      while (top.parentElement && top.parentElement !== log) top = top.parentElement;
+      if (top.parentElement === log && tops.indexOf(top) < 0) tops.push(top);
+    });
+
+    let run = [];
+    function flush() {
+      if (!run.length) return;
+      const d = document.createElement('details');
+      d.className = 'activity-group';
+      d.appendChild(document.createElement('summary'));
+      log.insertBefore(d, run[0]);
+      run.forEach(function (node) { d.appendChild(node); });
+      activitySummary(d);
+      run = [];
+    }
+
+    tops.forEach(function (top) {
+      if (run.length && run[run.length - 1].nextElementSibling !== top) flush();
+      run.push(top);
+    });
+    flush();
+  }
+  function approvalActivitySummary(d) {
+    const icons = [];
+    d.querySelectorAll('.approval-activity-item[data-activity-icon]').forEach(function (item) {
+      const icon = item.getAttribute('data-activity-icon');
+      if (icon && icons.indexOf(icon) < 0) icons.push(icon);
+    });
+    const summary = d.querySelector('summary');
+    summary.textContent = icons.join(' ');
+    summary.title = 'Approval activity';
+    summary.setAttribute('aria-label', 'Approval activity: ' + icons.join(' '));
+  }
+  function completeApprovalActivity() {
+    const items = Array.from(log.querySelectorAll(
+      '.approval-activity-item:not([data-approval-activity-completed])'));
+    const tops = [];
+    items.forEach(function (item) {
+      item.setAttribute('data-approval-activity-completed', '1');
+      let top = item;
+      while (top.parentElement && top.parentElement !== log) top = top.parentElement;
+      if (top.parentElement === log && tops.indexOf(top) < 0) tops.push(top);
+    });
+
+    let run = [];
+    function flush() {
+      if (!run.length) return;
+      const d = document.createElement('details');
+      d.className = 'approval-activity-group';
+      d.appendChild(document.createElement('summary'));
+      log.insertBefore(d, run[0]);
+      run.forEach(function (node) { d.appendChild(node); });
+      approvalActivitySummary(d);
+      run = [];
+    }
+
+    tops.forEach(function (top) {
+      if (run.length && run[run.length - 1].nextElementSibling !== top) flush();
+      run.push(top);
+    });
+    flush();
+  }
+  // Finished work commonly alternates between a tool/activity card, its resulting diff or
+  // command, and an approval result. Keep that complete sequence together once the turn is
+  // over, without changing the individual cards or how they stream while the work is active.
+  function isCompletedWork(node) {
+    return !node.hasAttribute('data-work-completed') &&
+      (node.matches('details.activity-group, details.approval-activity-group') ||
+       node.matches('.panel[data-work-kind]'));
+  }
+  function workSummary(d) {
+    const files = d.querySelectorAll('.panel[data-work-kind="diff"]').length;
+    const additions = d.querySelectorAll('.d-add').length;
+    const deletions = d.querySelectorAll('.d-rem').length;
+    const commands = d.querySelectorAll('.panel[data-work-kind="command"]').length;
+    const icons = [];
+    d.querySelectorAll('.approval-activity-item[data-activity-icon]').forEach(function (item) {
+      const icon = item.getAttribute('data-activity-icon');
+      if (icon && icons.indexOf(icon) < 0) icons.push(icon);
+    });
+
+    const parts = [];
+    if (files) parts.push(files + ' file' + (files === 1 ? '' : 's') + ' changed');
+    if (additions || deletions) parts.push('+' + additions + ' / −' + deletions);
+    if (icons.length) parts.push(icons.join(' '));
+    if (commands) parts.push(commands + ' command' + (commands === 1 ? '' : 's'));
+    d.querySelector('summary').textContent = 'Work completed' +
+      (parts.length ? ' · ' + parts.join(' · ') : '');
+  }
+  function completeWorkRollups() {
+    let run = [];
+    function flush() {
+      if (run.length < 2) return run = [];
+      const d = document.createElement('details');
+      d.className = 'work-group';
+      d.appendChild(document.createElement('summary'));
+      log.insertBefore(d, run[0]);
+      run.forEach(function (node) {
+        node.setAttribute('data-work-completed', '1');
+        d.appendChild(node);
+      });
+      workSummary(d);
+      run = [];
+    }
+    Array.from(log.children).forEach(function (node) {
+      if (isCompletedWork(node)) run.push(node);
+      else flush();
+    });
+    flush();
+  }
   function placeChild(c) {
     if (c.nodeType !== 1) { log.appendChild(c); return; }
     if (c.classList.contains('op')) {
@@ -386,6 +515,11 @@
     addEchoClamps();
     if (nearBottom) window.scrollTo(0, document.body.scrollHeight);
     updatePill();
+  };
+  window.__completeActivity = function () {
+    completeActivity();
+    completeApprovalActivity();
+    completeWorkRollups();
   };
   window.__clear = function () { log.innerHTML = ''; updatePill(); };
 

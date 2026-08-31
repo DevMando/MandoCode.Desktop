@@ -110,6 +110,7 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         // drives them into a WebView2 that no longer has a CoreWebView2.
         _transcript.BlockAdded += OnTranscriptBlock;
         _transcript.Cleared += OnTranscriptCleared;
+        _transcript.ActivityCompleted += OnTranscriptActivityCompleted;
         Session.Busy.Changed += OnBusyChanged;
         Session.TitleChanged += OnAgentTitleChanged;
 
@@ -128,6 +129,7 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
     // Harness events arrive on background threads; each hop marshals to the UI thread.
     private void OnTranscriptBlock(string html) => OnUi(() => AppendHtml(html));
     private void OnTranscriptCleared() => OnUi(ClearTranscript);
+    private void OnTranscriptActivityCompleted() => OnUi(CompleteTranscriptActivity);
     private void OnBusyChanged(bool busy, string? activity) => OnUi(() => UpdateBusy(busy, activity));
     private void OnAgentTitleChanged(string _) => OnUi(UpdateHeader);
     private void OnControllerStateChanged() => OnUi(UpdateHeader);
@@ -182,6 +184,11 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
                 await RestoreJournaledTranscriptAsync();
                 _webViewReady = true;
                 while (_pendingHtml.Count > 0) AppendHtml(_pendingHtml.Dequeue());
+                if (_pendingActivityCompletion)
+                {
+                    _pendingActivityCompletion = false;
+                    CompleteTranscriptActivity();
+                }
             };
 
             // The WebView hosts only the transcript document. Any link click opens in the
@@ -333,6 +340,7 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         // WebView2 whose CoreWebView2 is about to be null.
         _transcript.BlockAdded -= OnTranscriptBlock;
         _transcript.Cleared -= OnTranscriptCleared;
+        _transcript.ActivityCompleted -= OnTranscriptActivityCompleted;
         Session.Busy.Changed -= OnBusyChanged;
         Session.TitleChanged -= OnAgentTitleChanged;
         _controller.StateChanged -= OnControllerStateChanged;
