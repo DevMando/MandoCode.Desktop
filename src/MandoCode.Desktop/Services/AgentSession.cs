@@ -75,6 +75,7 @@ public sealed class AgentSession
     public ApprovalPromptGate PromptGate { get; }
     public WinUiApprovalService Approvals { get; }
     public ShellRunner Shell { get; }
+    public DesktopPreviewTools PreviewTools { get; }
     public ChatController Controller { get; }
 
     /// <summary>App-wide snapshot store, shared with every other tab (see <see cref="SnapshotStore"/>).</summary>
@@ -112,6 +113,15 @@ public sealed class AgentSession
         McpGate = new McpApprovalGate(Config);
 
         Ai = new AIService(ProjectRoot, Config, Tokens, PlanHandoff, Skills, mcpManager, McpGate, spinner);
+        PreviewTools = new DesktopPreviewTools(ProjectRoot);
+        Ai.SetHostTools([
+            Microsoft.Extensions.AI.AIFunctionFactory.Create(
+                PreviewTools.OpenDesktopPreview,
+                new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "open_desktop_preview" }),
+            Microsoft.Extensions.AI.AIFunctionFactory.Create(
+                PreviewTools.RefreshDesktopPreview,
+                new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "refresh_desktop_preview" }),
+        ]);
         Planner = new TaskPlannerService(Ai, Config);
         // PersistKey is the durable tab identity. Including it in the checkpoint key prevents two
         // agents working in the same project from overwriting each other's unfinished plans.

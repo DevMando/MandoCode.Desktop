@@ -9,6 +9,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.System;
 
@@ -288,6 +289,34 @@ public sealed partial class ChatTabView
 
     private bool _explorerOpen;
     private string? _explorerRoot;   // root the tree was last built for
+    private bool _previewOpen;
+    private string? _previewPath;
+    private string _previewTitle = "";
+    private bool _previewEditing;
+    private bool _previewDirty;
+    private bool _settingPreviewText;
+    private DateTime _previewLoadedWriteTimeUtc;
+    private long _previewLoadedLength;
+    private bool _browserPreview;
+    private bool _previewBrowserReady;
+    private const string PreviewBrowserHost = "preview.mandocode.local";
+
+    private static readonly HashSet<string> PreviewableTextExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".cs", ".csproj", ".sln", ".props", ".targets", ".xaml", ".xml", ".json", ".jsonc",
+        ".yaml", ".yml", ".toml", ".ini", ".config", ".md", ".markdown", ".txt", ".log",
+        ".html", ".htm", ".css", ".scss", ".js", ".ts", ".tsx", ".jsx", ".py", ".ps1",
+        ".sh", ".sql", ".csv", ".svg"
+    };
+    private static readonly HashSet<string> PreviewableImageExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico"
+    };
+    private static readonly HashSet<string> BrowserPreviewExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".html", ".htm", ".svg"
+    };
+    private const long MaxPreviewBytes = 1024 * 1024;
 
     private void ExplorerButton_Click(object sender, RoutedEventArgs e) => ToggleExplorer(!_explorerOpen);
     private void ExplorerClose_Click(object sender, RoutedEventArgs e) => ToggleExplorer(false);
@@ -322,6 +351,7 @@ public sealed partial class ChatTabView
     private void ChatRoot_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         if (_explorerOpen) SizeExplorer();
+        if (_previewOpen) SizePreview();
     }
 
     private void SizeExplorer()
@@ -336,7 +366,350 @@ public sealed partial class ChatTabView
     }
 
     private const double MinExplorerWidth = 180;
-    private double MaxExplorerWidth() => Math.Max(MinExplorerWidth, ChatRoot.ActualWidth * 0.6);
+    private const double MinPreviewWidth = 280;
+    private double MaxExplorerWidth() => Math.Max(MinExplorerWidth,
+        ChatRoot.ActualWidth - (_previewOpen ? PreviewPanel.ActualWidth : 0) - 320);
+    private double MaxPreviewWidth() => Math.Max(MinPreviewWidth,
+        ChatRoot.ActualWidth - (_explorerOpen ? ExplorerPanel.ActualWidth : 0) - 320);
+
+    private double? _previewUserWidth;
+    private bool _draggingPreview;
+    private double _previewDragStartWidth;
+    private double _previewDragStartX;
+
+    private void SizePreview()
+    {
+        var width = ChatRoot.ActualWidth;
+        if (width <= 0) return;
+        var target = _previewUserWidth ?? Math.Clamp(width * 0.36, 320, 680);
+        PreviewPanel.Width = Math.Clamp(target, MinPreviewWidth, MaxPreviewWidth());
+    }
+
+    private void PreviewSplitter_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        _draggingPreview = true;
+        _previewDragStartWidth = PreviewPanel.ActualWidth;
+        _previewDragStartX = e.GetCurrentPoint(ChatRoot).Position.X;
+        ((UIElement)sender).CapturePointer(e.Pointer);
+    }
+
+    private void PreviewSplitter_PointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_draggingPreview) return;
+        var delta = e.GetCurrentPoint(ChatRoot).Position.X - _previewDragStartX;
+        var next = Math.Clamp(_previewDragStartWidth - delta, MinPreviewWidth, MaxPreviewWidth());
+        PreviewPanel.Width = next;
+        _previewUserWidth = next;
+    }
+
+    private void PreviewSplitter_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_draggingPreview) return;
+        _draggingPreview = false;
+        ((UIElement)sender).ReleasePointerCapture(e.Pointer);
+    }
+
+    private void TogglePreview(bool open)
+    {
+        _previewOpen = open;
+        if (open)
+        {
+            SizePreview();
+            PreviewPanel.Visibility = Visibility.Visible;
+            PreviewSplitter.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            PreviewPanel.Visibility = Visibility.Collapsed;
+            PreviewSplitter.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private async Task OpenFilePreviewAsync(ExplorerItem item)
+    {
+        var replacingPreview = !string.Equals(_previewPath, item.FullPath, StringComparison.OrdinalIgnoreCase);
+        if (_previewDirty && replacingPreview)
+        {
+            if (!await ConfirmDiscardPreviewChangesAsync()) return;
+            ResetPreviewEditing();
+        }
+        else if (replacingPreview)
+            ResetPreviewEditing();
+
+        _previewPath = item.FullPath;
+        _previewTitle = item.RelPath;
+        UpdatePreviewTitle();
+        ToolTipService.SetToolTip(PreviewTitleText, item.FullPath);
+        TogglePreview(true);
+        PreviewText.Visibility = Visibility.Collapsed;
+        PreviewImageScroll.Visibility = Visibility.Collapsed;
+        PreviewMessage.Visibility = Visibility.Collapsed;
+        PreviewBrowser.Visibility = Visibility.Collapsed;
+        PreviewReloadButton.Visibility = Visibility.Collapsed;
+        _browserPreview = false;
+        PreviewEditButton.IsEnabled = false;
+        PreviewSaveButton.IsEnabled = false;
+
+        if (!File.Exists(item.FullPath))
+        {
+            ShowPreviewMessage("This file no longer exists.");
+            return;
+        }
+
+        var extension = Path.GetExtension(item.FullPath);
+        if (BrowserPreviewExtensions.Contains(extension))
+        {
+            await ShowBrowserPreviewAsync(item);
+            return;
+        }
+        if (PreviewableImageExtensions.Contains(extension))
+        {
+            try
+            {
+                PreviewImage.Source = new BitmapImage(new Uri(item.FullPath));
+                CapturePreviewFileStamp(item.FullPath);
+                PreviewImageScroll.Visibility = Visibility.Visible;
+            }
+            catch
+            {
+                ShowPreviewMessage("This image could not be previewed. You can still open it in its default application.");
+            }
+            return;
+        }
+
+        var info = new FileInfo(item.FullPath);
+        if (!PreviewableTextExtensions.Contains(extension))
+        {
+            ShowPreviewMessage("Preview is available for code, text, configuration, documentation, and common image files.");
+            return;
+        }
+        if (info.Length > MaxPreviewBytes)
+        {
+            ShowPreviewMessage("This file is larger than 1 MB, so it is not loaded into the preview.");
+            return;
+        }
+
+        try
+        {
+            var text = await File.ReadAllTextAsync(item.FullPath);
+            if (_previewPath != item.FullPath || _shutDown) return;
+            _settingPreviewText = true;
+            PreviewText.Text = text;
+            _settingPreviewText = false;
+            _previewDirty = false;
+            CapturePreviewFileStamp(item.FullPath);
+            PreviewText.IsReadOnly = !_previewEditing;
+            PreviewEditButton.IsEnabled = !_previewEditing;
+            PreviewSaveButton.IsEnabled = false;
+            UpdatePreviewTitle();
+            PreviewText.Visibility = Visibility.Visible;
+        }
+        catch (Exception ex)
+        {
+            _settingPreviewText = false;
+            ShowPreviewMessage($"Couldn't preview this file: {ex.Message}");
+        }
+    }
+
+    private void ShowPreviewMessage(string text)
+    {
+        PreviewMessageText.Text = text;
+        PreviewMessage.Visibility = Visibility.Visible;
+    }
+
+    private async Task ShowBrowserPreviewAsync(ExplorerItem item)
+    {
+        try
+        {
+            await PreviewBrowser.EnsureCoreWebView2Async();
+            var core = PreviewBrowser.CoreWebView2;
+            if (core == null)
+            {
+                ShowPreviewMessage("The browser preview could not be initialized. You can still open this file externally.");
+                return;
+            }
+
+            if (!_previewBrowserReady)
+            {
+                _previewBrowserReady = true;
+                core.Settings.AreDevToolsEnabled = true;
+                core.NavigationStarting += (_, args) =>
+                {
+                    if (Uri.TryCreate(args.Uri, UriKind.Absolute, out var uri) &&
+                        string.Equals(uri.Host, PreviewBrowserHost, StringComparison.OrdinalIgnoreCase)) return;
+                    args.Cancel = true; // project links cannot replace the preview with an unrelated page
+                    if (args.IsUserInitiated && ShellOpen.Try(args.Uri) is { } ex)
+                        _transcript.Append(_html.Warn($"Couldn't open link: {ex.Message}"));
+                };
+            }
+
+            var root = _controller.ProjectRootPath;
+            core.SetVirtualHostNameToFolderMapping(
+                PreviewBrowserHost,
+                root,
+                Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Allow);
+
+            var relativePath = Path.GetRelativePath(root, item.FullPath).Replace('\\', '/');
+            var encodedPath = string.Join('/', relativePath.Split('/').Select(Uri.EscapeDataString));
+            CapturePreviewFileStamp(item.FullPath);
+            _browserPreview = true;
+            PreviewBrowser.Visibility = Visibility.Visible;
+            PreviewReloadButton.Visibility = Visibility.Visible;
+            core.Navigate($"https://{PreviewBrowserHost}/{encodedPath}");
+        }
+        catch (Exception ex)
+        {
+            ShowPreviewMessage($"Couldn't open this browser preview: {ex.Message}");
+        }
+    }
+
+    private void PreviewReload_Click(object sender, RoutedEventArgs e)
+    {
+        if (_browserPreview) PreviewBrowser.CoreWebView2?.Reload();
+    }
+
+    private async void PreviewClose_Click(object sender, RoutedEventArgs e)
+    {
+        if (_previewDirty && !await ConfirmDiscardPreviewChangesAsync()) return;
+        ResetPreviewEditing();
+        TogglePreview(false);
+    }
+
+    private void PreviewEdit_Click(object sender, RoutedEventArgs e)
+    {
+        if (_previewPath == null || PreviewText.Visibility != Visibility.Visible) return;
+        _previewEditing = true;
+        PreviewText.IsReadOnly = false;
+        PreviewEditButton.IsEnabled = false;
+        PreviewText.Focus(FocusState.Programmatic);
+    }
+
+    private async void PreviewSave_Click(object sender, RoutedEventArgs e) => await SavePreviewAsync();
+
+    private async Task SavePreviewAsync()
+    {
+        if (!_previewEditing || !_previewDirty || _previewPath == null) return;
+        try
+        {
+            if (File.GetLastWriteTimeUtc(_previewPath) > _previewLoadedWriteTimeUtc &&
+                !await ConfirmOverwriteChangedFileAsync()) return;
+            await File.WriteAllTextAsync(_previewPath, PreviewText.Text);
+            CapturePreviewFileStamp(_previewPath);
+            _previewDirty = false;
+            PreviewSaveButton.IsEnabled = false;
+            UpdatePreviewTitle();
+            _controller.NoteWorkspaceEvent($"The user edited {_previewTitle} in the Desktop file pane. Re-read it before changing it again.");
+            _wsTracker.MarkCapturePending();
+            RefreshBranchChip(force: true);
+        }
+        catch (Exception ex)
+        {
+            ShowPreviewMessage($"Couldn't save this file: {ex.Message}");
+        }
+    }
+
+    private void PreviewText_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_settingPreviewText || !_previewEditing) return;
+        _previewDirty = true;
+        PreviewSaveButton.IsEnabled = true;
+        UpdatePreviewTitle();
+    }
+
+    private async void PreviewText_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        var ctrl = Microsoft.UI.Input.InputKeyboardSource
+            .GetKeyStateForCurrentThread(VirtualKey.Control)
+            .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+        if (ctrl && e.Key == VirtualKey.S)
+        {
+            e.Handled = true;
+            await SavePreviewAsync();
+        }
+    }
+
+    private void ResetPreviewEditing()
+    {
+        _previewEditing = false;
+        _previewDirty = false;
+        PreviewText.IsReadOnly = true;
+        PreviewEditButton.IsEnabled = PreviewText.Visibility == Visibility.Visible;
+        PreviewSaveButton.IsEnabled = false;
+        UpdatePreviewTitle();
+    }
+
+    private void UpdatePreviewTitle() => PreviewTitleText.Text = _previewDirty ? $"{_previewTitle} • unsaved" : _previewTitle;
+
+    private async Task<bool> ConfirmDiscardPreviewChangesAsync()
+    {
+        var dialog = new ContentDialog
+        {
+            Title = "Discard unsaved edits?",
+            Content = $"Your unsaved changes to {_previewTitle} will be lost.",
+            PrimaryButtonText = "Discard edits",
+            CloseButtonText = "Keep editing",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = XamlRoot,
+        };
+        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+    }
+
+    private async Task<bool> ConfirmOverwriteChangedFileAsync()
+    {
+        var dialog = new ContentDialog
+        {
+            Title = "File changed while you were editing",
+            Content = $"{_previewTitle} changed on disk, possibly by the agent. Saving now will replace that newer version with your edits.",
+            PrimaryButtonText = "Save my edits",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = XamlRoot,
+        };
+        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+    }
+
+    private void PreviewAttach_Click(object sender, RoutedEventArgs e)
+    {
+        if (_previewPath != null) InsertFileTokens(new[] { _previewPath });
+    }
+
+    private void PreviewOpenExternal_Click(object sender, RoutedEventArgs e)
+    {
+        if (_previewPath != null && ShellOpen.Try(_previewPath) is { } ex)
+            _transcript.Append(_html.Warn($"Couldn't open file: {ex.Message}"));
+    }
+
+    /// <summary>Agent writes can happen in several small operations. Reload once at turn end so
+    /// the preview shows the final file without flashing through intermediate writes.</summary>
+    private void RefreshOpenFilePreview(bool force = false)
+    {
+        // Never replace text the user has not saved. Once editing exists, this is the UI-level
+        // lock: the agent can still write its file, but it cannot silently overwrite the user's
+        // in-pane buffer.
+        if (!_previewOpen || _previewDirty || _previewPath == null || !File.Exists(_previewPath)) return;
+        if (!force && !HasPreviewFileChanged()) return;
+        if (_browserPreview)
+        {
+            CapturePreviewFileStamp(_previewPath);
+            PreviewBrowser.CoreWebView2?.Reload();
+            return;
+        }
+        _ = OpenFilePreviewAsync(ExplorerItem.ForFile(_previewPath, _controller.ProjectRootPath));
+    }
+
+    private void CapturePreviewFileStamp(string path)
+    {
+        var info = new FileInfo(path);
+        _previewLoadedLength = info.Length;
+        _previewLoadedWriteTimeUtc = info.LastWriteTimeUtc;
+    }
+
+    private bool HasPreviewFileChanged()
+    {
+        if (_previewPath == null) return false;
+        var info = new FileInfo(_previewPath);
+        return info.Length != _previewLoadedLength || info.LastWriteTimeUtc != _previewLoadedWriteTimeUtc;
+    }
 
     // --- splitter drag (same pointer-capture pattern as MainWindow's terminal splitter) ---
 
@@ -766,6 +1139,8 @@ public sealed partial class ChatTabView
         // (ExplorerTree_DoubleTapped) — a stray single click must never launch an app.
         if (args.InvokedItem is TreeViewNode { Content: ExplorerItem { IsDirectory: true } } node)
             node.IsExpanded = !node.IsExpanded;
+        else if (args.InvokedItem is TreeViewNode { Content: ExplorerItem { IsDirectory: false } item })
+            _ = OpenFilePreviewAsync(item);
     }
 
     private void ExplorerTree_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
