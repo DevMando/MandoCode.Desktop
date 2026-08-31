@@ -16,6 +16,17 @@ for every approved plan. Desktop's version follows the engine generation, so it 
 0.15.0.
 
 ### Added
+- **Docked file previews from the Explorer.** Selecting a file opens a resizable, read-only
+  preview between the chat and file tree. Code, text, configuration, documentation, and common
+  image formats open in Desktop; unsupported or large files offer the existing external-open
+  action. An open preview reloads once after an agent turn so it shows the final saved file state.
+  Text previews can enter an explicit edit mode and save with the button or `Ctrl+S`; unsaved
+  edits are protected from agent refreshes and saving warns before replacing a newer disk version.
+  HTML, SVG, and local page assets render in a project-local browser mode with an in-pane reload
+  control; browser navigation cannot replace the preview with an external site. The agent can open
+  a finished HTML, HTM, or SVG page in that pane and refresh an open page through its normal tool
+  calls, while the pane also refreshes once automatically when a turn changes the open file.
+  Opening a file never adds it to the agent's context—use the explicit `@` button to attach it.
 - **Separate tags for Skills and MCP servers.** Use the new gear-icon **Tags** button on each row
   to assign tags from a checkbox menu; assigned tags appear as colored chips beside that button.
   The `+` button in Filters opens a tag-management dialog where new tags receive a chosen color.

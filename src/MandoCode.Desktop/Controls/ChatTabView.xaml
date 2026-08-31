@@ -139,14 +139,79 @@
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
 
             <WebView2 x:Name="TranscriptView" DefaultBackgroundColor="#16121F"/>
 
+            <controls:ResizeGrip x:Name="PreviewSplitter" Grid.Column="1" Width="6"
+                                 Visibility="Collapsed" Background="Transparent"
+                                 GripOrientation="Vertical"
+                                 PointerPressed="PreviewSplitter_PointerPressed"
+                                 PointerMoved="PreviewSplitter_PointerMoved"
+                                 PointerReleased="PreviewSplitter_PointerReleased"/>
+
+            <!-- Read-only preview: opening a file does not edit it or attach it to the model. -->
+            <Grid x:Name="PreviewPanel" Grid.Column="2" Visibility="Collapsed" Width="460"
+                  Background="{StaticResource MandoPanelBrush}"
+                  BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1,0,0,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <Grid Padding="10,7,6,7" ColumnSpacing="6"
+                      BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="0,0,0,1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <FontIcon Glyph="&#xE8A5;" FontSize="13" VerticalAlignment="Center"
+                              Foreground="{StaticResource MandoAccentBrush}"/>
+                    <TextBlock x:Name="PreviewTitleText" Grid.Column="1" FontWeight="SemiBold"
+                               FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                    <Button x:Name="PreviewEditButton" Grid.Column="2" Click="PreviewEdit_Click" Padding="6" Background="Transparent" BorderThickness="0"
+                            ToolTipService.ToolTip="Edit this file in MandoCode"><FontIcon Glyph="&#xE70F;" FontSize="12"/></Button>
+                    <Button x:Name="PreviewSaveButton" Grid.Column="3" Click="PreviewSave_Click" Padding="6" Background="Transparent" BorderThickness="0"
+                            IsEnabled="False" ToolTipService.ToolTip="Save changes (Ctrl+S)"><FontIcon Glyph="&#xE74E;" FontSize="12"/></Button>
+                    <Button Grid.Column="4" Click="PreviewAttach_Click" Padding="6" Background="Transparent" BorderThickness="0"
+                            ToolTipService.ToolTip="Attach this file to the chat prompt"><TextBlock Text="@" FontSize="13"/></Button>
+                    <Button x:Name="PreviewReloadButton" Grid.Column="5" Click="PreviewReload_Click" Padding="6" Background="Transparent" BorderThickness="0"
+                            Visibility="Collapsed" ToolTipService.ToolTip="Reload browser preview"><FontIcon Glyph="&#xE72C;" FontSize="12"/></Button>
+                    <Button Grid.Column="6" Click="PreviewOpenExternal_Click" Padding="6" Background="Transparent" BorderThickness="0"
+                            ToolTipService.ToolTip="Open in the default application"><FontIcon Glyph="&#xE8A7;" FontSize="12"/></Button>
+                    <Button Grid.Column="7" Click="PreviewClose_Click" Padding="6" Background="Transparent" BorderThickness="0"
+                            ToolTipService.ToolTip="Close file preview"><FontIcon Glyph="&#xE711;" FontSize="12"/></Button>
+                </Grid>
+                <Grid Grid.Row="1">
+                    <TextBox x:Name="PreviewText" IsReadOnly="True" Visibility="Collapsed" AcceptsReturn="True"
+                             TextWrapping="NoWrap" ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto"
+                             BorderThickness="0" Padding="12,10" FontFamily="Cascadia Code,Consolas" FontSize="13"
+                             TextChanged="PreviewText_TextChanged" KeyDown="PreviewText_KeyDown"/>
+                    <ScrollViewer x:Name="PreviewImageScroll" Visibility="Collapsed"
+                                  HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                        <Image x:Name="PreviewImage" Stretch="Uniform" Margin="12"/>
+                    </ScrollViewer>
+                    <WebView2 x:Name="PreviewBrowser" Visibility="Collapsed" DefaultBackgroundColor="#16121F"/>
+                    <StackPanel x:Name="PreviewMessage" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                Spacing="8" Margin="24" Visibility="Collapsed">
+                        <TextBlock x:Name="PreviewMessageText" TextWrapping="Wrap" TextAlignment="Center" Opacity="0.65" MaxWidth="300"/>
+                        <Button Click="PreviewOpenExternal_Click" HorizontalAlignment="Center" Padding="10,5"><TextBlock Text="Open externally"/></Button>
+                    </StackPanel>
+                </Grid>
+            </Grid>
+
             <!-- Drag splitter for the explorer: ResizeGrip shows the ↔ cursor on hover; the
                  drag itself is pointer events in code-behind (same pattern as the terminal's
                  splitter in MainWindow). Shown/hidden together with the panel. -->
-            <controls:ResizeGrip x:Name="ExplorerSplitter" Grid.Column="1" Width="6"
+            <controls:ResizeGrip x:Name="ExplorerSplitter" Grid.Column="3" Width="6"
                                  Visibility="Collapsed" Background="Transparent"
                                  GripOrientation="Vertical"
                                  PointerPressed="ExplorerSplitter_PointerPressed"
@@ -157,7 +222,7 @@
                  Toggled by the header's explorer button. The tree is LAZY: a folder's children
                  are only read from disk when it is first expanded, so opening the panel never
                  scans node_modules/bin/obj unless you drill into them. -->
-            <Grid x:Name="ExplorerPanel" Grid.Column="2" Visibility="Collapsed" Width="280"
+            <Grid x:Name="ExplorerPanel" Grid.Column="4" Visibility="Collapsed" Width="280"
                   Background="{StaticResource MandoPanelBrush}"
                   BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1,0,0,0">
                 <Grid.RowDefinitions>
