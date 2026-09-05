@@ -816,6 +816,7 @@ public sealed partial class ChatController
             TaskPlanStatus.Completed => ("Plan completed", plan.ExecutionSummary ?? "All steps completed successfully.", "success"),
             TaskPlanStatus.CompletedWithIssues => ("Plan completed with issues", plan.ExecutionSummary ?? "Some steps were skipped or failed.", "warning"),
             TaskPlanStatus.Cancelled => ("Plan cancelled", plan.ExecutionSummary ?? "No more plan steps will run.", "warning"),
+            TaskPlanStatus.Paused => ("Plan paused", plan.ExecutionSummary ?? "Outstanding work is saved. Use /plan-resume to continue.", "warning"),
             _ => ("Plan completed with errors", plan.ExecutionSummary ?? "One or more steps could not be completed.", "error"),
         };
         _transcript.Append(_html.PlanFinished(outcomeTitle, outcomeDetail, outcomeState));
@@ -937,6 +938,40 @@ public sealed partial class ChatController
     {
         switch (progressEvent.ProgressType)
         {
+            case TaskProgressType.StepActivity:
+                _busy.Update(progressEvent.Message ?? "Checking step...");
+                _transcript.Append(_html.Dim(progressEvent.Message ?? "Checking step..."));
+                break;
+
+            case TaskProgressType.StepVerificationUnavailable:
+                _busy.Stop();
+                _transcript.Append(_html.Warn(progressEvent.Message ?? "Verification unavailable; execution evidence is saved."));
+                if (ct.IsCancellationRequested) break;
+                var verificationChoice = await ui.ShowApprovalAsync(new ApprovalRequest
+                {
+                    Title = $"Step {progressEvent.CurrentStep}: verification unavailable",
+                    Subtitle = "The implementation will not run again. Check the saved evidence or pause.",
+                    Options = [new ApprovalOption("Retry verification", ApprovalOptionKind.Proceed),
+                        new ApprovalOption("Pause plan", ApprovalOptionKind.Redirect)]
+                }, ct);
+                if (verificationChoice == "Retry verification")
+                {
+                    plan.Steps.First(s => s.StepNumber == progressEvent.CurrentStep).Status = TaskStepStatus.Pending;
+                    _busy.Start("Retrying verification...");
+                }
+                else plan.Status = TaskPlanStatus.Paused;
+                break;
+
+            case TaskProgressType.PlanPaused:
+                _busy.Stop();
+                _transcript.Append(_html.Warn(progressEvent.Message ?? "Plan paused."));
+                _transcript.Append(_html.Dim("Use /plan-resume to continue from the saved step, or revise its instruction before retrying."));
+                break;
+
+            case TaskProgressType.PersistenceWarning:
+                _transcript.Append(_html.Warn(progressEvent.Message ?? "Plan progress could not be saved."));
+                break;
+
             case TaskProgressType.StepStarted:
                 _recentReadCount = 0;
                 _recentReadFiles.Clear();
