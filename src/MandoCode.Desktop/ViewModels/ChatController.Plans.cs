@@ -192,6 +192,8 @@ public sealed partial class ChatController
                 _transcript.Append(_html.Warn("Resumed plan completed with skipped or failed steps."));
             else if (plan.Status == TaskPlanStatus.Cancelled)
                 _transcript.Append(_html.Warn("Resumed plan was cancelled; its checkpoint remains available."));
+            else if (plan.Status == TaskPlanStatus.Paused)
+                _transcript.Append(_html.Warn("Plan paused; outstanding work and verification evidence remain saved."));
             else
                 _transcript.Append(_html.Error("Resumed plan finished with unresolved failures."));
 
