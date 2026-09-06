@@ -358,6 +358,7 @@ public sealed partial class ChatController
         {
             ModelError = false;
             ModelWarning = null;
+            _transcript.Append(_html.Dim(_ai.VisionSupport.Label()));
         }
         StateChanged?.Invoke();
     }

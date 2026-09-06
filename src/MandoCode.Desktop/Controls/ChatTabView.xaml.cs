@@ -113,7 +113,7 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         _transcript.ActivityCompleted += OnTranscriptActivityCompleted;
         Session.Busy.Changed += OnBusyChanged;
         Session.TitleChanged += OnAgentTitleChanged;
-        Session.PreviewTools.Requested += OnPreviewRequested;
+        Session.PreviewTools.ExecuteAsync = DispatchPreviewRequestAsync;
 
         _controller.StateChanged += OnControllerStateChanged;
         _controller.PlanProgressChanged += OnPlanProgress;
@@ -146,13 +146,6 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
     private void OnHistoryCompacted() => _ = Task.Run(() =>
         SessionHistoryStore.Save(Session.PersistKey, Session.Ai.ExportHistoryJson()));
     private void OnSnapshotOfferChanged() => OnUi(RefreshSnapshotOffer);
-    private void OnPreviewRequested(DesktopPreviewRequest request) => OnUi(() =>
-    {
-        if (request.ForceRefresh)
-            RefreshOpenFilePreview(force: true);
-        else if (request.FullPath != null)
-            _ = OpenFilePreviewAsync(ExplorerItem.ForFile(request.FullPath, _controller.ProjectRootPath));
-    });
 
     private void OnUi(Action action)
     {
@@ -355,7 +348,8 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         _transcript.ActivityCompleted -= OnTranscriptActivityCompleted;
         Session.Busy.Changed -= OnBusyChanged;
         Session.TitleChanged -= OnAgentTitleChanged;
-        Session.PreviewTools.Requested -= OnPreviewRequested;
+        Session.PreviewTools.ExecuteAsync = null;
+        _previewAutomationLifetime.Cancel();
         _controller.StateChanged -= OnControllerStateChanged;
         _controller.PlanProgressChanged -= OnPlanProgress;
         _controller.SetupNeeded -= OnSetupNeeded;
@@ -373,6 +367,8 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
 
         try { TranscriptView.Close(); }
         catch { /* already gone, or WebView2 never initialized */ }
+        try { PreviewBrowser.Close(); }
+        catch { /* already gone, or preview never initialized */ }
     }
 
     /// <summary>Esc from anywhere in the window, routed here by MainWindow.</summary>

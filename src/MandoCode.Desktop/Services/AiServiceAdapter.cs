@@ -18,6 +18,7 @@ public sealed class AiServiceAdapter : IAiService
     private readonly AIService _ai;
 
     public AiServiceAdapter(AIService ai) => _ai = ai;
+    public ModelVisionSupport VisionSupport => _ai.VisionSupport;
 
     public event Action<FunctionCall>? OnFunctionInvoked
     {

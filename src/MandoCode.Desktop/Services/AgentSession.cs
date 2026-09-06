@@ -121,6 +121,33 @@ public sealed class AgentSession
             Microsoft.Extensions.AI.AIFunctionFactory.Create(
                 PreviewTools.RefreshDesktopPreview,
                 new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "refresh_desktop_preview" }),
+            Microsoft.Extensions.AI.AIFunctionFactory.Create(
+                PreviewTools.InspectDesktopPreview,
+                new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "inspect_desktop_preview" }),
+            Microsoft.Extensions.AI.AIFunctionFactory.Create(
+                PreviewTools.ObserveDesktopPreview,
+                new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "observe_desktop_preview" }),
+            Microsoft.Extensions.AI.AIFunctionFactory.Create(
+                PreviewTools.ClickDesktopPreview,
+                new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "click_desktop_preview" }),
+            Microsoft.Extensions.AI.AIFunctionFactory.Create(
+                PreviewTools.PressKeyDesktopPreview,
+                new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "press_key_desktop_preview" }),
+            Microsoft.Extensions.AI.AIFunctionFactory.Create(
+                PreviewTools.HoverDesktopPreview,
+                new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "hover_desktop_preview" }),
+            Microsoft.Extensions.AI.AIFunctionFactory.Create(
+                PreviewTools.FillDesktopPreview,
+                new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "fill_desktop_preview" }),
+            Microsoft.Extensions.AI.AIFunctionFactory.Create(
+                PreviewTools.SelectDesktopPreview,
+                new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "select_desktop_preview" }),
+            Microsoft.Extensions.AI.AIFunctionFactory.Create(
+                PreviewTools.ScrollDesktopPreview,
+                new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "scroll_desktop_preview" }),
+            Microsoft.Extensions.AI.AIFunctionFactory.Create(
+                PreviewTools.WaitForDesktopPreview,
+                new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "wait_for_desktop_preview" }),
         ]);
         Planner = new TaskPlannerService(Ai, Config);
         // PersistKey is the durable tab identity. Including it in the checkpoint key prevents two
