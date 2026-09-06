@@ -15,8 +15,17 @@ public static class PlanCardHtml
         sb.Append("<div class=\"panel\"><div class=\"panel-header sky\">Proposed plan</div><table class=\"plan\">");
         sb.Append("<tr><th>Step</th><th>Description</th><th>What it will do</th></tr>");
         foreach (var step in plan.Steps)
+        {
             sb.Append($"<tr><td class=\"sky\">{step.StepNumber}</td><td>{Escape(step.Description)}</td>" +
-                      $"<td class=\"dim\">{Escape(step.Instruction)}</td></tr>");
+                      $"<td class=\"dim\">{Escape(step.Instruction)}");
+            if (step.AcceptanceCriteria.Count > 0)
+            {
+                sb.Append("<p>Acceptance checks</p><ol>");
+                foreach (var criterion in step.AcceptanceCriteria) sb.Append($"<li>{Escape(criterion)}</li>");
+                sb.Append("</ol>");
+            }
+            sb.Append("</td></tr>");
+        }
         sb.Append("</table></div>");
         return sb.ToString();
     }
