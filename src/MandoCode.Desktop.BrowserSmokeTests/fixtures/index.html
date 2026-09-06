@@ -1,0 +1,26 @@
+<!doctype html><html><head><title>Browser tool fixture</title><style>
+body{font-family:sans-serif} #covered-area{position:relative;width:200px;height:40px} #cover{position:absolute;inset:0;background:#aaa}
+#tooltip{display:none} #hover:hover #tooltip{display:block} #footer{margin-top:1800px}
+</style></head><body>
+<h1>Browser tools</h1><button id="increment">Increment</button><p id="status">Count 0</p>
+<label>Name <input id="name"></label><p id="echo"></p>
+<select id="choice"><option value="a">A</option><option value="b">B</option><option value="disabled" disabled>Disabled</option></select><p id="selection">a</p>
+<button class="duplicate">One</button><button class="duplicate">Two</button>
+<button id="disabled" disabled>Disabled</button><button id="hidden" style="display:none">INVISIBLE TEXT</button>
+<div id="covered-area"><button id="covered">Covered</button><div id="cover"></div></div>
+<div id="hover" role="button" style="padding:10px;width:250px">Hover here <span id="tooltip">Tooltip revealed</span></div>
+<form id="search"><input id="term"><button id="first" type="button">First</button><button id="second" type="button">Second</button></form>
+<p id="submitted"></p><p id="keylog"></p><p id="held">none</p><input id="typed">
+<canvas width="40" height="20"></canvas><div id="more"></div><footer id="footer">Footer</footer>
+<script>
+let count=0;
+document.querySelector('#increment').onclick=e=>document.querySelector('#status').textContent=`Count ${++count} trusted=${e.isTrusted}`;
+document.querySelector('#name').oninput=e=>document.querySelector('#echo').textContent=e.target.value;
+document.querySelector('#choice').onchange=e=>document.querySelector('#selection').textContent=e.target.value;
+document.querySelector('#search').onsubmit=e=>{e.preventDefault();document.querySelector('#submitted').textContent='submitted '+document.querySelector('#term').value};
+document.addEventListener('keydown',e=>{document.querySelector('#keylog').textContent+=`[${e.key}${e.ctrlKey?'+ctrl':''}${e.shiftKey?'+shift':''}${e.isTrusted?'':' untrusted'}]`;
+  if(e.key==='ArrowRight')document.querySelector('#held').textContent='down'});
+document.addEventListener('keyup',e=>{if(e.key==='ArrowRight')document.querySelector('#held').textContent='up'});
+for(let i=0;i<45;i++){const b=document.createElement('button');b.textContent='Extra '+i;document.querySelector('#more').append(b)}
+console.warn('fixture warning');
+</script></body></html>

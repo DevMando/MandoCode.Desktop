@@ -425,8 +425,9 @@ public sealed partial class ChatTabView
         }
     }
 
-    private async Task OpenFilePreviewAsync(ExplorerItem item)
+    private async Task OpenFilePreviewAsync(ExplorerItem item, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var replacingPreview = !string.Equals(_previewPath, item.FullPath, StringComparison.OrdinalIgnoreCase);
         if (_previewDirty && replacingPreview)
         {
@@ -459,7 +460,7 @@ public sealed partial class ChatTabView
         var extension = Path.GetExtension(item.FullPath);
         if (BrowserPreviewExtensions.Contains(extension))
         {
-            await ShowBrowserPreviewAsync(item);
+            await ShowBrowserPreviewAsync(item, cancellationToken);
             return;
         }
         if (PreviewableImageExtensions.Contains(extension))
@@ -517,11 +518,13 @@ public sealed partial class ChatTabView
         PreviewMessage.Visibility = Visibility.Visible;
     }
 
-    private async Task ShowBrowserPreviewAsync(ExplorerItem item)
+    private async Task ShowBrowserPreviewAsync(ExplorerItem item, CancellationToken cancellationToken = default)
     {
+        var root = _controller.ProjectRootPath;
         try
         {
             await PreviewBrowser.EnsureCoreWebView2Async();
+            cancellationToken.ThrowIfCancellationRequested();
             var core = PreviewBrowser.CoreWebView2;
             if (core == null)
             {
@@ -533,21 +536,17 @@ public sealed partial class ChatTabView
             {
                 _previewBrowserReady = true;
                 core.Settings.AreDevToolsEnabled = true;
-                core.NavigationStarting += (_, args) =>
-                {
-                    if (Uri.TryCreate(args.Uri, UriKind.Absolute, out var uri) &&
-                        string.Equals(uri.Host, PreviewBrowserHost, StringComparison.OrdinalIgnoreCase)) return;
-                    args.Cancel = true; // project links cannot replace the preview with an unrelated page
-                    if (args.IsUserInitiated && ShellOpen.Try(args.Uri) is { } ex)
-                        _transcript.Append(_html.Warn($"Couldn't open link: {ex.Message}"));
-                };
+                await InitializePreviewAutomationAsync(core);
             }
 
-            var root = _controller.ProjectRootPath;
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_shutDown || _previewPath != item.FullPath) return;
+            if (root != _controller.ProjectRootPath) throw new InvalidOperationException("The project changed while opening the preview.");
             core.SetVirtualHostNameToFolderMapping(
                 PreviewBrowserHost,
                 root,
                 Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Allow);
+            _previewMappedRoot = root;
 
             var relativePath = Path.GetRelativePath(root, item.FullPath).Replace('\\', '/');
             var encodedPath = string.Join('/', relativePath.Split('/').Select(Uri.EscapeDataString));
@@ -555,7 +554,11 @@ public sealed partial class ChatTabView
             _browserPreview = true;
             PreviewBrowser.Visibility = Visibility.Visible;
             PreviewReloadButton.Visibility = Visibility.Visible;
-            core.Navigate($"https://{PreviewBrowserHost}/{encodedPath}");
+            await NavigatePreviewConfirmedAsync(core, () =>
+            {
+                core.Navigate($"https://{PreviewBrowserHost}/{encodedPath}");
+                return Task.CompletedTask;
+            }, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -565,7 +568,8 @@ public sealed partial class ChatTabView
 
     private void PreviewReload_Click(object sender, RoutedEventArgs e)
     {
-        if (_browserPreview) PreviewBrowser.CoreWebView2?.Reload();
+        // Reloading is how anyone checks an edit, so it must never show a cached script or stylesheet.
+        if (_browserPreview && PreviewBrowser.CoreWebView2 is { } core) _ = ReloadPreviewFreshAsync(core);
     }
 
     private async void PreviewClose_Click(object sender, RoutedEventArgs e)
@@ -691,7 +695,9 @@ public sealed partial class ChatTabView
         if (_browserPreview)
         {
             CapturePreviewFileStamp(_previewPath);
-            PreviewBrowser.CoreWebView2?.Reload();
+            // The agent's edits often land in the linked script or stylesheet rather than this page,
+            // so a plain reload would redisplay the previous assets.
+            if (PreviewBrowser.CoreWebView2 is { } core) _ = ReloadPreviewFreshAsync(core);
             return;
         }
         _ = OpenFilePreviewAsync(ExplorerItem.ForFile(_previewPath, _controller.ProjectRootPath));

@@ -24,6 +24,7 @@ namespace MandoCode.Desktop.Services;
 /// </summary>
 public interface IAiService
 {
+    ModelVisionSupport VisionSupport => ModelVisionSupport.Unknown;
     event Action<FunctionCall>? OnFunctionInvoked;
     event Action<FunctionExecutionResult>? OnFunctionCompleted;
 
