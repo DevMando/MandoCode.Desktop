@@ -943,25 +943,6 @@ public sealed partial class ChatController
                 _transcript.Append(_html.Dim(progressEvent.Message ?? "Checking step..."));
                 break;
 
-            case TaskProgressType.StepVerificationUnavailable:
-                _busy.Stop();
-                _transcript.Append(_html.Warn(progressEvent.Message ?? "Verification unavailable; execution evidence is saved."));
-                if (ct.IsCancellationRequested) break;
-                var verificationChoice = await ui.ShowApprovalAsync(new ApprovalRequest
-                {
-                    Title = $"Step {progressEvent.CurrentStep}: verification unavailable",
-                    Subtitle = "The implementation will not run again. Check the saved evidence or pause.",
-                    Options = [new ApprovalOption("Retry verification", ApprovalOptionKind.Proceed),
-                        new ApprovalOption("Pause plan", ApprovalOptionKind.Redirect)]
-                }, ct);
-                if (verificationChoice == "Retry verification")
-                {
-                    plan.Steps.First(s => s.StepNumber == progressEvent.CurrentStep).Status = TaskStepStatus.Pending;
-                    _busy.Start("Retrying verification...");
-                }
-                else plan.Status = TaskPlanStatus.Paused;
-                break;
-
             case TaskProgressType.PlanPaused:
                 _busy.Stop();
                 _transcript.Append(_html.Warn(progressEvent.Message ?? "Plan paused."));
