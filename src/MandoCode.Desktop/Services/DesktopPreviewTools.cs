@@ -1,13 +1,15 @@
 using System.ComponentModel;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using MandoCode.Services;
 
 namespace MandoCode.Desktop.Services;
 
 /// <summary>
-/// Desktop-only agent tools for the docked preview pane. They deliberately accept only project
-/// files: opening arbitrary URLs is not an agent capability, and a browser-compatible file can
-/// be rendered safely through the pane's project-local virtual host.
+/// Desktop-only agent tools for the docked preview pane. Two sources are allowed and nothing
+/// else: a browser-compatible file inside the current project, rendered through the pane's
+/// project-local virtual host, and a development server already running on loopback. Opening
+/// arbitrary URLs is not an agent capability.
 /// </summary>
 public sealed class DesktopPreviewTools
 {
@@ -30,6 +32,9 @@ public sealed class DesktopPreviewTools
 
     /// <summary>The owning tab marshals requests to its UI thread and returns observed results.</summary>
     public Func<DesktopPreviewRequest, CancellationToken, Task<string>>? ExecuteAsync { get; set; }
+
+    /// <summary>The owning session delivers captured images to the model, or explains why it cannot.</summary>
+    public IAgentImageSink? ImageSink { get; set; }
 
     [Description(
         "Opens a browser-compatible project file in the MandoCode Desktop preview pane. " +
@@ -141,6 +146,106 @@ public sealed class DesktopPreviewTools
     public Task<string> WaitForDesktopPreview(string selector, string? text = null, CancellationToken cancellationToken = default) =>
         RunAsync(new("wait", _projectRoot.ProjectRoot, Selector: selector, Value: text), cancellationToken);
 
+    [Description(
+        "Capture a screenshot of the current project preview and give it to the model as image input. " +
+        "Use it only for questions the page's DOM cannot answer: visual layout, overlapping or clipped " +
+        "elements, spacing, and canvas rendering. For text, values, and control state, inspect or observe " +
+        "instead, which is far cheaper. Requires a model that accepts image input; it is refused, not " +
+        "faked, when the model is text-only. Describe only what is actually visible in the returned image.")]
+    public async Task<string> ScreenshotDesktopPreview(
+        [Description("Optional unique CSS selector to capture just that element instead of the whole visible page.")]
+        string? selector = null,
+        [Description("Optional short note recorded alongside the image, such as what to look for.")]
+        string? note = null,
+        CancellationToken cancellationToken = default)
+    {
+        var sink = ImageSink;
+        if (sink == null) return Failure("Image input is unavailable for this agent.");
+        // Refuse before capturing: a text-only model would only be handed something it ignores.
+        if (sink.Unavailable is { } unavailable) return Failure(unavailable);
+        if (note?.Length > 500) return Failure("The screenshot note is too long.");
+
+        var captured = await RunAsync(new("screenshot", _projectRoot.ProjectRoot, Selector: selector), cancellationToken);
+        JsonNode? parsed;
+        try { parsed = JsonNode.Parse(captured); }
+        catch (JsonException) { return Failure("The preview did not return a usable screenshot."); }
+        if (parsed is not JsonObject state || state["ok"]?.GetValue<bool>() != true) return captured;
+
+        var encoded = state["image"]?.GetValue<string>();
+        state.Remove("image");   // the bytes go to the model as image input, never into its text context
+        if (string.IsNullOrEmpty(encoded)) return Failure("The preview returned an empty screenshot.");
+        byte[] bytes;
+        try { bytes = Convert.FromBase64String(encoded); }
+        catch (FormatException) { return Failure("The preview returned an unreadable screenshot."); }
+
+        var caption = string.IsNullOrWhiteSpace(note)
+            ? "Screenshot of the project preview."
+            : "Screenshot of the project preview: " + note.Trim();
+        if (!sink.TryAttach(bytes, "image/png", caption, out var error)) return Failure(error);
+        state["imageAttached"] = true;
+        state["imageBytes"] = bytes.Length;
+        state["evidence"] = "The image is supplied as image input on the next step. Describe only what is visible in it.";
+        return state.ToJsonString();
+    }
+
+    [Description(
+        "Open a page served by a development server already running on this machine, so the preview can " +
+        "exercise a live app instead of a static file. Only http/https on localhost or 127.0.0.1 with an " +
+        "explicit port is allowed; this cannot open external websites. The server must already be running; " +
+        "this does not start one.")]
+    public Task<string> OpenLocalServerDesktopPreview(
+        [Description("Local development server URL, for example http://localhost:5173/ or http://127.0.0.1:3000/about.")]
+        string url, CancellationToken cancellationToken = default)
+    {
+        if (!TryResolveLocalServerUrl(url, out var resolved, out var error)) return Task.FromResult(Failure(error));
+        return RunAsync(new("open", _projectRoot.ProjectRoot, Url: resolved), cancellationToken);
+    }
+
+    /// <summary>
+    /// Loopback only, with an explicit port and no embedded credentials. A development server is a
+    /// deliberate widening of what the preview may load; it must not become a way to reach the network.
+    /// </summary>
+    internal static bool TryResolveLocalServerUrl(string url, out string resolved, out string message)
+    {
+        resolved = "";
+        if (string.IsNullOrWhiteSpace(url) || url.Length > 2000)
+        {
+            message = "A local development server URL is required, for example http://localhost:5173/.";
+            return false;
+        }
+        if (!Uri.TryCreate(url.Trim(), UriKind.Absolute, out var uri))
+        {
+            message = "That is not a valid absolute URL.";
+            return false;
+        }
+        if (uri.Scheme is not ("http" or "https"))
+        {
+            message = "Only http and https development server URLs can be opened.";
+            return false;
+        }
+        if (!IsLoopbackHost(uri.Host))
+        {
+            message = "Only localhost and 127.0.0.1 can be opened. External websites are not available to the preview.";
+            return false;
+        }
+        if (uri.IsDefaultPort && !url.Contains($":{uri.Port}"))
+        {
+            message = "Include the development server's port, for example http://localhost:5173/.";
+            return false;
+        }
+        if (!string.IsNullOrEmpty(uri.UserInfo))
+        {
+            message = "Remove the credentials from the URL.";
+            return false;
+        }
+        resolved = uri.GetComponents(UriComponents.AbsoluteUri, UriFormat.UriEscaped);
+        message = "";
+        return true;
+    }
+
+    private static bool IsLoopbackHost(string host) =>
+        host.Equals("localhost", StringComparison.OrdinalIgnoreCase) || host is "127.0.0.1" or "[::1]" or "::1";
+
     internal static string Failure(string message) => JsonSerializer.Serialize(new { ok = false, error = message });
 
     private async Task<string> RunAsync(DesktopPreviewRequest request, CancellationToken cancellationToken)
@@ -149,6 +254,8 @@ public sealed class DesktopPreviewTools
             return Failure("Selector/value is too long, or offset is negative.");
         if (request.Operation is "click" or "hover" or "fill" or "select" or "wait" && string.IsNullOrWhiteSpace(request.Selector))
             return Failure("A unique CSS selector is required. Inspect the page first.");
+        if (request.Operation == "screenshot" && request.Selector != null && string.IsNullOrWhiteSpace(request.Selector))
+            return Failure("Provide a unique CSS selector to clip to, or omit it to capture the visible page.");
         if (request.Operation == "observe" && string.IsNullOrWhiteSpace(request.Observe))
             return Failure("A unique CSS selector is required. Inspect the page first.");
         if (request.Count is < 1 or > MaxRepeats) return Failure($"Repeat count must be between 1 and {MaxRepeats}.");
@@ -249,7 +356,15 @@ public sealed class DesktopPreviewTools
 public sealed record DesktopPreviewRequest(string Operation, string ProjectRoot, string? FullPath = null,
     string? Selector = null, string? Value = null, int Offset = 0, int DeltaY = 0, int Count = 1,
     string? Observe = null, BrowserKey? Key = null, int Modifiers = 0,
-    int HoldMs = 0, DesktopPreviewProgress? Progress = null);
+    int HoldMs = 0, DesktopPreviewProgress? Progress = null, string? Url = null, string? Origin = null);
+
+/// <summary>How captured images reach the model, kept behind an interface so it can be stubbed in tests.</summary>
+public interface IAgentImageSink
+{
+    /// <summary>Null when images can be delivered, otherwise the reason they cannot.</summary>
+    string? Unavailable { get; }
+    bool TryAttach(ReadOnlyMemory<byte> bytes, string mediaType, string caption, out string error);
+}
 
 /// <summary>
 /// How much of a repeated action actually reached the page. The host writes it as each repeat

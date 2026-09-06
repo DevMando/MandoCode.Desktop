@@ -70,8 +70,10 @@ Two problems, one app:
   cards, one-click commit, and drag-to-reference straight into the chat.
 - **Interactive project preview** — the agent can inspect live page text and controls, click and
   hover, press keys, fill forms, select options, scroll, and read browser errors in its WebView2
-  pane. Edited scripts and stylesheets reload without cache-busting query strings. Works with
-  text-only models. See [browser tools](docs/browser-tools.md) for scope and testing.
+  pane, against a project file or a development server running on localhost. Edited scripts and
+  stylesheets reload without cache-busting query strings. DOM checks work with text-only models;
+  a vision-capable model can also take a screenshot to judge layout it cannot read from the DOM.
+  See [browser tools](docs/browser-tools.md) for scope and testing.
 - **Context snapshots & session history** — closing an agent archives its conversation instead of
   deleting it; reopen any past conversation later with its transcript and, when the model supports
   it, its full memory. Snapshots let you carry an AI-written recap of one conversation into a

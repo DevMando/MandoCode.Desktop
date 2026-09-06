@@ -35,6 +35,7 @@
     <Compile Include="..\MandoCode.Desktop\Services\DesktopPreviewTools.cs" Link="src\DesktopPreviewTools.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\DesktopPreviewScripts.cs" Link="src\DesktopPreviewScripts.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\DesktopPreviewKeys.cs" Link="src\DesktopPreviewKeys.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\AgentImageSink.cs" Link="src\AgentImageSink.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\WorkspaceDeltaTracker.cs" Link="src\WorkspaceDeltaTracker.cs" />
 
     <!-- Session-archive/snapshot display derivations are pure logic (path parsing, placeholders);
