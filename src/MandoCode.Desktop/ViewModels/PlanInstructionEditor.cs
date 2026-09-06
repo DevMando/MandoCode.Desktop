@@ -13,7 +13,6 @@ public static class PlanInstructionEditor
         var revised = revisedInstruction.Trim();
         step.Instruction = revised;
         step.AcceptanceCriteria = [revised];
-        step.EvidenceFollowupUsed = false;
         // The description is a UI label, but a stale label makes the review card misleading.
         // Always derive it from the instruction the user actually approved.
         step.Description = revised.Length > 60 ? revised[..57] + "..." : revised;
