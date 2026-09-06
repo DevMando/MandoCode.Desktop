@@ -24,7 +24,7 @@ internal static class Program
                 await CheckBrowserAsync(browser.CoreWebView2).WaitAsync(TimeSpan.FromSeconds(45));
                 exitCode = 0;
                 Console.WriteLine("PASS: real WebView2 DOM, pointer, keyboard, repeated clicks, focused observations, " +
-                    "forms, scrolling, navigation, fresh assets on reload, diagnostics, and argument escaping.");
+                    "forms, scrolling, navigation, fresh assets on reload, screenshots, origin scoping, diagnostics, and argument escaping.");
             }
             catch (Exception ex) { Console.Error.WriteLine(ex); }
             finally { browser.Dispose(); form.Close(); }
@@ -45,10 +45,30 @@ internal static class Program
         await core.CallDevToolsProtocolMethodAsync("Runtime.enable", "{}");
         await NavigateAsync(core, "https://preview.mandocode.local/index.html");
 
-        async Task<JsonObject> Run(string operation, string? selector = null, string? value = null, int offset = 0, int deltaY = 0, string? observe = null)
+        const string previewOrigin = "https://preview.mandocode.local";
+        async Task<JsonObject> RunAs(string? origin, string operation, string? selector = null, string? value = null, int offset = 0, int deltaY = 0, string? observe = null)
         {
-            var json = await core.ExecuteScriptAsync(DesktopPreviewScripts.Build(new(operation, root, Selector: selector, Value: value, Offset: offset, DeltaY: deltaY, Observe: observe)));
+            var json = await core.ExecuteScriptAsync(DesktopPreviewScripts.Build(
+                new(operation, root, Selector: selector, Value: value, Offset: offset, DeltaY: deltaY, Observe: observe, Origin: origin)));
             return JsonNode.Parse(json) as JsonObject ?? throw new Exception("No result: " + json);
+        }
+        Task<JsonObject> Run(string operation, string? selector = null, string? value = null, int offset = 0, int deltaY = 0, string? observe = null) =>
+            RunAs(previewOrigin, operation, selector, value, offset, deltaY, observe);
+        async Task<byte[]> Capture(JsonObject? clip)
+        {
+            object parameters = clip == null ? new { format = "png" } : new
+            {
+                format = "png",
+                clip = new
+                {
+                    x = clip["x"]!.GetValue<double>(), y = clip["y"]!.GetValue<double>(),
+                    width = clip["width"]!.GetValue<double>(), height = clip["height"]!.GetValue<double>(), scale = 1,
+                },
+            };
+            var captured = await core.CallDevToolsProtocolMethodAsync("Page.captureScreenshot", JsonSerializer.Serialize(parameters));
+            var data = (JsonNode.Parse(captured) as JsonObject)?["data"]?.GetValue<string>();
+            Assert(!string.IsNullOrEmpty(data), "No screenshot data returned");
+            return Convert.FromBase64String(data!);
         }
         async Task Click(string selector, int count = 1)
         {
@@ -139,6 +159,22 @@ internal static class Program
         await Run("scroll", "#footer");
         Assert((await Run("inspect"))["viewport"]!["scrollY"]!.GetValue<double>() > 0, "Scroll did not move viewport");
         Assert(errors.Any(e => e.Contains("fixture warning")), "Browser diagnostics not received");
+
+        // The origin guard is the whole basis for allowing development servers: a script must only
+        // ever run on the one origin the host opened.
+        Assert(!(await RunAs("https://preview.mandocode.local.evil.test", "inspect"))["ok"]!.GetValue<bool>(), "A lookalike origin was accepted");
+        Assert(!(await RunAs(null, "inspect"))["ok"]!.GetValue<bool>(), "A missing origin was accepted");
+
+        // Screenshots: real PNG bytes, and clipping to one element captures less than the page.
+        var full = await Capture(null);
+        Assert(full.Length > 100 && full[0] == 0x89 && full[1] == 0x50 && full[2] == 0x4E && full[3] == 0x47,
+            $"Full screenshot was not a PNG ({full.Length} bytes)");
+        var bounds = await Run("bounds", "#increment");
+        Assert(bounds["ok"]!.GetValue<bool>(), "Bounds lookup failed: " + bounds.ToJsonString());
+        Assert(bounds["width"]!.GetValue<double>() > 0 && bounds["height"]!.GetValue<double>() > 0, "Bounds had no area");
+        var clipped = await Capture(bounds);
+        Assert(clipped.Length < full.Length, $"Clipping captured no less than the full page ({clipped.Length} vs {full.Length})");
+        Assert(!(await Run("bounds", "#hidden"))["ok"]!.GetValue<bool>(), "A hidden element was accepted for capture");
 
         // An edited script must never come back from cache; a stale asset is what pushes people
         // into adding ?v=2 cache-busting query strings to their own project files.

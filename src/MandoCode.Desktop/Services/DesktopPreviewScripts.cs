@@ -8,7 +8,7 @@ public static class DesktopPreviewScripts
     public static string Build(DesktopPreviewRequest request) => "(() => { const args = " +
         JsonSerializer.Serialize(new { operation = request.Operation, selector = request.Selector,
             value = request.Value, offset = request.Offset, deltaY = request.DeltaY,
-            observe = request.Observe }) + ";\n" + Body + "\n})()";
+            observe = request.Observe, origin = request.Origin }) + ";\n" + Body + "\n})()";
 
     private const string Body = """
         const cut = (v, n = 120) => String(v ?? '').slice(0, n);
@@ -85,8 +85,10 @@ public static class DesktopPreviewScripts
         };
         const result = () => args.observe ? observation(args.observe) : snapshot();
         try {
-            if (location.origin !== 'https://preview.mandocode.local') throw new Error('This is not the project preview origin.');
+            if (!args.origin || location.origin !== args.origin) throw new Error('This is not the preview origin the host opened.');
             if (args.operation === 'inspect' || args.operation === 'observe') return result();
+            if (args.operation === 'pagestate') return { ok: true, url: location.href, title: cut(document.title, 200),
+                readyState: document.readyState, viewport: { width: innerWidth, height: innerHeight, scrollX, scrollY } };
             if (args.operation === 'wait') {
                 const nodes = document.querySelectorAll(args.selector);
                 if (nodes.length > 1) throw new Error('Wait selector is ambiguous; use a unique selector.');
@@ -105,6 +107,14 @@ public static class DesktopPreviewScripts
                 e.focus({ preventScroll: true });
                 if (document.activeElement !== e) throw new Error('The element did not take keyboard focus; it may not be focusable. Send the keys without a selector to target the page.');
                 return { ok: true, url: location.href, keyboardFocus: focusedSelector() };
+            }
+            if (args.operation === 'bounds') {
+                e.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+                const b = e.getBoundingClientRect();
+                const x = Math.max(0, b.left), y = Math.max(0, b.top);
+                const width = Math.min(b.right, innerWidth) - x, height = Math.min(b.bottom, innerHeight) - y;
+                if (width < 1 || height < 1) throw new Error('That element has no visible area on screen to capture.');
+                return { ok: true, url: location.href, readyState: document.readyState, x, y, width, height };
             }
             if (args.operation === 'click' || args.operation === 'hover') {
                 e.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });

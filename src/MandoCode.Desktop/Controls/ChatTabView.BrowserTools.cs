@@ -20,9 +20,20 @@ public sealed partial class ChatTabView
     private bool _previewCacheBypassed;
     private TaskCompletionSource<string?>? _previewNavigation;
 
-    private static bool IsProjectPreviewUrl(string? url) =>
-        Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == "https" &&
-        uri.Host.Equals(PreviewBrowserHost, StringComparison.OrdinalIgnoreCase) && uri.IsDefaultPort;
+    /// <summary>
+    /// The one origin this preview was opened on — the project virtual host, or a loopback
+    /// development server. Every script call and every navigation is checked against it, so
+    /// widening the preview to dev servers never widens it to the network.
+    /// </summary>
+    private string? _previewOrigin;
+
+    internal static string? OriginOf(string? url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "https" or "http"
+            ? uri.GetLeftPart(UriPartial.Authority) : null;
+
+    private bool IsAllowedPreviewUrl(string? url) =>
+        _previewOrigin != null && OriginOf(url) is { } origin &&
+        string.Equals(origin, _previewOrigin, StringComparison.OrdinalIgnoreCase);
 
     private async Task<string> DispatchPreviewRequestAsync(DesktopPreviewRequest request, CancellationToken cancellationToken)
     {
@@ -66,7 +77,8 @@ public sealed partial class ChatTabView
             if (request.Operation == "open")
             {
                 if (_previewDirty) return DesktopPreviewTools.Failure("The preview has unsaved user edits. Save or discard them before opening another preview.");
-                await OpenFilePreviewAsync(ExplorerItem.ForFile(request.FullPath!, request.ProjectRoot), token);
+                if (request.Url != null) await OpenUrlPreviewAsync(request.Url, token);
+                else await OpenFilePreviewAsync(ExplorerItem.ForFile(request.FullPath!, request.ProjectRoot), token);
             }
             CheckProject();
             var core = PreviewBrowser.CoreWebView2;
@@ -77,7 +89,7 @@ public sealed partial class ChatTabView
                 await NavigatePreviewConfirmedAsync(core, () => ReloadPreviewFreshAsync(core), token);
             await WaitForPreviewNavigationAsync(token);
             CheckProject();
-            if (!IsProjectPreviewUrl(core.Source)) return DesktopPreviewTools.Failure("The active document is outside the project preview.");
+            if (!IsAllowedPreviewUrl(core.Source)) return DesktopPreviewTools.Failure("The active document is outside the project preview.");
 
             if (request.Operation == "wait")
             {
@@ -100,7 +112,7 @@ public sealed partial class ChatTabView
                 var target = await ExecutePreviewScriptAsync(core, request, token);
                 if (target["ok"]?.GetValue<bool>() != true) return AddPreviewDiagnostics(target);
                 CheckProject();
-                if (version != _previewDocumentVersion || !IsProjectPreviewUrl(core.Source))
+                if (version != _previewDocumentVersion || !IsAllowedPreviewUrl(core.Source))
                     return DesktopPreviewTools.Failure("The page navigated before the action. Inspect its new state.");
                 var x = target["x"]!.GetValue<double>();
                 var y = target["y"]!.GetValue<double>();
@@ -156,6 +168,40 @@ public sealed partial class ChatTabView
             }
 
             if (request.Operation == "key") return await ExecutePreviewKeyAsync(core, request, CheckProject, token);
+
+            if (request.Operation == "screenshot")
+            {
+                object parameters = new { format = "png" };
+                var state = await ExecutePreviewScriptAsync(core, request with { Operation = "pagestate" }, token);
+                if (!string.IsNullOrWhiteSpace(request.Selector))
+                {
+                    var bounds = await ExecutePreviewScriptAsync(core, request with { Operation = "bounds" }, token);
+                    if (bounds["ok"]?.GetValue<bool>() != true) return AddPreviewDiagnostics(bounds);
+                    parameters = new
+                    {
+                        format = "png",
+                        clip = new
+                        {
+                            x = bounds["x"]!.GetValue<double>(),
+                            y = bounds["y"]!.GetValue<double>(),
+                            width = bounds["width"]!.GetValue<double>(),
+                            height = bounds["height"]!.GetValue<double>(),
+                            scale = 1,
+                        },
+                    };
+                    state["captured"] = request.Selector;
+                }
+                CheckProject();
+                var captured = await core.CallDevToolsProtocolMethodAsync("Page.captureScreenshot", JsonSerializer.Serialize(parameters));
+                var data = (JsonNode.Parse(captured) as JsonObject)?["data"]?.GetValue<string>();
+                if (string.IsNullOrEmpty(data))
+                    return DesktopPreviewTools.Failure("The browser did not return a screenshot. The preview may be hidden or still loading.");
+                // Only the visible viewport is captured, so an enormous page cannot produce an
+                // enormous image, and what the model sees is what a person would see in the pane.
+                state["image"] = data;
+                state["imageScope"] = "The visible preview viewport at the moment of capture.";
+                return AddPreviewDiagnostics(state);
+            }
 
             var operation = request.Operation is "open" or "refresh" ? request with { Operation = "inspect" } : request;
             return AddPreviewDiagnostics(await ExecutePreviewScriptAsync(core, operation, token));
@@ -248,10 +294,10 @@ public sealed partial class ChatTabView
     {
         token.ThrowIfCancellationRequested();
         if (!_previewOpen || !_browserPreview || _previewMappedRoot != request.ProjectRoot ||
-            _controller.ProjectRootPath != request.ProjectRoot || !IsProjectPreviewUrl(core.Source))
+            _controller.ProjectRootPath != request.ProjectRoot || !IsAllowedPreviewUrl(core.Source))
             throw new InvalidOperationException("The preview changed. Open and inspect the current project page first.");
         var version = _previewDocumentVersion;
-        var json = await core.ExecuteScriptAsync(DesktopPreviewScripts.Build(request));
+        var json = await core.ExecuteScriptAsync(DesktopPreviewScripts.Build(request with { Origin = _previewOrigin }));
         token.ThrowIfCancellationRequested();
         if (_controller.ProjectRootPath != request.ProjectRoot || _previewMappedRoot != request.ProjectRoot || !_previewOpen || !_browserPreview)
             throw new InvalidOperationException("The project or preview changed during the operation. Inspect before retrying; an action may have occurred.");
@@ -280,7 +326,7 @@ public sealed partial class ChatTabView
     {
         core.NavigationStarting += (_, args) =>
         {
-            if (!IsProjectPreviewUrl(args.Uri))
+            if (!IsAllowedPreviewUrl(args.Uri))
             {
                 args.Cancel = true;
                 NotePreviewDiagnostic("blocked-navigation", args.Uri);
@@ -326,7 +372,7 @@ public sealed partial class ChatTabView
             var receiver = core.GetDevToolsProtocolEventReceiver(eventName);
             receiver.DevToolsProtocolEventReceived += (_, args) =>
             {
-                if (!IsProjectPreviewUrl(core.Source)) return;
+                if (!IsAllowedPreviewUrl(core.Source)) return;
                 if (eventName == "Runtime.consoleAPICalled")
                 {
                     using var message = JsonDocument.Parse(args.ParameterObjectAsJson);

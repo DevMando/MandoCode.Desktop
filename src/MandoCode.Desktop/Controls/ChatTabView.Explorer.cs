@@ -547,6 +547,7 @@ public sealed partial class ChatTabView
                 root,
                 Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Allow);
             _previewMappedRoot = root;
+            _previewOrigin = $"https://{PreviewBrowserHost}";
 
             var relativePath = Path.GetRelativePath(root, item.FullPath).Replace('\\', '/');
             var encodedPath = string.Join('/', relativePath.Split('/').Select(Uri.EscapeDataString));
@@ -563,6 +564,68 @@ public sealed partial class ChatTabView
         catch (Exception ex)
         {
             ShowPreviewMessage($"Couldn't open this browser preview: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Shows a development server already running on loopback. Unlike a file preview this has no
+    /// backing path, so the pane is read-only for it: there is nothing on disk to edit or save.
+    /// </summary>
+    private async Task OpenUrlPreviewAsync(string url, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_previewDirty && !await ConfirmDiscardPreviewChangesAsync()) return;
+        ResetPreviewEditing();
+
+        var root = _controller.ProjectRootPath;
+        _previewPath = null;
+        _previewTitle = url;
+        UpdatePreviewTitle();
+        ToolTipService.SetToolTip(PreviewTitleText, url);
+        TogglePreview(true);
+        PreviewText.Visibility = Visibility.Collapsed;
+        PreviewImageScroll.Visibility = Visibility.Collapsed;
+        PreviewMessage.Visibility = Visibility.Collapsed;
+        PreviewBrowser.Visibility = Visibility.Collapsed;
+        PreviewReloadButton.Visibility = Visibility.Collapsed;
+        _browserPreview = false;
+        PreviewEditButton.IsEnabled = false;
+        PreviewSaveButton.IsEnabled = false;
+
+        try
+        {
+            await PreviewBrowser.EnsureCoreWebView2Async();
+            cancellationToken.ThrowIfCancellationRequested();
+            var core = PreviewBrowser.CoreWebView2;
+            if (core == null)
+            {
+                ShowPreviewMessage("The browser preview could not be initialized.");
+                return;
+            }
+            if (!_previewBrowserReady)
+            {
+                _previewBrowserReady = true;
+                core.Settings.AreDevToolsEnabled = true;
+                await InitializePreviewAutomationAsync(core);
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_shutDown) return;
+            if (root != _controller.ProjectRootPath) throw new InvalidOperationException("The project changed while opening the preview.");
+
+            _previewMappedRoot = root;
+            _previewOrigin = OriginOf(url);
+            _browserPreview = true;
+            PreviewBrowser.Visibility = Visibility.Visible;
+            PreviewReloadButton.Visibility = Visibility.Visible;
+            await NavigatePreviewConfirmedAsync(core, () =>
+            {
+                core.Navigate(url);
+                return Task.CompletedTask;
+            }, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            ShowPreviewMessage($"Couldn't open that development server: {ex.Message}. Is it running?");
         }
     }
 

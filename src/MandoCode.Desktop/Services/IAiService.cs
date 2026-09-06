@@ -25,6 +25,16 @@ namespace MandoCode.Desktop.Services;
 public interface IAiService
 {
     ModelVisionSupport VisionSupport => ModelVisionSupport.Unknown;
+
+    /// <summary>
+    /// Hands a host-captured image to the model. Default-refuses so any implementation that has
+    /// not wired image delivery cannot appear to accept one and silently drop it.
+    /// </summary>
+    bool TryAttachImage(ReadOnlyMemory<byte> bytes, string mediaType, string caption, out string error)
+    {
+        error = "This agent cannot deliver images to the model.";
+        return false;
+    }
     event Action<FunctionCall>? OnFunctionInvoked;
     event Action<FunctionExecutionResult>? OnFunctionCompleted;
 

@@ -19,6 +19,8 @@ public sealed class AiServiceAdapter : IAiService
 
     public AiServiceAdapter(AIService ai) => _ai = ai;
     public ModelVisionSupport VisionSupport => _ai.VisionSupport;
+    public bool TryAttachImage(ReadOnlyMemory<byte> bytes, string mediaType, string caption, out string error) =>
+        _ai.TryAttachImage(bytes, mediaType, caption, out error);
 
     public event Action<FunctionCall>? OnFunctionInvoked
     {
