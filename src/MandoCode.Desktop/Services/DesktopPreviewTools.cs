@@ -178,6 +178,17 @@ public sealed class DesktopPreviewTools
         try { bytes = Convert.FromBase64String(encoded); }
         catch (FormatException) { return Failure("The preview returned an unreadable screenshot."); }
 
+        // A capture taken before the page painted comes back nearly uniform: valid PNG bytes that
+        // show nothing. It cannot be told apart from a genuinely blank page, so it is flagged
+        // rather than refused, and the model is told not to describe what it cannot see.
+        if (LooksBlank(bytes.Length, state))
+        {
+            state["possiblyBlank"] = true;
+            state["blankWarning"] = "This capture is nearly uniform. It may be a genuinely blank page, or the " +
+                "preview may not have painted yet. Say the image appears blank rather than describing detail; " +
+                "refresh or wait, then capture again if content was expected.";
+        }
+
         var caption = string.IsNullOrWhiteSpace(note)
             ? "Screenshot of the project preview."
             : "Screenshot of the project preview: " + note.Trim();
@@ -199,6 +210,26 @@ public sealed class DesktopPreviewTools
     {
         if (!TryResolveLocalServerUrl(url, out var resolved, out var error)) return Task.FromResult(Failure(error));
         return RunAsync(new("open", _projectRoot.ProjectRoot, Url: resolved), cancellationToken);
+    }
+
+    /// <summary>
+    /// A rendered page carries far more compressed detail per pixel than an unpainted one. Measured
+    /// against a real preview, a painted page runs about 0.05 bytes per pixel and a blank one about
+    /// 0.005, so this sits an order of magnitude below the painted case and only trips the flat ones.
+    /// </summary>
+    internal static bool LooksBlank(int byteCount, JsonObject state)
+    {
+        var viewport = state["viewport"];
+        var area = Number(viewport?["width"]) * Number(viewport?["height"]);
+        return area >= 10_000 && byteCount / area < 0.01;
+
+        // A number parsed from the page arrives boxed differently than one built in code, and
+        // asking for the wrong one throws rather than converting.
+        static double Number(JsonNode? node) =>
+            node is not JsonValue value ? 0
+            : value.TryGetValue<double>(out var d) ? d
+            : value.TryGetValue<int>(out var i) ? i
+            : 0;
     }
 
     /// <summary>

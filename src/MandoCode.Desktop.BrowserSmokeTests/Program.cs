@@ -24,7 +24,7 @@ internal static class Program
                 await CheckBrowserAsync(browser.CoreWebView2).WaitAsync(TimeSpan.FromSeconds(45));
                 exitCode = 0;
                 Console.WriteLine("PASS: real WebView2 DOM, pointer, keyboard, repeated clicks, focused observations, " +
-                    "forms, scrolling, navigation, fresh assets on reload, screenshots, origin scoping, diagnostics, and argument escaping.");
+                    "forms, scrolling, navigation, fresh assets on reload, screenshots under changing window visibility, origin scoping, diagnostics, and argument escaping.");
             }
             catch (Exception ex) { Console.Error.WriteLine(ex); }
             finally { browser.Dispose(); form.Close(); }
@@ -54,6 +54,13 @@ internal static class Program
         }
         Task<JsonObject> Run(string operation, string? selector = null, string? value = null, int offset = 0, int deltaY = 0, string? observe = null) =>
             RunAs(previewOrigin, operation, selector, value, offset, deltaY, observe);
+        async Task<byte[]> CaptureFrom(bool fromSurface)
+        {
+            var captured = await core.CallDevToolsProtocolMethodAsync("Page.captureScreenshot",
+                JsonSerializer.Serialize(new { format = "png", fromSurface, captureBeyondViewport = false }));
+            var data = (JsonNode.Parse(captured) as JsonObject)?["data"]?.GetValue<string>();
+            return string.IsNullOrEmpty(data) ? [] : Convert.FromBase64String(data);
+        }
         async Task<byte[]> Capture(JsonObject? clip)
         {
             object parameters = clip == null ? new { format = "png" } : new
@@ -176,6 +183,40 @@ internal static class Program
         Assert(clipped.Length < full.Length, $"Clipping captured no less than the full page ({clipped.Length} vs {full.Length})");
         Assert(!(await Run("bounds", "#hidden"))["ok"]!.GetValue<bool>(), "A hidden element was accepted for capture");
 
+        // Capture depends on the window having a compositor surface. A minimized window has none,
+        // and the browser never answers at all, so the production path bounds this rather than
+        // letting one call eat the whole operation deadline.
+        var host = Application.OpenForms[0]!;
+        async Task<(string Outcome, int Bytes)> TimedCapture()
+        {
+            try
+            {
+                var bytes = await CaptureFrom(true).WaitAsync(TimeSpan.FromSeconds(4));
+                return ("captured", bytes.Length);
+            }
+            catch (TimeoutException) { return ("hung", 0); }
+        }
+        host.Opacity = 1;
+        await Task.Delay(500);
+        var shown = await TimedCapture();
+        Assert(shown.Outcome == "captured" && shown.Bytes > 20000,
+            $"A visible preview did not capture a painted page ({shown.Outcome}, {shown.Bytes} bytes)");
+
+        host.WindowState = FormWindowState.Minimized;
+        await Task.Delay(500);
+        var minimized = await TimedCapture();
+        Assert(minimized.Outcome == "hung",
+            $"Minimized capture no longer hangs ({minimized.Outcome}, {minimized.Bytes} bytes) — the production " +
+            "deadline and its guidance message may now be unnecessary; re-check before removing them.");
+        host.WindowState = FormWindowState.Normal;
+        host.Opacity = 0;
+        await Task.Delay(500);
+
+        // The blank heuristic has to separate these two in the real thing, not just in theory.
+        var painted = await CaptureFrom(true);
+        Assert(!DesktopPreviewTools.LooksBlank(painted.Length, Viewport(900, 700)), "A painted page was flagged blank");
+        Assert(DesktopPreviewTools.LooksBlank(3160, Viewport(900, 700)), "A blank-sized capture was not flagged");
+
         // An edited script must never come back from cache; a stale asset is what pushes people
         // into adding ?v=2 cache-busting query strings to their own project files.
         var assetRoot = Path.Combine(root, "cache");
@@ -208,6 +249,9 @@ internal static class Program
         Assert(!(await Run("inspect"))["ok"]!.GetValue<bool>(), "Non-project origin accepted");
         GC.KeepAlive(receiver);
     }
+
+    private static JsonObject Viewport(int width, int height) =>
+        new() { ["viewport"] = new JsonObject { ["width"] = width, ["height"] = height } };
 
     private static async Task ReloadAsync(CoreWebView2 core, bool ignoreCache)
     {

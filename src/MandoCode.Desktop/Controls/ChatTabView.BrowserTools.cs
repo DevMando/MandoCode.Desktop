@@ -192,7 +192,21 @@ public sealed partial class ChatTabView
                     state["captured"] = request.Selector;
                 }
                 CheckProject();
-                var captured = await core.CallDevToolsProtocolMethodAsync("Page.captureScreenshot", JsonSerializer.Serialize(parameters));
+                string captured;
+                try
+                {
+                    // A minimized window has no compositor surface to read, and the browser never
+                    // answers rather than failing. Bound it so that costs seconds and a clear
+                    // explanation instead of the whole operation deadline and a vague timeout.
+                    captured = await CaptureWithDeadlineAsync(core, parameters, token);
+                }
+                catch (TimeoutException)
+                {
+                    return DesktopPreviewTools.Failure(
+                        "The preview could not be captured, which usually means the app window is minimized. " +
+                        "Ask the user to restore the window, or continue with inspect and observe and say that " +
+                        "visual layout could not be checked.");
+                }
                 var data = (JsonNode.Parse(captured) as JsonObject)?["data"]?.GetValue<string>();
                 if (string.IsNullOrEmpty(data))
                     return DesktopPreviewTools.Failure("The browser did not return a screenshot. The preview may be hidden or still loading.");
@@ -253,6 +267,14 @@ public sealed partial class ChatTabView
             state["pressesCompleted"] = completed;
         }
         return AddPreviewDiagnostics(state);
+    }
+
+    /// <summary>Screenshot capture, bounded. See the call site for why the browser can never answer.</summary>
+    private static async Task<string> CaptureWithDeadlineAsync(CoreWebView2 core, object parameters, CancellationToken token)
+    {
+        var operation = core.CallDevToolsProtocolMethodAsync("Page.captureScreenshot", JsonSerializer.Serialize(parameters));
+        async Task<string> Awaited() => await operation;
+        return await Awaited().WaitAsync(TimeSpan.FromSeconds(6), token);
     }
 
     private static async Task DispatchPreviewKeyAsync(CoreWebView2 core, BrowserKey key, int modifiers, bool down) =>

@@ -67,6 +67,26 @@ public sealed class DesktopPreviewImageAndServerTests : IDisposable
         Assert.Contains("over the", result);
     }
 
+    [Fact]
+    public async Task NearBlankCapturesAreFlaggedRatherThanDescribed()
+    {
+        var tools = Tools();
+        tools.ImageSink = new Sink();
+        // 3160 bytes over a 900x700 viewport is what an unpainted preview actually returns.
+        tools.ExecuteAsync = (_, _) => Task.FromResult(
+            "{\"ok\":true,\"readyState\":\"complete\",\"viewport\":{\"width\":900,\"height\":700},\"image\":\"" +
+            Convert.ToBase64String(new byte[3160]) + "\"}");
+        var blank = await tools.ScreenshotDesktopPreview();
+        Assert.True(Ok(blank));                       // a blank page is an observation, not an error
+        Assert.Contains("\"possiblyBlank\":true", blank);
+        Assert.Contains("appears blank", blank);
+
+        tools.ExecuteAsync = (_, _) => Task.FromResult(
+            "{\"ok\":true,\"readyState\":\"complete\",\"viewport\":{\"width\":900,\"height\":700},\"image\":\"" +
+            Convert.ToBase64String(new byte[32000]) + "\"}");
+        Assert.DoesNotContain("possiblyBlank", await tools.ScreenshotDesktopPreview());
+    }
+
     [Theory]
     [InlineData("http://localhost:5173/")]
     [InlineData("http://127.0.0.1:3000/about")]
