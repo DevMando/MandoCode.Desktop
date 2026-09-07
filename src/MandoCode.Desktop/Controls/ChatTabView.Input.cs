@@ -40,11 +40,12 @@ public sealed partial class ChatTabView
         HideSuggestions();
         UpdateHeader();
 
+        var browserContext = CaptureBrowserRequestContext();
         _ = Task.Run(async () =>
         {
             try
             {
-                await _controller.SubmitAsync(text);
+                await _controller.SubmitAsync(text, browserContext);
             }
             catch (Exception ex)
             {

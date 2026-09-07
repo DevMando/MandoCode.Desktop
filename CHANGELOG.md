@@ -16,6 +16,15 @@ for every approved plan. Desktop's version follows the engine generation, so it 
 0.15.0.
 
 ### Added
+- **Embedded form DOM support.** Browser tools discover cross-origin and nested frames
+  and can inspect, fill, select, scroll, wait, and read back fields using explicit tab and
+  frame IDs. Navigated or removed frame targets fail without falling back to the parent.
+  Inspection distinguishes uninspected frame content from missing form fields.
+- **Shared browser tabs.** The browser button beside Snapshot opens the existing pane
+  with tabs, a new-tab button, an address bar, and back/forward/reload controls. User
+  websites and agent previews coexist. Agent actions require explicit tab IDs; references
+  to “this page” retain the tab viewed when the message was sent, even after switching tabs.
+  Closing a targeted tab reports failure rather than redirecting the agent to another tab.
 - **Docked file previews from the Explorer.** Selecting a file opens a resizable, read-only
   preview between the chat and file tree. Code, text, configuration, documentation, and common
   image formats open in Desktop; unsupported or large files offer the existing external-open
@@ -103,7 +112,19 @@ for every approved plan. Desktop's version follows the engine generation, so it 
   plan runner, manual conversation compaction, automatic planning based on task shape, and the
   large-root context guard verified through Desktop against a real `@directory` request.
 
+- **Model status is now one line instead of several cards.** The active model, its image
+  capability, and whether it runs in the cloud appear together as `model · active · text-only ·
+  cloud`, replacing the separate capability notice and status pill. The cloud subscription caveat
+  appears once per session rather than on every model switch.
+- **A blocked click now names what is covering the target.** Instead of reporting only that an
+  element is covered, the result identifies the element sitting on top of it — usually an overlay,
+  a sticky header, or the suggestion list a field opens when it is filled.
+
 ### Fixed
+- **A restored tab no longer announces two different models at startup.** Restoring a session
+  announced the default model, then immediately switched to the tab's saved model and announced
+  that one as well. The first notice was obsolete the moment it appeared, and could advertise
+  image support on a model that was never used.
 - **The token total now reflects what the provider actually processed.** Desktop no longer adds
   rough character-based estimates for reads, searches, web results, writes, or attachments on top
   of the provider's prompt and completion counts. File reads still show their line counts.
@@ -115,10 +136,15 @@ for every approved plan. Desktop's version follows the engine generation, so it 
   not conversation messages, so stale actions are not replayed into a restored session.
 
 ### Test coverage
-239 Desktop tests pass. New host-level coverage exercises deferred plan execution, instruction
+295 Desktop tests pass. New host-level coverage exercises deferred plan execution, instruction
 editing, dependent-step revision, checkpoint cards, Resume/Discard actions, semantic step outcomes,
-and truthful completion status. The same workflows were also exercised with real models, including
+and truthful completion status. Browser coverage adds explicit tab targeting, frame identity, and
+plan-card review content. The same workflows were also exercised with real models, including
 closing the process between steps and resuming from the saved cursor.
+
+An opt-in smoke test drives a real WebView2 browser end to end: DOM reads, pointer and keyboard
+input, cross-origin and nested frame discovery, filling and reading back embedded form fields
+without submitting, background-tab isolation, and rejection of stale or removed frame targets.
 
 ## [0.14.1] — 2026-07-28
 

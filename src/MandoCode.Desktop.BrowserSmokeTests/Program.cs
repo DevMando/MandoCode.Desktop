@@ -22,9 +22,10 @@ internal static class Program
             {
                 await browser.EnsureCoreWebView2Async(await CoreWebView2Environment.CreateAsync(userDataFolder: profile));
                 await CheckBrowserAsync(browser.CoreWebView2).WaitAsync(TimeSpan.FromSeconds(45));
+                await CheckTwoTabsAsync(form, browser).WaitAsync(TimeSpan.FromSeconds(20));
                 exitCode = 0;
                 Console.WriteLine("PASS: real WebView2 DOM, pointer, keyboard, repeated clicks, focused observations, " +
-                    "forms, scrolling, navigation, fresh assets on reload, screenshots under changing window visibility, origin scoping, diagnostics, and argument escaping.");
+                    "forms, scrolling, navigation, fresh assets on reload, screenshots under changing window visibility, origin scoping, diagnostics, argument escaping, and independent background-tab DOM operations.");
             }
             catch (Exception ex) { Console.Error.WriteLine(ex); }
             finally { browser.Dispose(); form.Close(); }
@@ -33,6 +34,93 @@ internal static class Program
         // Browser shutdown can briefly retain profile files; the unique profile never affects the app.
         try { Directory.Delete(profile, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         return exitCode;
+    }
+
+    private static async Task CheckTwoTabsAsync(Form form, WebView2 first)
+    {
+        using var second = new WebView2 { Dock = DockStyle.Fill };
+        form.Controls.Add(second);
+        await second.EnsureCoreWebView2Async(first.CoreWebView2.Environment);
+        var root = Path.Combine(AppContext.BaseDirectory, "fixtures");
+        const string origin = "https://preview.mandocode.local";
+        second.CoreWebView2.SetVirtualHostNameToFolderMapping("preview.mandocode.local", root, CoreWebView2HostResourceAccessKind.DenyCors);
+        await NavigateAsync(first.CoreWebView2, origin + "/index.html");
+        await NavigateAsync(second.CoreWebView2, origin + "/index.html");
+        // Match Desktop: changing visible controls leaves the captured WebView target intact.
+        var capturedTarget = first.CoreWebView2;
+        first.Visible = false;
+        second.Visible = true;
+        second.BringToFront();
+        var result = JsonNode.Parse(await capturedTarget.ExecuteScriptAsync(DesktopPreviewScripts.Build(
+            new("fill", root, Selector: "#name", Value: "only the captured tab", Origin: origin))))!;
+        Assert(result["ok"]!.GetValue<bool>(), "Background target could not perform its DOM operation");
+        Assert((await capturedTarget.ExecuteScriptAsync("document.querySelector('#name').value")).Contains("only the captured tab"), "Captured target did not change");
+        Assert(await second.CoreWebView2.ExecuteScriptAsync("document.querySelector('#name').value") == "\"\"", "Selected tab was changed by another tab's action");
+        await CheckFramesAsync(first.CoreWebView2, second.CoreWebView2, root);
+        second.Dispose();
+        first.Visible = true;
+    }
+
+    private static async Task CheckFramesAsync(CoreWebView2 target, CoreWebView2 selected, string root)
+    {
+        var frames = new BrowserFrames(target);
+        var otherFrames = new BrowserFrames(selected);
+        foreach (var core in new[] { target, selected })
+            core.SetVirtualHostNameToFolderMapping("forms.mandocode.local", root, CoreWebView2HostResourceAccessKind.DenyCors);
+        const string origin = "https://preview.mandocode.local";
+        await NavigateAsync(target, origin + "/frame-host.html");
+        await NavigateAsync(selected, origin + "/frame-host.html");
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            if (frames.Describe().Count == 2 && otherFrames.Describe().Count == 2 &&
+                frames.Describe().All(n => n?["state"]?.GetValue<string>() == "ready") &&
+                otherFrames.Describe().All(n => n?["state"]?.GetValue<string>() == "ready")) break;
+            await Task.Delay(50);
+        }
+        var parent = JsonNode.Parse(await target.ExecuteScriptAsync(DesktopPreviewScripts.Build(new("inspect", root, Origin: origin))))!;
+        Assert(parent["uninspectedFrames"]!.GetValue<int>() == 1, "Parent did not disclose uninspected frames");
+        var frameElement = JsonNode.Parse(await target.ExecuteScriptAsync(DesktopPreviewScripts.Build(new("inspect", root, Selector: "#contact", Origin: origin))))!;
+        Assert(frameElement["ok"]!.GetValue<bool>() == false, "Iframe fallback text was misrepresented as frame document inspection");
+        string ContactId(BrowserFrames registry) => registry.Describe().First(n => n?["url"]?.GetValue<string>()?.EndsWith("/frame-contact.html") == true)!["frameId"]!.GetValue<string>();
+        var frameId = ContactId(frames);
+        var inspect = await frames.ExecuteAsync(new("inspect", root, FrameId: frameId), CancellationToken.None);
+        Assert(inspect["controls"]!.AsArray().Any(n => n?["selector"]?.GetValue<string>() == "#first"), "Cross-origin frame fields unavailable");
+        foreach (var field in new[] { ("#first", "Alex"), ("#last", "Example") })
+        {
+            var filled = await frames.ExecuteAsync(new("fill", root, Selector: field.Item1, Value: field.Item2, FrameId: frameId), CancellationToken.None);
+            Assert(filled["fieldVerification"]?["matches"]?.GetValue<bool>() == true, "Field did not retain placeholder value");
+            var observed = await frames.ExecuteAsync(new("observe", root, Observe: field.Item1, FrameId: frameId), CancellationToken.None);
+            Assert(observed["element"]?["value"]?.GetValue<string>() == field.Item2, "Read-back did not confirm value");
+        }
+        var submissions = await frames.ExecuteAsync(new("observe", root, Observe: "#submissions", FrameId: frameId), CancellationToken.None);
+        Assert(submissions["text"]?.GetValue<string>() == "0", "Filling submitted the form");
+        var untouched = await otherFrames.ExecuteAsync(new("observe", root, Observe: "#first", FrameId: ContactId(otherFrames)), CancellationToken.None);
+        Assert(untouched["element"]?["value"]?.GetValue<string>() == "", "Selected tab was modified instead of the target");
+        Assert(frames.Describe().Any(n => n?["parentFrameId"]?.GetValue<string>() == frameId), "Nested frame was not discovered");
+        try
+        {
+            await otherFrames.ExecuteAsync(new("fill", root, Selector: "#first", Value: "wrong", FrameId: frameId), CancellationToken.None);
+            throw new Exception("A frame ID from another tab was accepted");
+        }
+        catch (InvalidOperationException) { }
+        await target.ExecuteScriptAsync("document.querySelector('#contact').src='https://forms.mandocode.local/frame-contact.html?new=1'");
+        for (var attempt = 0; attempt < 100 && frames.Describe().Any(n => n?["frameId"]?.GetValue<string>() == frameId); attempt++) await Task.Delay(20);
+        try
+        {
+            await frames.ExecuteAsync(new("fill", root, Selector: "#first", Value: "wrong", FrameId: frameId), CancellationToken.None);
+            throw new Exception("Navigated frame accepted a stale action");
+        }
+        catch (InvalidOperationException) { }
+        for (var attempt = 0; attempt < 100 && !frames.Describe().Any(n => n?["state"]?.GetValue<string>() == "ready" && n?["url"]?.GetValue<string>()?.Contains("?new=1") == true); attempt++) await Task.Delay(20);
+        var replacementId = frames.Describe().First(n => n?["url"]?.GetValue<string>()?.Contains("?new=1") == true)!["frameId"]!.GetValue<string>();
+        await target.ExecuteScriptAsync("document.querySelector('#contact').remove()");
+        try
+        {
+            await frames.ExecuteAsync(new("fill", root, Selector: "#first", Value: "wrong", FrameId: replacementId), CancellationToken.None);
+            throw new Exception("Removed frame accepted a stale action");
+        }
+        catch (InvalidOperationException) { }
+        Console.WriteLine("PASS: cross-origin and nested frame discovery, placeholder fill/read-back, no submission, background-tab isolation, and removed-frame rejection.");
     }
 
     private static async Task CheckBrowserAsync(CoreWebView2 core)
@@ -107,7 +195,9 @@ internal static class Program
         Assert(state["nextOffset"] != null, "Control pagination missing");
         Assert((await Run("inspect", offset: 40))["controls"]!.AsArray().Count > 0, "Control pagination failed");
         Assert(!(await Run("click", ".duplicate"))["ok"]!.GetValue<bool>(), "Ambiguous click accepted");
-        Assert(!(await Run("click", "#covered"))["ok"]!.GetValue<bool>(), "Covered click accepted");
+        var covered = await Run("click", "#covered");
+        Assert(!covered["ok"]!.GetValue<bool>(), "Covered click accepted");
+        Assert(covered["error"]!.GetValue<string>().Contains("#cover"), "Covered click did not name what covers the target");
         Assert(!(await Run("click", "#disabled"))["ok"]!.GetValue<bool>(), "Disabled click accepted");
         Assert(!(await Run("click", "#hidden"))["ok"]!.GetValue<bool>(), "Hidden click accepted");
 
@@ -183,15 +273,16 @@ internal static class Program
         Assert(clipped.Length < full.Length, $"Clipping captured no less than the full page ({clipped.Length} vs {full.Length})");
         Assert(!(await Run("bounds", "#hidden"))["ok"]!.GetValue<bool>(), "A hidden element was accepted for capture");
 
-        // Capture depends on the window having a compositor surface. A minimized window has none,
-        // and the browser never answers at all, so the production path bounds this rather than
-        // letting one call eat the whole operation deadline.
+        // Capture while minimized varies with runtime/compositor state. The contract is a valid
+        // image or a bounded timeout, not that a particular runtime must hang.
         var host = Application.OpenForms[0]!;
         async Task<(string Outcome, int Bytes)> TimedCapture()
         {
             try
             {
                 var bytes = await CaptureFrom(true).WaitAsync(TimeSpan.FromSeconds(4));
+                Assert(bytes.Length >= 8 && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4e && bytes[3] == 0x47,
+                    "Capture returned invalid image bytes");
                 return ("captured", bytes.Length);
             }
             catch (TimeoutException) { return ("hung", 0); }
@@ -205,9 +296,8 @@ internal static class Program
         host.WindowState = FormWindowState.Minimized;
         await Task.Delay(500);
         var minimized = await TimedCapture();
-        Assert(minimized.Outcome == "hung",
-            $"Minimized capture no longer hangs ({minimized.Outcome}, {minimized.Bytes} bytes) — the production " +
-            "deadline and its guidance message may now be unnecessary; re-check before removing them.");
+        Assert(minimized.Outcome == "hung" || minimized.Outcome == "captured" && minimized.Bytes >= 8,
+            "Minimized capture neither returned a valid image nor reached the bounded timeout.");
         host.WindowState = FormWindowState.Normal;
         host.Opacity = 0;
         await Task.Delay(500);

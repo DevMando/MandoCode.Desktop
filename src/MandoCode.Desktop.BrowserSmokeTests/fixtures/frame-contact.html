@@ -1,0 +1,7 @@
+<!doctype html><html><head><title>Contact details</title></head><body>
+<form id="form"><label>First name <input id="first" name="first"></label>
+<label>Last name <input id="last" name="last"></label><button type="submit">Send</button></form>
+<p id="submissions">0</p>
+<iframe title="Nested frame" src="https://preview.mandocode.local/frame-nested.html"></iframe>
+<script>let submissions=0;document.querySelector('form').onsubmit=e=>{e.preventDefault();document.querySelector('#submissions').textContent=String(++submissions)};</script>
+</body></html>

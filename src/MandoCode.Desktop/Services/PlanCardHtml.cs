@@ -17,7 +17,7 @@ public static class PlanCardHtml
         foreach (var step in plan.Steps)
         {
             sb.Append($"<tr><td class=\"sky\">{step.StepNumber}</td><td>{Escape(step.Description)}</td>" +
-                      $"<td class=\"dim\">{Escape(step.Instruction)}");
+                      $"<td class=\"dim\">{Escape(BrowserRequestContext.Strip(step.Instruction))}");
             if (step.AcceptanceCriteria.Count > 0)
             {
                 sb.Append("<p>Acceptance checks</p><ol>");

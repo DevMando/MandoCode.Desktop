@@ -113,8 +113,11 @@ public sealed class AgentSession
         McpGate = new McpApprovalGate(Config);
 
         Ai = new AIService(ProjectRoot, Config, Tokens, PlanHandoff, Skills, mcpManager, McpGate, spinner);
-        PreviewTools = new DesktopPreviewTools(ProjectRoot) { ImageSink = new AgentImageSink(new AiServiceAdapter(Ai)) };
+        PreviewTools = new DesktopPreviewTools(ProjectRoot) { RequireTabId = true, ImageSink = new AgentImageSink(new AiServiceAdapter(Ai)) };
         Ai.SetHostTools([
+            Microsoft.Extensions.AI.AIFunctionFactory.Create(PreviewTools.ListBrowserFrames, new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "list_browser_frames" }),
+            Microsoft.Extensions.AI.AIFunctionFactory.Create(PreviewTools.ListBrowserTabs, new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "list_browser_tabs" }),
+            Microsoft.Extensions.AI.AIFunctionFactory.Create(PreviewTools.OpenBrowserTab, new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "open_browser_tab" }),
             Microsoft.Extensions.AI.AIFunctionFactory.Create(
                 PreviewTools.OpenDesktopPreview,
                 new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "open_desktop_preview" }),
