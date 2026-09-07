@@ -10,6 +10,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3719.77" />
     <Compile Include="..\MandoCode.Desktop\Services\DesktopPreviewScripts.cs" Link="DesktopPreviewScripts.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\BrowserFrames.cs" Link="BrowserFrames.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\DesktopPreviewTools.cs" Link="DesktopPreviewTools.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\DesktopPreviewKeys.cs" Link="DesktopPreviewKeys.cs" />
     <Compile Include="..\..\MandoCode\src\MandoCode\Services\ProjectRootAccessor.cs" Link="ProjectRootAccessor.cs" />

@@ -1,5 +1,6 @@
 using MandoCode.Models;
 using MandoCode.Services;
+using MandoCode.Desktop.Services;
 
 namespace MandoCode.Desktop.ViewModels;
 
@@ -100,6 +101,14 @@ public sealed partial class ChatController
     /// </summary>
     private Task ForcePlanAsync(string goal) => ForcePlanAsync(goal, goal);
 
+    /// <summary>
+    /// Planning has no host-instruction channel of its own — <c>revisionContext</c> reframes the
+    /// entire prompt as a revision — so the proposal request carries the marked block instead, and
+    /// the planner needs it: every step that touches the page must name the captured tab.
+    /// </summary>
+    private string WithBrowserContext(string request) =>
+        BrowserRequestContext.Attach(request, _requestBrowserContext);
+
     private async Task ForcePlanAsync(string planningRequest, string originalRequest)
     {
         if (!IsConnected || ModelError)
@@ -117,7 +126,9 @@ public sealed partial class ChatController
         {
             _ai.AppendUserNote(originalRequest);
             _deferredPlans.Outcome = DeferredPlanOutcome.None;
-            var proposal = await _ai.GeneratePlanAsync(planningRequest, cancellationToken: token);
+            var proposal = await _ai.GeneratePlanAsync(WithBrowserContext(planningRequest), cancellationToken: token);
+            // originalRequest stays the user's words: it becomes plan.OriginalRequest, which
+            // BuildManifest puts into chat history for the rest of the session.
             var result = await _planHandoff.ProcessAsync(
                 proposal.Goal, proposal.Steps, token, originalRequest: originalRequest);
 
@@ -133,7 +144,8 @@ public sealed partial class ChatController
                 // command has no outer model turn waiting to receive the rejection result.
                 var response = await _streamer.StreamAsync(
                     "Proceed with my original request directly.", token,
-                    DeferredPlanCompletion.RejectionHostInstruction);
+                    string.Join("\n\n", new[] { DeferredPlanCompletion.RejectionHostInstruction, _requestBrowserContext }
+                        .Where(s => !string.IsNullOrWhiteSpace(s))));
                 if (!string.IsNullOrEmpty(response)) _lastAiResponse = response;
                 _planHandoff.ClearPendingProposal();
             }

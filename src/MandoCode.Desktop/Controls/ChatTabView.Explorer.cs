@@ -298,7 +298,6 @@ public sealed partial class ChatTabView
     private DateTime _previewLoadedWriteTimeUtc;
     private long _previewLoadedLength;
     private bool _browserPreview;
-    private bool _previewBrowserReady;
     private const string PreviewBrowserHost = "preview.mandocode.local";
 
     private static readonly HashSet<string> PreviewableTextExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -445,7 +444,7 @@ public sealed partial class ChatTabView
         PreviewText.Visibility = Visibility.Collapsed;
         PreviewImageScroll.Visibility = Visibility.Collapsed;
         PreviewMessage.Visibility = Visibility.Collapsed;
-        PreviewBrowser.Visibility = Visibility.Collapsed;
+        BrowserPanel.Visibility = Visibility.Collapsed;
         PreviewReloadButton.Visibility = Visibility.Collapsed;
         _browserPreview = false;
         PreviewEditButton.IsEnabled = false;
@@ -520,119 +519,17 @@ public sealed partial class ChatTabView
 
     private async Task ShowBrowserPreviewAsync(ExplorerItem item, CancellationToken cancellationToken = default)
     {
-        var root = _controller.ProjectRootPath;
-        try
-        {
-            await PreviewBrowser.EnsureCoreWebView2Async();
-            cancellationToken.ThrowIfCancellationRequested();
-            var core = PreviewBrowser.CoreWebView2;
-            if (core == null)
-            {
-                ShowPreviewMessage("The browser preview could not be initialized. You can still open this file externally.");
-                return;
-            }
-
-            if (!_previewBrowserReady)
-            {
-                _previewBrowserReady = true;
-                core.Settings.AreDevToolsEnabled = true;
-                await InitializePreviewAutomationAsync(core);
-            }
-
-            cancellationToken.ThrowIfCancellationRequested();
-            if (_shutDown || _previewPath != item.FullPath) return;
-            if (root != _controller.ProjectRootPath) throw new InvalidOperationException("The project changed while opening the preview.");
-            core.SetVirtualHostNameToFolderMapping(
-                PreviewBrowserHost,
-                root,
-                Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Allow);
-            _previewMappedRoot = root;
-            _previewOrigin = $"https://{PreviewBrowserHost}";
-
-            var relativePath = Path.GetRelativePath(root, item.FullPath).Replace('\\', '/');
-            var encodedPath = string.Join('/', relativePath.Split('/').Select(Uri.EscapeDataString));
-            CapturePreviewFileStamp(item.FullPath);
-            _browserPreview = true;
-            PreviewBrowser.Visibility = Visibility.Visible;
-            PreviewReloadButton.Visibility = Visibility.Visible;
-            await NavigatePreviewConfirmedAsync(core, () =>
-            {
-                core.Navigate($"https://{PreviewBrowserHost}/{encodedPath}");
-                return Task.CompletedTask;
-            }, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            ShowPreviewMessage($"Couldn't open this browser preview: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Shows a development server already running on loopback. Unlike a file preview this has no
-    /// backing path, so the pane is read-only for it: there is nothing on disk to edit or save.
-    /// </summary>
-    private async Task OpenUrlPreviewAsync(string url, CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (_previewDirty && !await ConfirmDiscardPreviewChangesAsync()) return;
-        ResetPreviewEditing();
-
-        var root = _controller.ProjectRootPath;
-        _previewPath = null;
-        _previewTitle = url;
-        UpdatePreviewTitle();
-        ToolTipService.SetToolTip(PreviewTitleText, url);
-        TogglePreview(true);
-        PreviewText.Visibility = Visibility.Collapsed;
-        PreviewImageScroll.Visibility = Visibility.Collapsed;
-        PreviewMessage.Visibility = Visibility.Collapsed;
-        PreviewBrowser.Visibility = Visibility.Collapsed;
-        PreviewReloadButton.Visibility = Visibility.Collapsed;
-        _browserPreview = false;
-        PreviewEditButton.IsEnabled = false;
-        PreviewSaveButton.IsEnabled = false;
-
-        try
-        {
-            await PreviewBrowser.EnsureCoreWebView2Async();
-            cancellationToken.ThrowIfCancellationRequested();
-            var core = PreviewBrowser.CoreWebView2;
-            if (core == null)
-            {
-                ShowPreviewMessage("The browser preview could not be initialized.");
-                return;
-            }
-            if (!_previewBrowserReady)
-            {
-                _previewBrowserReady = true;
-                core.Settings.AreDevToolsEnabled = true;
-                await InitializePreviewAutomationAsync(core);
-            }
-            cancellationToken.ThrowIfCancellationRequested();
-            if (_shutDown) return;
-            if (root != _controller.ProjectRootPath) throw new InvalidOperationException("The project changed while opening the preview.");
-
-            _previewMappedRoot = root;
-            _previewOrigin = OriginOf(url);
-            _browserPreview = true;
-            PreviewBrowser.Visibility = Visibility.Visible;
-            PreviewReloadButton.Visibility = Visibility.Visible;
-            await NavigatePreviewConfirmedAsync(core, () =>
-            {
-                core.Navigate(url);
-                return Task.CompletedTask;
-            }, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            ShowPreviewMessage($"Couldn't open that development server: {ex.Message}. Is it running?");
-        }
+        var tab = _browserTabs.FirstOrDefault(t => !t.Closed && t.ProjectRoot == _controller.ProjectRootPath &&
+            string.Equals(t.FilePath, item.FullPath, StringComparison.OrdinalIgnoreCase));
+        if (tab == null) tab = await CreateBrowserTabAsync(false, cancellationToken);
+        else SelectBrowserTab(tab);
+        await NavigateBrowserTabAsync(tab, null, item.FullPath, cancellationToken);
     }
 
     private void PreviewReload_Click(object sender, RoutedEventArgs e)
     {
         // Reloading is how anyone checks an edit, so it must never show a cached script or stylesheet.
-        if (_browserPreview && PreviewBrowser.CoreWebView2 is { } core) _ = ReloadPreviewFreshAsync(core);
+        if (_browserPreview && _selectedBrowserTab is { Closed: false } tab && tab.View.CoreWebView2 is { } core) _ = ReloadPreviewFreshAsync(tab, core);
     }
 
     private async void PreviewClose_Click(object sender, RoutedEventArgs e)
@@ -760,7 +657,7 @@ public sealed partial class ChatTabView
             CapturePreviewFileStamp(_previewPath);
             // The agent's edits often land in the linked script or stylesheet rather than this page,
             // so a plain reload would redisplay the previous assets.
-            if (PreviewBrowser.CoreWebView2 is { } core) _ = ReloadPreviewFreshAsync(core);
+            if (_selectedBrowserTab is { Closed: false } tab && tab.View.CoreWebView2 is { } core) _ = ReloadPreviewFreshAsync(tab, core);
             return;
         }
         _ = OpenFilePreviewAsync(ExplorerItem.ForFile(_previewPath, _controller.ProjectRootPath));

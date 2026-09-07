@@ -10,30 +10,13 @@ namespace MandoCode.Desktop;
 public sealed partial class ChatTabView
 {
     private readonly CancellationTokenSource _previewAutomationLifetime = new();
-    private readonly List<CoreWebView2DevToolsProtocolEventReceiver> _previewEventReceivers = [];
-    private readonly Queue<object> _previewDiagnostics = new();
-    private readonly Dictionary<string, bool> _previewDiagnosticDomains = new();
-    private string? _previewMappedRoot;
-    private int _agentBrowserRequests;
-    private long _previewDocumentVersion;
-    private ulong _previewNavigationId;
-    private bool _previewCacheBypassed;
-    private TaskCompletionSource<string?>? _previewNavigation;
-
-    /// <summary>
-    /// The one origin this preview was opened on — the project virtual host, or a loopback
-    /// development server. Every script call and every navigation is checked against it, so
-    /// widening the preview to dev servers never widens it to the network.
-    /// </summary>
-    private string? _previewOrigin;
-
     internal static string? OriginOf(string? url) =>
         Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "https" or "http"
             ? uri.GetLeftPart(UriPartial.Authority) : null;
 
-    private bool IsAllowedPreviewUrl(string? url) =>
-        _previewOrigin != null && OriginOf(url) is { } origin &&
-        string.Equals(origin, _previewOrigin, StringComparison.OrdinalIgnoreCase);
+    private bool IsAllowedPreviewUrl(BrowserTab tab, string? url) =>
+        !tab.Closed && (url == "about:blank" || OriginOf(url) is { } origin &&
+        (tab.External || string.Equals(origin, tab.Origin, StringComparison.OrdinalIgnoreCase)));
 
     private async Task<string> DispatchPreviewRequestAsync(DesktopPreviewRequest request, CancellationToken cancellationToken)
     {
@@ -63,33 +46,55 @@ public sealed partial class ChatTabView
 
     private async Task<string> ExecutePreviewRequestAsync(DesktopPreviewRequest request, CancellationToken token)
     {
+        if (request.Operation == "list-tabs")
+            return JsonSerializer.Serialize(new { ok = true, tabs = _browserTabs.Where(t => !t.Closed).Select(t => new {
+                tabId = t.Id, title = t.View.CoreWebView2?.DocumentTitle, url = t.View.CoreWebView2?.Source,
+                selected = t == _selectedBrowserTab && _previewOpen && _browserPreview }) });
+        BrowserTab tab;
+        if (request.TabId != null)
+        {
+            var found = _browserTabs.FirstOrDefault(t => t.Id == request.TabId && !t.Closed);
+            if (found == null) return DesktopPreviewTools.Failure("The requested browser tab is closed or unknown. No other tab was used.");
+            tab = found;
+        }
+        else if (request.Operation is "open" or "open-browser")
+        {
+            if (_previewDirty) return DesktopPreviewTools.Failure("Save or discard the file preview's unsaved edits before opening the browser.");
+            tab = await CreateBrowserTabAsync(request.Operation == "open-browser", token);
+        }
+        else return DesktopPreviewTools.Failure("An explicit tabId is required. List browser tabs first.");
+        using var tabLifetime = CancellationTokenSource.CreateLinkedTokenSource(token, tab.Lifetime.Token);
+        token = tabLifetime.Token;
         void CheckProject()
         {
             token.ThrowIfCancellationRequested();
-            if (_shutDown || !string.Equals(request.ProjectRoot, _controller.ProjectRootPath, StringComparison.OrdinalIgnoreCase))
+            if (tab.Closed || _shutDown || !string.Equals(request.ProjectRoot, _controller.ProjectRootPath, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("The tab closed or changed projects. Open the current project's preview first.");
         }
         CheckProject();
-        _agentBrowserRequests++;
+        if ((!tab.External || request.FullPath != null) && tab.ProjectRoot != request.ProjectRoot)
+            return DesktopPreviewTools.Failure("This browser tab belongs to a different project. No navigation or action was performed.");
+        tab.AgentRequests++;
         try
         {
-            if (PreviewBrowser.CoreWebView2 is { } existingCore) existingCore.Settings.AreDefaultScriptDialogsEnabled = false;
-            if (request.Operation == "open")
-            {
-                if (_previewDirty) return DesktopPreviewTools.Failure("The preview has unsaved user edits. Save or discard them before opening another preview.");
-                if (request.Url != null) await OpenUrlPreviewAsync(request.Url, token);
-                else await OpenFilePreviewAsync(ExplorerItem.ForFile(request.FullPath!, request.ProjectRoot), token);
-            }
+            if (tab.View.CoreWebView2 is { } existingCore) existingCore.Settings.AreDefaultScriptDialogsEnabled = false;
+            if (request.Operation == "open-browser") tab.External = true;
+            if (request.Operation is "open" or "open-browser")
+                await NavigateBrowserTabAsync(tab, request.Url, request.FullPath, token);
             CheckProject();
-            var core = PreviewBrowser.CoreWebView2;
-            if (!_previewOpen || !_browserPreview || core == null ||
-                !string.Equals(_previewMappedRoot, request.ProjectRoot, StringComparison.OrdinalIgnoreCase))
+            var core = tab.View.CoreWebView2;
+            if (tab.Closed || core == null ||
+                (!tab.External && !string.Equals(tab.ProjectRoot, request.ProjectRoot, StringComparison.OrdinalIgnoreCase)))
                 return DesktopPreviewTools.Failure("No browser preview is open for this project. Call open_desktop_preview first.");
             if (request.Operation == "refresh")
-                await NavigatePreviewConfirmedAsync(core, () => ReloadPreviewFreshAsync(core), token);
-            await WaitForPreviewNavigationAsync(token);
+                await NavigatePreviewConfirmedAsync(core, () => ReloadPreviewFreshAsync(tab, core), token);
+            await WaitForPreviewNavigationAsync(tab, token);
             CheckProject();
-            if (!IsAllowedPreviewUrl(core.Source)) return DesktopPreviewTools.Failure("The active document is outside the project preview.");
+            if (!IsAllowedPreviewUrl(tab, core.Source)) return DesktopPreviewTools.Failure("The active document is outside the project preview.");
+
+            if (request.Operation == "list-frames")
+                return AddPreviewDiagnostics(tab, new JsonObject { ["ok"] = true, ["frames"] = tab.Frames?.Describe(),
+                    ["note"] = "Frame documents have not been inspected. Inspect the relevant frameId before concluding fields are absent." });
 
             if (request.Operation == "wait")
             {
@@ -97,33 +102,33 @@ public sealed partial class ChatTabView
                 while (watch.Elapsed < TimeSpan.FromSeconds(10))
                 {
                     CheckProject();
-                    var state = await ExecutePreviewScriptAsync(core, request, token);
+                    var state = await ExecutePreviewScriptAsync(tab, core, request, token);
                     if (state["ok"]?.GetValue<bool>() != true || state["matched"]?.GetValue<bool>() == true)
-                        return AddPreviewDiagnostics(state);
+                        return AddPreviewDiagnostics(tab, state);
                     await Task.Delay(200, token);
-                    await WaitForPreviewNavigationAsync(token);
+                    await WaitForPreviewNavigationAsync(tab, token);
                 }
                 return DesktopPreviewTools.Failure("The expected element/text was not visible within 10 seconds. The action was not repeated; inspect the page to determine its state.");
             }
 
             if (request.Operation is "click" or "hover")
             {
-                var version = _previewDocumentVersion;
-                var target = await ExecutePreviewScriptAsync(core, request, token);
-                if (target["ok"]?.GetValue<bool>() != true) return AddPreviewDiagnostics(target);
+                var version = tab.DocumentVersion;
+                var target = await ExecutePreviewScriptAsync(tab, core, request, token);
+                if (target["ok"]?.GetValue<bool>() != true) return AddPreviewDiagnostics(tab, target);
                 CheckProject();
-                if (version != _previewDocumentVersion || !IsAllowedPreviewUrl(core.Source))
+                if (version != tab.DocumentVersion || !IsAllowedPreviewUrl(tab, core.Source))
                     return DesktopPreviewTools.Failure("The page navigated before the action. Inspect its new state.");
                 var x = target["x"]!.GetValue<double>();
                 var y = target["y"]!.GetValue<double>();
                 await MovePreviewPointerAsync(core, x, y);
                 CheckProject();
-                if (version != _previewDocumentVersion) return DesktopPreviewTools.Failure("The page navigated while moving the pointer. Inspect the new page before clicking.");
+                if (version != tab.DocumentVersion) return DesktopPreviewTools.Failure("The page navigated while moving the pointer. Inspect the new page before clicking.");
                 var completedClicks = 0;
                 if (request.Operation == "click")
                 {
-                    var confirmed = await ExecutePreviewScriptAsync(core, request, token);
-                    if (confirmed["ok"]?.GetValue<bool>() != true) return AddPreviewDiagnostics(confirmed);
+                    var confirmed = await ExecutePreviewScriptAsync(tab, core, request, token);
+                    if (confirmed["ok"]?.GetValue<bool>() != true) return AddPreviewDiagnostics(tab, confirmed);
                     if (Math.Abs(confirmed["x"]!.GetValue<double>() - x) > 1 || Math.Abs(confirmed["y"]!.GetValue<double>() - y) > 1)
                         return DesktopPreviewTools.Failure("The element moved after hover. Inspect its new state before clicking.");
                     for (var attempt = 0; attempt < request.Count; attempt++)
@@ -135,10 +140,10 @@ public sealed partial class ChatTabView
                             // moved, been replaced, or become covered. Stop and report what landed
                             // rather than clicking a stale point on the page.
                             JsonObject next;
-                            try { next = await ExecutePreviewScriptAsync(core, request, token); }
-                            catch (InvalidOperationException ex) { return PartialClicks(request, completedClicks, ex.Message); }
+                            try { next = await ExecutePreviewScriptAsync(tab, core, request, token); }
+                            catch (InvalidOperationException ex) { return PartialClicks(tab, request, completedClicks, ex.Message); }
                             if (next["ok"]?.GetValue<bool>() != true)
-                                return PartialClicks(request, completedClicks, next["error"]?.GetValue<string>() ?? "The element is no longer clickable.");
+                                return PartialClicks(tab, request, completedClicks, next["error"]?.GetValue<string>() ?? "The element is no longer clickable.");
                             x = next["x"]!.GetValue<double>();
                             y = next["y"]!.GetValue<double>();
                             await MovePreviewPointerAsync(core, x, y);
@@ -156,27 +161,29 @@ public sealed partial class ChatTabView
                     }
                 }
                 CheckProject();
-                await WaitForPreviewNavigationAsync(token);
-                var state = await ObservePreviewAsync(core, request, token);
+                await WaitForPreviewNavigationAsync(tab, token);
+                var state = await ObservePreviewAsync(tab, core, request, token);
                 state["actionDispatched"] = request.Operation;
                 if (request.Operation == "click" && request.Count > 1)
                 {
                     state["clicksRequested"] = request.Count;
                     state["clicksCompleted"] = completedClicks;
                 }
-                return AddPreviewDiagnostics(state);
+                return AddPreviewDiagnostics(tab, state);
             }
 
-            if (request.Operation == "key") return await ExecutePreviewKeyAsync(core, request, CheckProject, token);
+            if (request.Operation == "key") return await ExecutePreviewKeyAsync(tab, core, request, CheckProject, token);
 
             if (request.Operation == "screenshot")
             {
+                if (tab != _selectedBrowserTab || !_previewOpen || !_browserPreview)
+                    return DesktopPreviewTools.Failure("The targeted tab is not visible. Use DOM inspection or ask the user to select that tab for a screenshot.");
                 object parameters = new { format = "png" };
-                var state = await ExecutePreviewScriptAsync(core, request with { Operation = "pagestate" }, token);
+                var state = await ExecutePreviewScriptAsync(tab, core, request with { Operation = "pagestate" }, token);
                 if (!string.IsNullOrWhiteSpace(request.Selector))
                 {
-                    var bounds = await ExecutePreviewScriptAsync(core, request with { Operation = "bounds" }, token);
-                    if (bounds["ok"]?.GetValue<bool>() != true) return AddPreviewDiagnostics(bounds);
+                    var bounds = await ExecutePreviewScriptAsync(tab, core, request with { Operation = "bounds" }, token);
+                    if (bounds["ok"]?.GetValue<bool>() != true) return AddPreviewDiagnostics(tab, bounds);
                     parameters = new
                     {
                         format = "png",
@@ -214,30 +221,41 @@ public sealed partial class ChatTabView
                 // enormous image, and what the model sees is what a person would see in the pane.
                 state["image"] = data;
                 state["imageScope"] = "The visible preview viewport at the moment of capture.";
-                return AddPreviewDiagnostics(state);
+                return AddPreviewDiagnostics(tab, state);
             }
 
-            var operation = request.Operation is "open" or "refresh" ? request with { Operation = "inspect" } : request;
-            return AddPreviewDiagnostics(await ExecutePreviewScriptAsync(core, operation, token));
+            var operation = request.Operation is "open" or "open-browser" or "refresh" ? request with { Operation = "inspect" } : request;
+            return AddPreviewDiagnostics(tab, await ExecutePreviewScriptAsync(tab, core, operation, token));
+        }
+        catch (OperationCanceledException) when (tab.Closed)
+        {
+            return DesktopPreviewTools.Failure("The targeted browser tab closed during the operation. No other tab was used. An already dispatched action may have occurred.");
+        }
+        catch (InvalidOperationException ex)
+        {
+            // These are the failures that leave the page in an unknown state — a navigation mid-script,
+            // a target that moved. Letting them reach the dispatcher's generic catch would strip the
+            // tab and the console output, which is precisely what deciding whether to retry needs.
+            return AddPreviewDiagnostics(tab, new JsonObject { ["ok"] = false, ["error"] = ex.Message });
         }
         finally
         {
-            _agentBrowserRequests--;
-            if (!_shutDown && PreviewBrowser.CoreWebView2 is { } activeCore)
-                activeCore.Settings.AreDefaultScriptDialogsEnabled = _agentBrowserRequests == 0;
+            tab.AgentRequests--;
+            if (!_shutDown && !tab.Closed && tab.View.CoreWebView2 is { } activeCore)
+                activeCore.Settings.AreDefaultScriptDialogsEnabled = tab.AgentRequests == 0;
         }
     }
 
-    private async Task<string> ExecutePreviewKeyAsync(CoreWebView2 core, DesktopPreviewRequest request, Action checkProject, CancellationToken token)
+    private async Task<string> ExecutePreviewKeyAsync(BrowserTab tab, CoreWebView2 core, DesktopPreviewRequest request, Action checkProject, CancellationToken token)
     {
         var key = request.Key!;
-        var version = _previewDocumentVersion;
+        var version = tab.DocumentVersion;
         if (!string.IsNullOrWhiteSpace(request.Selector))
         {
-            var focus = await ExecutePreviewScriptAsync(core, request with { Operation = "focus" }, token);
-            if (focus["ok"]?.GetValue<bool>() != true) return AddPreviewDiagnostics(focus);
+            var focus = await ExecutePreviewScriptAsync(tab, core, request with { Operation = "focus" }, token);
+            if (focus["ok"]?.GetValue<bool>() != true) return AddPreviewDiagnostics(tab, focus);
             checkProject();
-            if (version != _previewDocumentVersion) return DesktopPreviewTools.Failure("The page navigated while taking keyboard focus. Inspect its new state.");
+            if (version != tab.DocumentVersion) return DesktopPreviewTools.Failure("The page navigated while taking keyboard focus. Inspect its new state.");
         }
 
         var completed = 0;
@@ -258,15 +276,15 @@ public sealed partial class ChatTabView
             request.Progress?.Note(++completed);
         }
         checkProject();
-        await WaitForPreviewNavigationAsync(token);
-        var state = await ObservePreviewAsync(core, request, token);
+        await WaitForPreviewNavigationAsync(tab, token);
+        var state = await ObservePreviewAsync(tab, core, request, token);
         state["actionDispatched"] = "key " + key.Name;
         if (request.Count > 1)
         {
             state["pressesRequested"] = request.Count;
             state["pressesCompleted"] = completed;
         }
-        return AddPreviewDiagnostics(state);
+        return AddPreviewDiagnostics(tab, state);
     }
 
     /// <summary>Screenshot capture, bounded. See the call site for why the browser can never answer.</summary>
@@ -284,11 +302,11 @@ public sealed partial class ChatTabView
         await core.CallDevToolsProtocolMethodAsync("Input.dispatchMouseEvent", JsonSerializer.Serialize(new { type = "mouseMoved", x, y }));
 
     /// <summary>Reads back only the element the caller asked about, or the whole page when it named none.</summary>
-    private Task<JsonObject> ObservePreviewAsync(CoreWebView2 core, DesktopPreviewRequest request, CancellationToken token) =>
-        ExecutePreviewScriptAsync(core, request with { Operation = "inspect", Selector = null, Offset = 0 }, token);
+    private Task<JsonObject> ObservePreviewAsync(BrowserTab tab, CoreWebView2 core, DesktopPreviewRequest request, CancellationToken token) =>
+        ExecutePreviewScriptAsync(tab, core, request with { Operation = "inspect", Selector = null, Offset = 0 }, token);
 
-    private string PartialClicks(DesktopPreviewRequest request, int completed, string reason) =>
-        AddPreviewDiagnostics(new JsonObject
+    private string PartialClicks(BrowserTab tab, DesktopPreviewRequest request, int completed, string reason) =>
+        AddPreviewDiagnostics(tab, new JsonObject
         {
             ["ok"] = false,
             ["clicksRequested"] = request.Count,
@@ -302,120 +320,136 @@ public sealed partial class ChatTabView
     /// edited script or stylesheet must never come back from cache — that is exactly what pushes
     /// people into adding ?v=2 cache-busting query strings to their own project files.
     /// </summary>
-    private async Task ReloadPreviewFreshAsync(CoreWebView2 core)
+    private async Task ReloadPreviewFreshAsync(BrowserTab tab, CoreWebView2 core)
     {
         try { await core.CallDevToolsProtocolMethodAsync("Page.reload", """{"ignoreCache":true}"""); }
         catch (Exception ex)
         {
-            NotePreviewDiagnostic("cache-bypass-unavailable", "A cache-bypassing reload failed; reloading normally: " + ex.Message);
+            NotePreviewDiagnostic(tab, "cache-bypass-unavailable", "A cache-bypassing reload failed; reloading normally: " + ex.Message);
             core.Reload();
         }
     }
 
-    private async Task<JsonObject> ExecutePreviewScriptAsync(CoreWebView2 core, DesktopPreviewRequest request, CancellationToken token)
+    private async Task<JsonObject> ExecutePreviewScriptAsync(BrowserTab tab, CoreWebView2 core, DesktopPreviewRequest request, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
-        if (!_previewOpen || !_browserPreview || _previewMappedRoot != request.ProjectRoot ||
-            _controller.ProjectRootPath != request.ProjectRoot || !IsAllowedPreviewUrl(core.Source))
+        if (tab.Closed || (!tab.External && tab.ProjectRoot != request.ProjectRoot) ||
+            _controller.ProjectRootPath != request.ProjectRoot || !IsAllowedPreviewUrl(tab, core.Source))
             throw new InvalidOperationException("The preview changed. Open and inspect the current project page first.");
-        var version = _previewDocumentVersion;
-        var json = await core.ExecuteScriptAsync(DesktopPreviewScripts.Build(request with { Origin = _previewOrigin }));
+        var version = tab.DocumentVersion;
+        JsonObject state;
+        if (request.FrameId is { } frameId && frameId != "main")
+            state = await (tab.Frames ?? throw new InvalidOperationException("Frame inspection is unavailable."))
+                .ExecuteAsync(request, token);
+        else
+        {
+            var json = await core.ExecuteScriptAsync(DesktopPreviewScripts.Build(request with { Origin = OriginOf(core.Source) }));
+            state = JsonNode.Parse(json) as JsonObject ?? throw new InvalidOperationException("The page did not return a DOM observation.");
+            state["frameId"] = "main";
+        }
         token.ThrowIfCancellationRequested();
-        if (_controller.ProjectRootPath != request.ProjectRoot || _previewMappedRoot != request.ProjectRoot || !_previewOpen || !_browserPreview)
+        if (_controller.ProjectRootPath != request.ProjectRoot || (!tab.External && tab.ProjectRoot != request.ProjectRoot) || tab.Closed)
             throw new InvalidOperationException("The project or preview changed during the operation. Inspect before retrying; an action may have occurred.");
-        if (version != _previewDocumentVersion) throw new InvalidOperationException("The page navigated during the operation. Inspect before retrying; an action may have occurred.");
-        return JsonNode.Parse(json) as JsonObject ?? throw new InvalidOperationException("The page did not return a DOM observation.");
+        if (version != tab.DocumentVersion) throw new InvalidOperationException("The page navigated during the operation. Inspect before retrying; an action may have occurred.");
+        state["availableFrames"] = tab.Frames?.Describe();
+        return state;
     }
 
-    private string AddPreviewDiagnostics(JsonObject state)
+    private string AddPreviewDiagnostics(BrowserTab tab, JsonObject state)
     {
-        state["browserDiagnostics"] = JsonSerializer.SerializeToNode(_previewDiagnostics.ToArray());
-        state["diagnosticsAvailable"] = JsonSerializer.SerializeToNode(_previewDiagnosticDomains);
-        state["assetCache"] = _previewCacheBypassed
+        state["tabId"] = tab.Id;
+        state["browserDiagnostics"] = JsonSerializer.SerializeToNode(tab.Diagnostics.ToArray());
+        state["diagnosticsAvailable"] = JsonSerializer.SerializeToNode(tab.DiagnosticDomains);
+        state["assetCache"] = tab.CacheBypassed
             ? "Bypassed. Every load reads the current file, so edited scripts and styles need no cache-busting query string."
             : "Browser default; a refresh still asks for a cache-bypassing reload.";
         state["diagnosticsScope"] = "Most recent 12 entries since the current navigation; no errors is not proof of correctness.";
         return state.ToJsonString();
     }
 
-    private void NotePreviewDiagnostic(string kind, string message)
+    private void NotePreviewDiagnostic(BrowserTab tab, string kind, string message)
     {
-        while (_previewDiagnostics.Count >= 12) _previewDiagnostics.Dequeue();
-        _previewDiagnostics.Enqueue(new { kind, message = message.Length > 1000 ? message[..1000] : message });
+        while (tab.Diagnostics.Count >= 12) tab.Diagnostics.Dequeue();
+        tab.Diagnostics.Enqueue(new { kind, message = message.Length > 1000 ? message[..1000] : message });
     }
 
-    private async Task InitializePreviewAutomationAsync(CoreWebView2 core)
+    private async Task InitializePreviewAutomationAsync(BrowserTab tab, CoreWebView2 core)
     {
         core.NavigationStarting += (_, args) =>
         {
-            if (!IsAllowedPreviewUrl(args.Uri))
+            if (!IsAllowedPreviewUrl(tab, args.Uri))
             {
                 args.Cancel = true;
-                NotePreviewDiagnostic("blocked-navigation", args.Uri);
-                if (_agentBrowserRequests == 0 && args.IsUserInitiated && ShellOpen.Try(args.Uri) is { } ex)
+                NotePreviewDiagnostic(tab, "blocked-navigation", args.Uri);
+                if (tab.AgentRequests == 0 && args.IsUserInitiated && ShellOpen.Try(args.Uri) is { } ex)
                     _transcript.Append(_html.Warn($"Couldn't open link: {ex.Message}"));
                 return;
             }
-            _previewDocumentVersion++;
+            if (tab.External) tab.Origin = OriginOf(args.Uri);
+            tab.DocumentVersion++;
             // Redirects share a navigation ID; keep their waiter until the final document loads.
-            if (_previewNavigationId == args.NavigationId && _previewNavigation is { Task.IsCompleted: false }) return;
-            _previewNavigationId = args.NavigationId;
-            _previewNavigation?.TrySetResult("Navigation was superseded. Inspect the current page.");
-            _previewNavigation = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            _previewDiagnostics.Clear();
+            if (tab.NavigationId == args.NavigationId && tab.Navigation is { Task.IsCompleted: false }) return;
+            tab.NavigationId = args.NavigationId;
+            tab.Navigation?.TrySetResult("Navigation was superseded. Inspect the current page.");
+            tab.Navigation = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            tab.Diagnostics.Clear();
         };
+        // Ordered after the blocking handler above: a navigation that is cancelled there never
+        // replaces the document, so frame IDs must survive it rather than be cleared.
+        tab.Frames = new BrowserFrames(core);
         core.NavigationCompleted += (_, args) =>
         {
-            if (args.NavigationId != _previewNavigationId) return;
+            UpdateBrowserChrome(tab);
+            if (args.NavigationId != tab.NavigationId) return;
             var error = args.IsSuccess && args.HttpStatusCode < 400 ? null : $"Preview navigation failed: {args.WebErrorStatus}, HTTP {args.HttpStatusCode}.";
-            if (error != null) NotePreviewDiagnostic("navigation-error", error);
-            _previewNavigation?.TrySetResult(error);
+            if (error != null) NotePreviewDiagnostic(tab, "navigation-error", error);
+            tab.Navigation?.TrySetResult(error);
         };
-        core.NewWindowRequested += (_, args) =>
+        core.NewWindowRequested += (sender, args) =>
         {
             args.Handled = true;
-            NotePreviewDiagnostic("blocked-popup", args.Uri);
-            if (_agentBrowserRequests == 0 && args.IsUserInitiated) ShellOpen.Try(args.Uri);
+            NotePreviewDiagnostic(tab, "blocked-popup", args.Uri);
+            if (tab.AgentRequests == 0 && args.IsUserInitiated) _ = OpenUserBrowserUrlAsync(args.Uri);
         };
         core.DownloadStarting += (_, args) =>
         {
-            if (_agentBrowserRequests == 0) return;
+            if (tab.AgentRequests == 0) return;
             args.Cancel = true;
-            NotePreviewDiagnostic("blocked-download", "Agent interaction attempted a download; no download was started.");
+            NotePreviewDiagnostic(tab, "blocked-download", "Agent interaction attempted a download; no download was started.");
         };
         // Page alerts must not hang an agent turn behind a native modal dialog.
-        core.Settings.AreDefaultScriptDialogsEnabled = _agentBrowserRequests == 0;
+        core.Settings.AreDefaultScriptDialogsEnabled = tab.AgentRequests == 0;
         core.ScriptDialogOpening += (_, args) =>
         {
-            if (_agentBrowserRequests > 0) NotePreviewDiagnostic("script-dialog-dismissed", args.Message);
+            if (tab.AgentRequests > 0) NotePreviewDiagnostic(tab, "script-dialog-dismissed", args.Message);
         };
         foreach (var eventName in new[] { "Runtime.consoleAPICalled", "Runtime.exceptionThrown", "Log.entryAdded", "Network.loadingFailed" })
         {
             var receiver = core.GetDevToolsProtocolEventReceiver(eventName);
             receiver.DevToolsProtocolEventReceived += (_, args) =>
             {
-                if (!IsAllowedPreviewUrl(core.Source)) return;
+                if (!IsAllowedPreviewUrl(tab, core.Source)) return;
                 if (eventName == "Runtime.consoleAPICalled")
                 {
                     using var message = JsonDocument.Parse(args.ParameterObjectAsJson);
                     var type = message.RootElement.GetProperty("type").GetString();
                     if (type is not ("error" or "warning" or "assert")) return;
                 }
-                NotePreviewDiagnostic(eventName, args.ParameterObjectAsJson);
+                NotePreviewDiagnostic(tab, eventName, args.ParameterObjectAsJson);
             };
-            _previewEventReceivers.Add(receiver);
+            tab.EventReceivers.Add(receiver);
         }
         foreach (var domain in new[] { "Runtime", "Log", "Network" })
         {
             try
             {
                 await core.CallDevToolsProtocolMethodAsync(domain + ".enable", "{}");
-                _previewDiagnosticDomains[domain] = true;
+                tab.DiagnosticDomains[domain] = true;
             }
             catch (Exception ex)
             {
-                _previewDiagnosticDomains[domain] = false;
-                NotePreviewDiagnostic("diagnostics-unavailable", domain + ": " + ex.Message);
+                tab.DiagnosticDomains[domain] = false;
+                NotePreviewDiagnostic(tab, "diagnostics-unavailable", domain + ": " + ex.Message);
             }
         }
         // The preview must show the files as they are on disk. Without this, an edited stylesheet or
@@ -423,19 +457,19 @@ public sealed partial class ChatTabView
         try
         {
             await core.CallDevToolsProtocolMethodAsync("Network.setCacheDisabled", """{"cacheDisabled":true}""");
-            _previewCacheBypassed = true;
+            tab.CacheBypassed = true;
         }
         catch (Exception ex)
         {
-            _previewCacheBypassed = false;
-            NotePreviewDiagnostic("cache-bypass-unavailable", ex.Message);
+            tab.CacheBypassed = false;
+            NotePreviewDiagnostic(tab, "cache-bypass-unavailable", ex.Message);
         }
     }
 
-    private async Task WaitForPreviewNavigationAsync(CancellationToken token)
+    private async Task WaitForPreviewNavigationAsync(BrowserTab tab, CancellationToken token)
     {
-        if (_previewNavigation == null) return;
-        var error = await _previewNavigation.Task.WaitAsync(token);
+        if (tab.Navigation == null) return;
+        var error = await tab.Navigation.Task.WaitAsync(token);
         if (error != null) throw new InvalidOperationException(error);
     }
 

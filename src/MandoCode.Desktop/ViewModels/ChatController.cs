@@ -124,6 +124,45 @@ public sealed partial class ChatController
     public string? ModelWarning { get; private set; }
     public bool IsProcessing => _isProcessing;
     public string ModelName => _config.GetEffectiveModelName();
+
+    /// <summary>
+    /// Set by the host while a tab restores a saved model. Boot validates and announces the config
+    /// default; the restore then switches and announces again, so without this the transcript names
+    /// two models — and the first one's capability line contradicts the second, advertising vision
+    /// on a model that is never used. The host calls <see cref="AnnounceModelStatus"/> once the
+    /// model has actually settled, so exactly one announcement lands either way.
+    /// </summary>
+    public bool DeferModelAnnouncement { get; set; }
+
+    private bool _cloudNoticeShown;
+
+    /// <summary>The single status line for the live model: state, image capability, where it runs.</summary>
+    public void AnnounceModelStatus()
+    {
+        if (!IsConnected || ModelError) return;
+        _transcript.Append(_html.StatusChip(ModelName, ModelStatusDetail(ModelName), "ok"));
+    }
+
+    /// <summary>
+    /// Capability travels with the model that has it. As a separate card it could be — and was —
+    /// separated from its model by an intervening switch, and it survived journal replay that
+    /// deliberately strips live status chips.
+    /// </summary>
+    private string ModelStatusDetail(string modelTag)
+    {
+        var parts = new List<string>
+        {
+            "active",
+            _ai.VisionSupport switch
+            {
+                ModelVisionSupport.Supported => "vision",
+                ModelVisionSupport.Unsupported => "text-only",
+                _ => "vision unknown"
+            }
+        };
+        if (MandoCodeConfig.IsCloudModel(modelTag)) parts.Add("cloud");
+        return string.Join(" · ", parts);
+    }
     public string ProjectRootPath => _projectRoot.ProjectRoot;
     public MandoCodeConfig Config => _config;
 
@@ -308,8 +347,7 @@ public sealed partial class ChatController
         {
             await ValidateCurrentModelAsync();
             await InitializeMcpAsync();
-            if (!ModelError)
-                _transcript.Append(_html.StatusChip(ModelName, "ready", "ok"));
+            if (!DeferModelAnnouncement) AnnounceModelStatus();
         }
 
         ShowUnfinishedPlanNotice();
@@ -358,7 +396,6 @@ public sealed partial class ChatController
         {
             ModelError = false;
             ModelWarning = null;
-            _transcript.Append(_html.Dim(_ai.VisionSupport.Label()));
         }
         StateChanged?.Invoke();
     }
@@ -395,11 +432,14 @@ public sealed partial class ChatController
     // ============================================================
 
     /// <summary>Handles one submitted input. Returns immediately if a request is running.</summary>
-    public async Task SubmitAsync(string input)
+    private string? _requestBrowserContext;
+
+    public async Task SubmitAsync(string input, string? browserContext = null)
     {
         if (string.IsNullOrWhiteSpace(input) || _isProcessing) return;
 
         _isProcessing = true;
+        _requestBrowserContext = browserContext;
         StateChanged?.Invoke();
         try
         {
@@ -469,6 +509,7 @@ public sealed partial class ChatController
         }
         finally
         {
+            _requestBrowserContext = null;
             _isProcessing = false;
             _busy.Reset();
             StateChanged?.Invoke();
@@ -506,12 +547,16 @@ public sealed partial class ChatController
 
         try
         {
-            var response = await _streamer.StreamAsync(input, token, hostInstruction);
+            var response = await _streamer.StreamAsync(input, token,
+                string.Join("\n\n", new[] { hostInstruction, _requestBrowserContext }.Where(s => !string.IsNullOrWhiteSpace(s))));
             if (!string.IsNullOrEmpty(response)) _lastAiResponse = response;
 
             // AIService sees the expanded/preambled model input. Before the queued plan is taken,
             // replace that fallback with the user's actual text so checkpoints preserve paths and
             // intent without persisting attachment dumps or internal planning nudges.
+            // Deliberately not WithBrowserContext: this value becomes plan.OriginalRequest, which
+            // BuildManifest interpolates into a tool result that stays in chat history for the rest
+            // of the session. The steps carry the tab; the request text stays the user's words.
             _planHandoff.SetRequestContext(originalRequest ?? input);
 
             // propose_plan now only queues a plan; the host runs it once the turn has drained, so
@@ -526,7 +571,8 @@ public sealed partial class ChatController
                 var completion = await _deferredPlans.CompleteAsync(
                     token,
                     (hostInstruction, ct) => _streamer.StreamAsync(
-                        "Continue with my original request.", ct, hostInstruction));
+                        "Continue with my original request.", ct,
+                        string.Join("\n\n", new[] { hostInstruction, _requestBrowserContext }.Where(s => !string.IsNullOrWhiteSpace(s)))));
                 if (!string.IsNullOrEmpty(completion.FollowUpResponse))
                     _lastAiResponse = completion.FollowUpResponse;
                 if (!string.IsNullOrWhiteSpace(completion.Manifest))
@@ -747,6 +793,12 @@ public sealed partial class ChatController
             _busy.Stop();
             while (true)
             {
+                // Persist the captured target in executable instructions, not just proposal prose.
+                // Editing a step must not discard it, and resumed work must never use a new selection.
+                // Attach replaces any block already there, so re-approving a checkpointed step cannot
+                // leave it naming two tabs; the card strips the block back off before display.
+                foreach (var step in plan.Steps)
+                    step.Instruction = BrowserRequestContext.Attach(step.Instruction, _requestBrowserContext);
                 _transcript.Append(_html.PlanCard(plan));
 
                 choice = await ui.ShowApprovalAsync(new ApprovalRequest
@@ -1546,13 +1598,18 @@ public sealed partial class ChatController
             _busy.Reset();
         }
 
-        _transcript.Append(_html.StatusChip(modelTag, "now active", "ok"));
+        _transcript.Append(_html.StatusChip(modelTag, ModelStatusDetail(modelTag), "ok"));
 
         // Selection-time awareness, not just failure-time: cloud models require an active
         // ollama.com cloud subscription — a signed-in account without one gets 403 Forbidden
-        // on its first message, which reads as the app breaking.
-        if (MandoCodeConfig.IsCloudModel(modelTag))
-            _transcript.Append(_html.Dim("Cloud model — runs on ollama.com's servers and needs an account with an active cloud subscription. Without one, requests return 403 Forbidden."));
+        // on its first message, which reads as the app breaking. Once per session is enough to
+        // establish that; the chip already marks every cloud model, and ResponseStreamer says
+        // the actionable version if a 403 actually arrives.
+        if (MandoCodeConfig.IsCloudModel(modelTag) && !_cloudNoticeShown)
+        {
+            _cloudNoticeShown = true;
+            _transcript.Append(_html.Dim("Cloud models run on ollama.com and need an active cloud subscription."));
+        }
 
         // Only mention the cleared context — and offer a snapshot — when there was actually a
         // conversation to clear. Switching an empty chat has nothing to salvage, so stay quiet.
@@ -1787,8 +1844,7 @@ public sealed partial class ChatController
                 await _ai.ReinitializeAsync(_config);
                 await ValidateCurrentModelAsync();
                 await InitializeMcpAsync();
-                if (!ModelError)
-                    _transcript.Append(_html.StatusChip(ModelName, "ready", "ok"));
+                AnnounceModelStatus();
             }
             else
             {

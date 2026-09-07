@@ -214,15 +214,25 @@ public sealed partial class MainWindow
 
     private async Task InitTabAsync(ChatTabEntry entry)
     {
-        await entry.View.InitializeAsync();
+        var controller = entry.View.Session.Controller;
         // Best-effort per-tab model restore: if the saved model is gone (Ollama not running,
         // cloud model renamed), the tab simply keeps the default and says so in its header.
         var desired = entry.RestoreModel;
-        if (!string.IsNullOrEmpty(desired) && desired != entry.View.Session.Controller.ModelName)
+        // Boot would announce the config default before the saved model replaces it. Hold that
+        // announcement until the model has settled, then let exactly one branch make it.
+        controller.DeferModelAnnouncement = !string.IsNullOrEmpty(desired);
+        await entry.View.InitializeAsync();
+        if (!string.IsNullOrEmpty(desired) && desired != controller.ModelName)
         {
-            await Task.Run(() => entry.View.Session.Controller.SelectModelAsync(desired));
+            await Task.Run(() => controller.SelectModelAsync(desired));
             entry.View.UpdateHeader();
         }
+        else if (controller.DeferModelAnnouncement)
+        {
+            // The saved model was already the active one, so no switch fired to announce it.
+            controller.AnnounceModelStatus();
+        }
+        controller.DeferModelAnnouncement = false;
 
         // Memory comes back only after the model has settled — selecting a model clears
         // history, so this order is what keeps the restored memory alive.

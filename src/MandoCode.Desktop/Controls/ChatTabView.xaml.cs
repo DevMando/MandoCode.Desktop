@@ -367,7 +367,7 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
 
         try { TranscriptView.Close(); }
         catch { /* already gone, or WebView2 never initialized */ }
-        try { PreviewBrowser.Close(); }
+        try { foreach (var tab in _browserTabs.ToArray()) CloseBrowserTab(tab); }
         catch { /* already gone, or preview never initialized */ }
     }
 
