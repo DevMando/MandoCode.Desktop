@@ -111,6 +111,16 @@ An image is evidence for the turn that captured it and is retracted afterward, s
 screenshot does not re-upload on every later message. The model's written conclusion is
 what persists.
 
+Capture reads the window's rendered surface, so it depends on the app actually having one.
+A minimized window has none and the browser never answers at all, so capture is bounded at
+six seconds and reports that the window needs restoring rather than consuming the whole
+operation deadline. Hidden, transparent, and occluded windows still capture normally.
+
+A capture taken before the page painted returns valid image bytes showing nothing. That
+cannot be told apart from a genuinely blank page, so it is flagged as `possiblyBlank`
+rather than refused, and the model is told to say the image looks blank instead of
+describing detail it cannot see.
+
 ## Development servers
 
 `open_local_server_desktop_preview` opens a server already running on this machine, so the
