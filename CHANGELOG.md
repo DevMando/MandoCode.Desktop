@@ -121,6 +121,12 @@ for every approved plan. Desktop's version follows the engine generation, so it 
   a sticky header, or the suggestion list a field opens when it is filled.
 
 ### Fixed
+- **Per-tab model choices survive a restart.** Restoring a session initialized every tab at once,
+  and a tab boots on the default model before moving onto its own saved one. Any workspace write
+  during that window recorded the default over a tab's real model, so an agent you had switched
+  could come back on the default — permanently, since the saved value was gone. Workspace writes
+  are now held until every tab has settled, and a tab whose restore does not finish keeps its
+  saved model instead of having the fallback written over it.
 - **A restored tab no longer announces two different models at startup.** Restoring a session
   announced the default model, then immediately switched to the tab's saved model and announced
   that one as well. The first notice was obsolete the moment it appeared, and could advertise
