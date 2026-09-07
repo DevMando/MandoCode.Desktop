@@ -21,6 +21,20 @@ for every approved plan. Desktop's version follows the engine generation, so it 
   recently switched to, then everything else alphabetically. Pins and recent use are remembered
   across launches and apply to every agent. The tail stays alphabetical on purpose, so a long
   list does not reshuffle every time a model is pulled.
+- **An interactive browser preview the agent can drive.** The agent reads a page's text,
+  controls, values, and browser errors, then clicks, hovers, presses keys, fills fields, selects
+  options, scrolls, and waits for elements. Pointer and keyboard input are dispatched as genuine
+  browser events, so a page cannot tell them from a person. The preview's cache is bypassed and
+  refreshes ask for a cache-bypassing reload, so an edited script or stylesheet is never reviewed
+  against its previous version and project files need no cache-busting query strings.
+- **Screenshots for the questions the page's structure cannot answer.** Visual layout, overlapping
+  or clipped elements, spacing, and canvas rendering. The capture is handed to the model as real
+  image input rather than text, and the model's ability to accept images is checked *before*
+  capturing — a text-only model is told plainly that visual layout could not be checked instead of
+  being handed bytes it would silently drop. Screenshots are also delivered during plan execution.
+- **Development server previews.** The agent can exercise a running app instead of a static file.
+  Only HTTP or HTTPS on loopback with an explicit port is accepted; external hosts, LAN addresses,
+  other schemes, and URLs carrying credentials are refused.
 - **Embedded form DOM support.** Browser tools discover cross-origin and nested frames
   and can inspect, fill, select, scroll, wait, and read back fields using explicit tab and
   frame IDs. Navigated or removed frame targets fail without falling back to the parent.
@@ -113,9 +127,11 @@ for every approved plan. Desktop's version follows the engine generation, so it 
   use the same Microsoft.Extensions.AI client the engine standardized on. Same prompts, same
   temperatures, same behavior — but Desktop no longer depends on a framework the engine has
   removed. Snapshot recaps and note replies are the surfaces to sanity-check.
-- **Engine safety pin: `7aede43`** (engine 0.15.0). This includes workflow planning as the default
-  plan runner, manual conversation compaction, automatic planning based on task shape, and the
-  large-root context guard verified through Desktop against a real `@directory` request.
+- **Engine safety pin: `5aea416`** (engine 0.15.0). This includes workflow planning as the default
+  plan runner, manual conversation compaction, automatic planning based on task shape, the
+  large-root context guard verified through Desktop against a real `@directory` request, image
+  content counted toward the context estimate, and browser tab and frame listings always being
+  read live rather than answered from the recent-call cache.
 
 - **The Settings model picker no longer waits on the network to show your model.** The configured
   model appears selected immediately and the installed-model list fills in behind it. A failed or
@@ -127,6 +143,12 @@ for every approved plan. Desktop's version follows the engine generation, so it 
   capability, and whether it runs in the cloud appear together as `model · active · text-only ·
   cloud`, replacing the separate capability notice and status pill. The cloud subscription caveat
   appears once per session rather than on every model switch.
+- **Screenshots stay honest when the window is not on screen.** Capture reads the window's
+  rendered surface, so it depends on the app having one. A minimized window is now reported as
+  needing to be restored, within a bounded wait, rather than consuming the whole operation
+  deadline and surfacing as a vague timeout. A capture that comes back nearly uniform is flagged
+  as possibly blank, so the model says the image looks empty instead of describing detail it
+  cannot see. Hidden, transparent, and occluded windows were measured and capture normally.
 - **A blocked click now names what is covering the target.** Instead of reporting only that an
   element is covered, the result identifies the element sitting on top of it — usually an overlay,
   a sticky header, or the suggestion list a field opens when it is filled.
