@@ -203,6 +203,10 @@ public sealed partial class MainWindow
         _initialized = true;
         // Restored workspaces can open with several tabs — initialize them all (each owns
         // its WebView2 + harness, same cost as if the user had opened them by hand).
+        // Every tab boots on the DEFAULT model and only moves to its own saved model once
+        // InitTabAsync gets that far. Workspace writes are suppressed until the last tab settles
+        // — see SaveWorkspace for why a write inside that window loses a tab's model.
+        Volatile.Write(ref _restoringTabs, _tabs.Count);
         foreach (var entry in _tabs) _ = InitTabAsync(entry);
         InitBgPreview();
 
@@ -212,7 +216,27 @@ public sealed partial class MainWindow
         RefreshHistoryBadge();
     }
 
+    /// <summary>Tabs still moving from the default model onto their own saved one.</summary>
+    private int _restoringTabs;
+
     private async Task InitTabAsync(ChatTabEntry entry)
+    {
+        try
+        {
+            await RestoreTabAsync(entry);
+            // Restore ran to completion, so whatever model this tab holds now is the one worth
+            // remembering — including a model that errored, since the name still resolved. A throw
+            // skips this line, leaving the saved model protected by SaveWorkspace instead.
+            entry.ModelRestorePending = false;
+        }
+        finally
+        {
+            // Last one out writes the workspace, now that every tab reports its real model.
+            if (Interlocked.Decrement(ref _restoringTabs) == 0) SaveWorkspace();
+        }
+    }
+
+    private async Task RestoreTabAsync(ChatTabEntry entry)
     {
         var controller = entry.View.Session.Controller;
         // Best-effort per-tab model restore: if the saved model is gone (Ollama not running,
@@ -241,12 +265,28 @@ public sealed partial class MainWindow
 
     /// <summary>Writes the current workspace shape (tabs + active) to disk. Called on close
     /// and after any structural change, so even a crash loses at most the latest tweak.</summary>
+    /// <summary>
+    /// The model to remember for a tab: its live model, except while a restore has not finished.
+    /// A tab mid-restore (or one whose restore threw) is still on the default it was seeded with,
+    /// and persisting that would replace the user's own choice with the default for good.
+    /// </summary>
+    private static string PersistedModelFor(ChatTabEntry tab) =>
+        tab.ModelRestorePending && !string.IsNullOrWhiteSpace(tab.RestoreModel)
+            ? tab.RestoreModel
+            : tab.View.Session.Controller.ModelName;
+
     private void SaveWorkspace()
     {
+        // This records the CURRENT model of EVERY tab, and a restore reaches it early: any tab's
+        // StateChanged during startup runs UpdateHeader -> HeaderChanged -> here, while other tabs
+        // are still sitting on the default. Writing then stamps the default over a tab's real
+        // model, and that tab comes back on the default next launch — the switch is simply lost.
+        if (Volatile.Read(ref _restoringTabs) > 0) return;
+
         var tabs = _tabs.Select(t => new WorkspaceTabState(
             t.View.Session.Title,
             t.View.Session.ProjectRoot.ProjectRoot,
-            t.View.Session.Controller.ModelName,
+            PersistedModelFor(t),
             t.View.Session.PersistKey)).ToList();
         var active = _selected == null ? 0 : Math.Max(0, _tabs.IndexOf(_selected));
 

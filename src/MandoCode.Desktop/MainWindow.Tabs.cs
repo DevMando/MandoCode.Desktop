@@ -36,6 +36,15 @@ public sealed partial class MainWindow
         /// <summary>Model to select once this tab's harness is initialized — set only for
         /// tabs recreated from a saved workspace. Best-effort: unavailable model = default.</summary>
         public string? RestoreModel { get; init; }
+
+        /// <summary>
+        /// True from creation until this tab has actually finished settling onto its own model.
+        /// While it is set, the workspace persists <see cref="RestoreModel"/> rather than the live
+        /// model: a tab whose restore never completed is sitting on the default it was seeded with,
+        /// and writing that would discard the user's real choice permanently. Once restore
+        /// finishes — whether the model resolved or errored — the live model is the truth.
+        /// </summary>
+        public bool ModelRestorePending { get; set; }
     }
 
     private readonly List<ChatTabEntry> _tabs = new();
@@ -81,7 +90,12 @@ public sealed partial class MainWindow
         TabHost.Children.Add(view);
 
         var (header, label, badge) = BuildTabHeader(session.Title);
-        var entry = new ChatTabEntry { Header = header, Label = label, Badge = badge, View = view, RestoreModel = restoreModel };
+        var entry = new ChatTabEntry
+        {
+            Header = header, Label = label, Badge = badge, View = view,
+            RestoreModel = restoreModel,
+            ModelRestorePending = !string.IsNullOrWhiteSpace(restoreModel),
+        };
         _tabs.Add(entry);
         TabStrip.Children.Add(header);
         WireHeader(entry);
