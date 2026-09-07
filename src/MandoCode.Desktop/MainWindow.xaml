@@ -1003,7 +1003,30 @@
                                     </Grid.ColumnDefinitions>
                                     <ComboBox x:Name="ModelCombo" IsEditable="True" HorizontalAlignment="Stretch"
                                               PlaceholderText="e.g. qwen2.5-coder:14b" MinWidth="512"
-                                              ToolTipService.ToolTip="The model that powers every response. Bigger models reason better but respond slower and need more memory; coder-tuned models follow tool-calling instructions most reliably."/>
+                                              ToolTipService.ToolTip="The model that powers every response. Bigger models reason better but respond slower and need more memory; coder-tuned models follow tool-calling instructions most reliably.">
+                                        <ComboBox.Resources>
+                                            <services:PinnedOpacityConverter x:Key="PinnedOpacity"/>
+                                        </ComboBox.Resources>
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid ColumnSpacing="8" HorizontalAlignment="Stretch">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Text="{Binding}" VerticalAlignment="Center"
+                                                               TextTrimming="CharacterEllipsis"/>
+                                                    <Button Grid.Column="1" Tag="{Binding}" Tapped="ModelPin_Tapped"
+                                                            Background="Transparent" BorderThickness="0" Padding="4"
+                                                            ToolTipService.ToolTip="Pin this model to the top of the list"
+                                                            AutomationProperties.Name="Pin model to top">
+                                                        <FontIcon Glyph="&#xE718;" FontSize="12"
+                                                                  Opacity="{Binding Converter={StaticResource PinnedOpacity}}"/>
+                                                    </Button>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
                                     <Button Grid.Column="1" Click="RefreshModels_Click"
                                             ToolTipService.ToolTip="Fetch pulled models">
                                         <FontIcon Glyph="&#xE72C;" FontSize="14"/>

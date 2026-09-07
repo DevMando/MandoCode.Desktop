@@ -16,6 +16,11 @@ for every approved plan. Desktop's version follows the engine generation, so it 
 0.15.0.
 
 ### Added
+- **Pinned and recently used models rise to the top of the model picker.** A pin on each row in
+  Settings keeps the models you actually use at the top; below them sit the models you most
+  recently switched to, then everything else alphabetically. Pins and recent use are remembered
+  across launches and apply to every agent. The tail stays alphabetical on purpose, so a long
+  list does not reshuffle every time a model is pulled.
 - **Embedded form DOM support.** Browser tools discover cross-origin and nested frames
   and can inspect, fill, select, scroll, wait, and read back fields using explicit tab and
   frame IDs. Navigated or removed frame targets fail without falling back to the parent.
@@ -112,6 +117,12 @@ for every approved plan. Desktop's version follows the engine generation, so it 
   plan runner, manual conversation compaction, automatic planning based on task shape, and the
   large-root context guard verified through Desktop against a real `@directory` request.
 
+- **The Settings model picker no longer waits on the network to show your model.** The configured
+  model appears selected immediately and the installed-model list fills in behind it. A failed or
+  empty fetch now keeps the picker as it was rather than blanking it, and a configured model the
+  fetch does not return — a cloud model with nothing pulled locally — stays listed.
+- **The preview pane shows a globe when it is showing the browser.** It previously showed a
+  document icon whether the pane held a file or a live web page.
 - **Model status is now one line instead of several cards.** The active model, its image
   capability, and whether it runs in the cloud appear together as `model · active · text-only ·
   cloud`, replacing the separate capability notice and status pill. The cloud subscription caveat
@@ -142,7 +153,7 @@ for every approved plan. Desktop's version follows the engine generation, so it 
   not conversation messages, so stale actions are not replayed into a restored session.
 
 ### Test coverage
-295 Desktop tests pass. New host-level coverage exercises deferred plan execution, instruction
+303 Desktop tests pass. New host-level coverage exercises deferred plan execution, instruction
 editing, dependent-step revision, checkpoint cards, Resume/Discard actions, semantic step outcomes,
 and truthful completion status. Browser coverage adds explicit tab targeting, frame identity, and
 plan-card review content. The same workflows were also exercised with real models, including

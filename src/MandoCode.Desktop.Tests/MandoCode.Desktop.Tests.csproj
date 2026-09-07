@@ -34,6 +34,7 @@
     <Compile Include="..\MandoCode.Desktop\Services\GitQuickStatus.cs" Link="src\GitQuickStatus.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\DesktopPreviewTools.cs" Link="src\DesktopPreviewTools.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\BrowserRequestContext.cs" Link="src\BrowserRequestContext.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\ModelOrdering.cs" Link="src\ModelOrdering.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\DesktopPreviewScripts.cs" Link="src\DesktopPreviewScripts.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\DesktopPreviewKeys.cs" Link="src\DesktopPreviewKeys.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\AgentImageSink.cs" Link="src\AgentImageSink.cs" />

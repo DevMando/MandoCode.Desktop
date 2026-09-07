@@ -175,7 +175,7 @@
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <FontIcon Glyph="&#xE8A5;" FontSize="13" VerticalAlignment="Center"
+                    <FontIcon x:Name="PreviewTitleIcon" Glyph="&#xE8A5;" FontSize="13" VerticalAlignment="Center"
                               Foreground="{StaticResource MandoAccentBrush}"/>
                     <TextBlock x:Name="PreviewTitleText" Grid.Column="1" FontWeight="SemiBold"
                                FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>

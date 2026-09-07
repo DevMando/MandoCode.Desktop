@@ -17,7 +17,9 @@ public sealed record PanelStateShape(
     List<string>? CollapsedNoteGroups = null,
     string? LastNotePath = null,
     string? NoteModel = null,
-    bool? AgentCallsigns = null);
+    bool? AgentCallsigns = null,
+    List<string>? PinnedModels = null,
+    List<string>? RecentModels = null);
 
 /// <summary>
 /// Persists per-panel UI preference — the fold state of the Snapshots and History project groups —
