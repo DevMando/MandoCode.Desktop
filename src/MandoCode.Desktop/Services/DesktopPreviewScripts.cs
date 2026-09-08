@@ -89,6 +89,13 @@ public static class DesktopPreviewScripts
         const result = () => args.observe ? observation(args.observe) : snapshot();
         try {
             if (!args.origin || location.origin !== args.origin) throw new Error('This is not the preview origin the host opened.');
+            // A PDF is drawn by the browser viewer, and none of its text, pages, or fields reach the
+            // DOM. Returning an empty snapshot would read as "the document is blank" — the same
+            // wrong conclusion an uninspected frame used to produce. Screenshot support operations
+            // are exempt, because an image is precisely how a PDF should be judged.
+            if (args.operation !== 'pagestate' && args.operation !== 'bounds' &&
+                (document.contentType === 'application/pdf' || document.querySelector('embed[type="application/pdf"]')))
+                return { ok: false, isPdf: true, error: 'This document is a PDF drawn by the browser PDF viewer. Its text, pages, and form fields are not reachable through the DOM, so an empty result here is not evidence that the document is empty. Judge it with screenshot_desktop_preview on a vision-capable model, or read the file from disk instead.' };
             if (args.operation === 'inspect' || args.operation === 'observe') return result();
             if (args.operation === 'pagestate') return { ok: true, url: location.href, title: cut(document.title, 200),
                 readyState: document.readyState, viewport: { width: innerWidth, height: innerHeight, scrollX, scrollY } };
