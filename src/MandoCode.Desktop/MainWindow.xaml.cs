@@ -107,6 +107,10 @@ public sealed partial class MainWindow : Window
         // matters: a user who explicitly toggled numbering keeps it (saved false), while
         // fresh installs and pre-0.14.1 panel states get callsigns.
         AgentCallsigns.Enabled = panelState.AgentCallsigns ?? true;
+        // Model picker order is a window-level preference like the above. Persist on change so a
+        // pin or a model switch survives a crash, not just a clean exit.
+        ModelOrdering.Load(panelState.PinnedModels, panelState.RecentModels);
+        ModelOrdering.Changed += SavePanelState;
         // The editor writes note content; the panel only lists. One store, handed over once.
         NoteEditor.Store = _notes;
         WireNotesPanel();

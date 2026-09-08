@@ -1577,6 +1577,7 @@ public sealed partial class ChatController
 
         _config.ModelName = modelTag;
         _config.ModelPath = null;
+        ModelOrdering.NoteUsed(modelTag);
 
         var recommendedCtx = MandoCodeConfig.RecommendedContextLength(modelTag);
         if (recommendedCtx > 0 && recommendedCtx != _config.ContextLength)
@@ -1824,7 +1825,11 @@ public sealed partial class ChatController
     public async Task ApplyConnectionSettingsAsync(string endpoint, string? modelName)
     {
         if (!string.IsNullOrWhiteSpace(endpoint)) _config.OllamaEndpoint = endpoint.Trim();
-        if (!string.IsNullOrWhiteSpace(modelName)) _config.ModelName = modelName.Trim();
+        if (!string.IsNullOrWhiteSpace(modelName))
+        {
+            _config.ModelName = modelName.Trim();
+            ModelOrdering.NoteUsed(_config.ModelName);
+        }
 
         // Onboarding is an app-wide fact, not a preference: once the user has connected once,
         // the first-run wizard must not fire again for the next agent or the next launch.

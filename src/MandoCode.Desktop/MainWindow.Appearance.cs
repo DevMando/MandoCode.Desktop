@@ -237,16 +237,62 @@ public sealed partial class MainWindow
     private async void RefreshModels_Click(object sender, RoutedEventArgs e) =>
         await RefreshModelListAsync();
 
+    /// <summary>
+    /// Pin toggle inside a dropdown row. Handled on Tapped rather than Click so the tap stops here
+    /// instead of bubbling to the ComboBoxItem, which would otherwise treat pinning as picking the
+    /// model and close the dropdown on the way out.
+    /// </summary>
+    private void ModelPin_Tapped(object sender, TappedRoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is not FrameworkElement { Tag: string model } || string.IsNullOrWhiteSpace(model)) return;
+        ModelOrdering.TogglePin(model);
+
+        // Re-project the same names so the row's glyph re-renders and the pinned model moves up.
+        if (ModelCombo.ItemsSource is not IList<string> current) return;
+        if (!string.IsNullOrEmpty(ModelCombo.Text)) _modelComboTarget = ModelCombo.Text;
+        ModelCombo.ItemsSource = ModelOrdering.Arrange(current);
+        ApplyModelComboTarget();
+    }
+
+    /// <summary>Fills the model picker without making the page wait on the network: the configured
+    /// model is already known, so it is shown selected on the first frame, then the installed-model
+    /// list (a probe plus an Ollama /api/tags fetch, slow on cloud setups) fills in behind it for
+    /// "pick another". Same approach as LoadSnapshotModelsAsync.</summary>
     private async Task RefreshModelListAsync()
     {
+        // Instant: seed with the one model we already know, so the picker never sits empty. Only on
+        // a first open — a manual refresh keeps the list it has until the new one arrives.
+        var configured = _controller.Config.GetEffectiveModelName();
+        if (!string.IsNullOrEmpty(configured) &&
+            (ModelCombo.ItemsSource is not IList<string> present || present.Count == 0))
+        {
+            _modelComboTarget = configured;
+            ModelCombo.ItemsSource = new List<string> { configured };
+            ApplyModelComboTarget();
+        }
+
         ModelListStatus.Text = "Fetching models…";
         var models = await Task.Run(_controller.ListModelsAsync);
         if (!string.IsNullOrEmpty(ModelCombo.Text)) _modelComboTarget = ModelCombo.Text;
-        ModelCombo.ItemsSource = models;
+
+        // A failed or empty fetch keeps whatever is already selectable. Replacing it with an empty
+        // list would blank a picker that was showing the right answer a moment ago.
+        if (models.Count == 0)
+        {
+            ModelListStatus.Text = "No models found — is Ollama running? (ollama serve, then ollama pull <model>)";
+            return;
+        }
+
+        // A configured model the fetch doesn't list (a cloud model with nothing pulled locally)
+        // still belongs in the picker — it is what the agent is actually using.
+        if (!string.IsNullOrEmpty(_modelComboTarget) &&
+            !models.Any(m => string.Equals(m, _modelComboTarget, StringComparison.OrdinalIgnoreCase)))
+            models.Insert(0, _modelComboTarget);
+
+        ModelCombo.ItemsSource = ModelOrdering.Arrange(models);
         ApplyModelComboTarget();
-        ModelListStatus.Text = models.Count == 0
-            ? "No models found — is Ollama running? (ollama serve, then ollama pull <model>)"
-            : $"{models.Count} model(s) available.";
+        ModelListStatus.Text = $"{models.Count} model(s) available.";
     }
 
     private async void SettingsSave_Click(object sender, RoutedEventArgs e)

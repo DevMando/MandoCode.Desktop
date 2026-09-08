@@ -142,7 +142,8 @@ public sealed partial class MainWindow
         _collapsedSnapshotGroups.ToList(), _collapsedHistoryGroups.ToList(),
         _snapshotsSeenAt, _historySeenAt,
         _collapsedNoteGroups.ToList(), _lastNotePath, _noteModel,
-        AgentCallsigns.Enabled));
+        AgentCallsigns.Enabled,
+        ModelOrdering.Pinned.ToList(), ModelOrdering.Recent.ToList()));
 
     // The group object is kept in sync (not just the set) so that when the ListView recycles a
     // container on scroll, the OneTime IsExpanded x:Bind re-reads the correct, current state.

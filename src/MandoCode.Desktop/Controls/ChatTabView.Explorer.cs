@@ -602,7 +602,13 @@ public sealed partial class ChatTabView
         UpdatePreviewTitle();
     }
 
-    private void UpdatePreviewTitle() => PreviewTitleText.Text = _previewDirty ? $"{_previewTitle} • unsaved" : _previewTitle;
+    private void UpdatePreviewTitle()
+    {
+        PreviewTitleText.Text = _previewDirty ? $"{_previewTitle} • unsaved" : _previewTitle;
+        // The browser gets the same globe as the toolbar button that opens it, so the pane and its
+        // control read as one feature. A document icon over a live web page describes the wrong thing.
+        PreviewTitleIcon.Glyph = _browserPreview ? "\uE774" : "\uE8A5";
+    }
 
     private async Task<bool> ConfirmDiscardPreviewChangesAsync()
     {
