@@ -193,6 +193,8 @@ public sealed partial class MainWindow
     /// switches between them: an open note means editor, otherwise the grouped list. Safe to call any
     /// time — everything is derived from state.
     /// </summary>
+    private readonly System.Collections.ObjectModel.ObservableCollection<NoteGroup> _visibleNotesGroups = new();
+
     private void PopulateNotes()
     {
         var editing = NoteEditor.Current != null;
@@ -234,7 +236,14 @@ public sealed partial class MainWindow
             })
             .ToList();
 
-        NotesList.ItemsSource = groups;
+        foreach (var incoming in groups)
+        {
+            var existing = _visibleNotesGroups.FirstOrDefault(g => g.Project == incoming.Project);
+            if (existing != null)
+                StableCollection.Update(existing, incoming, row => row.Note.Path.ToUpperInvariant(), (a, b) => a.Note == b.Note && a.MatchSnippet == b.MatchSnippet);
+        }
+        StableCollection.Update(_visibleNotesGroups, groups, g => g.Project, (a, b) => true);
+        if (NotesList.ItemsSource == null) NotesList.ItemsSource = _visibleNotesGroups;
 
         var nothingToShow = groups.Count == 0;
         NotesEmpty.Text = !_notesScanned

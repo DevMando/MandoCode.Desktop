@@ -38,50 +38,27 @@ public sealed record ModelChoice(string Name, bool IsCloud)
     public string Tag => IsCloud ? "cloud · uses tokens" : "local · free";
 }
 
-/// <summary>A project's snapshots, as one group in the (grouped) snapshots panel. Derives from
-/// <see cref="List{T}"/> so a <see cref="Microsoft.UI.Xaml.Data.CollectionViewSource"/> can group
-/// on it directly — the ListView's group-header template binds to <see cref="Project"/> and
-/// <see cref="Count"/>.</summary>
-public sealed class SnapshotGroup : List<Services.ContextSnapshot>
+/// <summary>A stable project group. Row changes notify counts without recreating its Expander.</summary>
+public abstract class PanelGroup<T> : ObservableCollection<T>
 {
-    public SnapshotGroup(string project, IEnumerable<Services.ContextSnapshot> items) : base(items)
-        => Project = project;
-
+    protected PanelGroup(string project, IEnumerable<T> items) : base(items) => Project = project;
     public string Project { get; }
-
-    /// <summary>Whether the group's Expander is open. Set when the groups are rebuilt (from the
-    /// remembered collapsed-set) and read once via a OneTime x:Bind — the Expander's own
-    /// expand/collapse events keep the remembered set current thereafter.</summary>
     public bool IsExpanded { get; set; } = true;
-
-    /// <summary>Label for the group's "delete everything shown here" button. Computed here rather
-    /// than assembled in XAML so the count is exact; a OneTime binding is always current because the
-    /// groups are rebuilt on every panel populate.</summary>
     public string DeleteAllLabel => $"Delete all {Count}";
-
-    /// <summary>The group action only earns its space once there's more than one item — with a single
-    /// card, that card's own Delete button already does the same job. Bound as Visibility rather than
-    /// a bool because x:Bind does no implicit bool-to-Visibility conversion.</summary>
     public Visibility DeleteAllVisibility => Count > 1 ? Visibility.Visible : Visibility.Collapsed;
+    protected override void OnPropertyChanged(PropertyChangedEventArgs e)
+    {
+        base.OnPropertyChanged(e);
+        if (e.PropertyName == nameof(Count))
+        {
+            base.OnPropertyChanged(new(nameof(DeleteAllLabel)));
+            base.OnPropertyChanged(new(nameof(DeleteAllVisibility)));
+        }
+    }
 }
 
-/// <summary>A project's closed conversations, as one collapsible group in the History panel —
-/// the archive twin of <see cref="SnapshotGroup"/>.</summary>
-public sealed class HistoryGroup : List<Services.SessionArchiveEntry>
-{
-    public HistoryGroup(string project, IEnumerable<Services.SessionArchiveEntry> items) : base(items)
-        => Project = project;
-
-    public string Project { get; }
-
-    public bool IsExpanded { get; set; } = true;
-
-    /// <summary>See <see cref="SnapshotGroup.DeleteAllLabel"/>.</summary>
-    public string DeleteAllLabel => $"Delete all {Count}";
-
-    /// <summary>See <see cref="SnapshotGroup.DeleteAllVisibility"/>.</summary>
-    public Visibility DeleteAllVisibility => Count > 1 ? Visibility.Visible : Visibility.Collapsed;
-}
+public sealed class SnapshotGroup(string project, IEnumerable<ContextSnapshot> items) : PanelGroup<ContextSnapshot>(project, items);
+public sealed class HistoryGroup(string project, IEnumerable<SessionArchiveEntry> items) : PanelGroup<SessionArchiveEntry>(project, items);
 
 /// <summary>
 /// One note as the panel shows it: the note itself plus the search snippet that explains why it
@@ -115,14 +92,7 @@ public sealed class NoteRow
 /// Deliberately WITHOUT the "Delete all n" group action those two carry. A snapshot or an archived
 /// conversation is a derived artifact the app made; a note is something the user wrote by hand, and
 /// one button that deletes a folder's worth of writing is a different class of risk.</summary>
-public sealed class NoteGroup : List<NoteRow>
-{
-    public NoteGroup(string project, IEnumerable<NoteRow> items) : base(items) => Project = project;
-
-    public string Project { get; }
-
-    public bool IsExpanded { get; set; } = true;
-}
+public sealed class NoteGroup(string project, IEnumerable<NoteRow> items) : PanelGroup<NoteRow>(project, items);
 
 /// <summary>
 /// One tile in the Appearance page's shipped-background gallery. Selection is baked in at build
