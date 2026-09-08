@@ -16,6 +16,12 @@ for every approved plan. Desktop's version follows the engine generation, so it 
 0.15.0.
 
 ### Added
+- **PDFs open in the preview pane.** Selecting a PDF in the Explorer shows it in the browser's own
+  viewer — scroll, zoom, search, print — instead of only offering to open it in another
+  application. This is for reading: a PDF's text and structure are not reachable through the page
+  DOM, so the assistant cannot read one. It is told that plainly, and told to judge the document
+  from a screenshot on a vision-capable model, rather than being handed an empty page it might
+  report as a blank document.
 - **Pinned and recently used models rise to the top of the model picker.** A pin on each row in
   Settings keeps the models you actually use at the top; below them sit the models you most
   recently switched to, then everything else alphabetically. Pins and recent use are remembered

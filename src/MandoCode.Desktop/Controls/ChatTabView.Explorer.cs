@@ -311,9 +311,16 @@ public sealed partial class ChatTabView
     {
         ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico"
     };
+    /// <summary>
+    /// Rendered in the browser pane rather than as text or an image. PDFs are here for the user's
+    /// benefit only — the browser's own viewer displays them. The agent's allowlist
+    /// (DesktopPreviewTools.BrowserExtensions) deliberately does NOT include .pdf: a PDF's contents
+    /// are not reachable through the DOM, so letting the agent open one would hand it a page that
+    /// looks successfully loaded and reads as completely empty.
+    /// </summary>
     private static readonly HashSet<string> BrowserPreviewExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".html", ".htm", ".svg"
+        ".html", ".htm", ".svg", ".pdf"
     };
     private const long MaxPreviewBytes = 1024 * 1024;
 
