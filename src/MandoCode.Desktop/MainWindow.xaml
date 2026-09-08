@@ -269,6 +269,7 @@
                      across search/import (see _collapsedSnapshotGroups). -->
                 <ScrollViewer x:Name="SnapshotsScroller" Grid.Row="2">
                     <ListView x:Name="SnapshotsList" SelectionMode="None" Padding="10,2,10,12">
+                        <ListView.ItemContainerTransitions><TransitionCollection/></ListView.ItemContainerTransitions>
                         <ListView.ItemContainerStyle>
                             <Style TargetType="ListViewItem">
                                 <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
@@ -289,7 +290,7 @@
                                                        VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                                             <Border CornerRadius="7" Padding="6,0" VerticalAlignment="Center"
                                                     Background="{StaticResource MandoPanelBrush}">
-                                                <TextBlock Text="{x:Bind Count}" FontSize="10" Opacity="0.7"/>
+                                                <TextBlock Text="{x:Bind Count, Mode=OneWay}" FontSize="10" Opacity="0.7"/>
                                             </Border>
                                         </StackPanel>
                                     </Expander.Header>
@@ -301,14 +302,14 @@
                                              Hidden for a single-item group — that card's
                                              own Delete already does the same job. -->
                                         <Button Click="SnapshotDeleteGroup_Click" Tag="{x:Bind}"
-                                                Visibility="{x:Bind DeleteAllVisibility}"
+                                                Visibility="{x:Bind DeleteAllVisibility, Mode=OneWay}"
                                                 HorizontalAlignment="Right" Margin="0,0,0,8" Padding="8,3"
                                                 Background="Transparent" BorderThickness="0"
                                                 ToolTipService.ToolTip="Delete every snapshot shown in this project"
                                                 AutomationProperties.Name="Delete every snapshot shown in this project">
                                             <StackPanel Orientation="Horizontal" Spacing="6">
                                                 <FontIcon Glyph="&#xE74D;" FontSize="11" Opacity="0.75"/>
-                                                <TextBlock Text="{x:Bind DeleteAllLabel}" FontSize="11" Opacity="0.75"/>
+                                                <TextBlock Text="{x:Bind DeleteAllLabel, Mode=OneWay}" FontSize="11" Opacity="0.75"/>
                                             </StackPanel>
                                         </Button>
                                         <ItemsControl ItemsSource="{x:Bind}">
@@ -417,6 +418,7 @@
                      is remembered in code (see _collapsedHistoryGroups). -->
                 <ScrollViewer x:Name="HistoryScroller" Grid.Row="2">
                     <ListView x:Name="HistoryList" SelectionMode="None" Padding="10,2,10,12">
+                        <ListView.ItemContainerTransitions><TransitionCollection/></ListView.ItemContainerTransitions>
                         <ListView.ItemContainerStyle>
                             <Style TargetType="ListViewItem">
                                 <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
@@ -437,7 +439,7 @@
                                                        VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                                             <Border CornerRadius="7" Padding="6,0" VerticalAlignment="Center"
                                                     Background="{StaticResource MandoPanelBrush}">
-                                                <TextBlock Text="{x:Bind Count}" FontSize="10" Opacity="0.7"/>
+                                                <TextBlock Text="{x:Bind Count, Mode=OneWay}" FontSize="10" Opacity="0.7"/>
                                             </Border>
                                         </StackPanel>
                                     </Expander.Header>
@@ -449,14 +451,14 @@
                                              Hidden for a single-item group — that card's
                                              own Delete already does the same job. -->
                                         <Button Click="HistoryDeleteGroup_Click" Tag="{x:Bind}"
-                                                Visibility="{x:Bind DeleteAllVisibility}"
+                                                Visibility="{x:Bind DeleteAllVisibility, Mode=OneWay}"
                                                 HorizontalAlignment="Right" Margin="0,0,0,8" Padding="8,3"
                                                 Background="Transparent" BorderThickness="0"
                                                 ToolTipService.ToolTip="Delete every conversation shown in this project"
                                                 AutomationProperties.Name="Delete every conversation shown in this project">
                                             <StackPanel Orientation="Horizontal" Spacing="6">
                                                 <FontIcon Glyph="&#xE74D;" FontSize="11" Opacity="0.75"/>
-                                                <TextBlock Text="{x:Bind DeleteAllLabel}" FontSize="11" Opacity="0.75"/>
+                                                <TextBlock Text="{x:Bind DeleteAllLabel, Mode=OneWay}" FontSize="11" Opacity="0.75"/>
                                             </StackPanel>
                                         </Button>
                                         <ItemsControl ItemsSource="{x:Bind}">
@@ -622,6 +624,7 @@
 
                 <ScrollViewer x:Name="NotesScroller" Grid.Row="2">
                     <ListView x:Name="NotesList" SelectionMode="None" Padding="10,2,10,12">
+                        <ListView.ItemContainerTransitions><TransitionCollection/></ListView.ItemContainerTransitions>
                         <ListView.ItemContainerStyle>
                             <Style TargetType="ListViewItem">
                                 <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
@@ -642,7 +645,7 @@
                                                        VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                                             <Border CornerRadius="7" Padding="6,0" VerticalAlignment="Center"
                                                     Background="{StaticResource MandoPanelBrush}">
-                                                <TextBlock Text="{x:Bind Count}" FontSize="10" Opacity="0.7"/>
+                                                <TextBlock Text="{x:Bind Count, Mode=OneWay}" FontSize="10" Opacity="0.7"/>
                                             </Border>
                                         </StackPanel>
                                     </Expander.Header>

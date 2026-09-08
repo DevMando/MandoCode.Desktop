@@ -178,6 +178,8 @@ public sealed partial class MainWindow
         || s.ProjectLabel.Contains(q, StringComparison.OrdinalIgnoreCase)
         || (s.Recap?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false);
 
+    private readonly System.Collections.ObjectModel.ObservableCollection<SnapshotGroup> _visibleSnapshotsGroups = new();
+
     private void PopulateSnapshots()
     {
         var all = _snapshotStore.Items;   // newest-first copy of the shared store
@@ -202,7 +204,14 @@ public sealed partial class MainWindow
             .Select(g => new SnapshotGroup(g.Key, g) { IsExpanded = !_collapsedSnapshotGroups.Contains(g.Key) })
             .ToList();
 
-        SnapshotsList.ItemsSource = groups;
+        foreach (var incoming in groups)
+        {
+            var existing = _visibleSnapshotsGroups.FirstOrDefault(g => g.Project == incoming.Project);
+            if (existing != null)
+                StableCollection.Update(existing, incoming, row => row.Id, ReferenceEquals);
+        }
+        StableCollection.Update(_visibleSnapshotsGroups, groups, g => g.Project, (a, b) => true);
+        if (SnapshotsList.ItemsSource == null) SnapshotsList.ItemsSource = _visibleSnapshotsGroups;
 
         var nothingToShow = groups.Count == 0;
         SnapshotsEmpty.Text = storeEmpty

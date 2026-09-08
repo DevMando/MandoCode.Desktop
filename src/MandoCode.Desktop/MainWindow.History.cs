@@ -234,6 +234,8 @@ public sealed partial class MainWindow
         || (s.Preview?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false)
         || _historyContentHits.ContainsKey(s.Key);
 
+    private readonly System.Collections.ObjectModel.ObservableCollection<HistoryGroup> _visibleHistoryGroups = new();
+
     private void PopulateHistory()
     {
         var all = _archive.Items;   // newest-first copy
@@ -244,8 +246,10 @@ public sealed partial class MainWindow
         var filtered = string.IsNullOrEmpty(q) ? all : all.Where(s => Matches(s, q)).ToList();
 
         // Stamp the snippet onto EVERY row, not just the matches, so a snippet from a previous query
-        // can't linger on a row the new query matched by title. Read once by a OneTime x:Bind —
-        // ItemsSource is reassigned below, so the templates always re-bind.
+        // can't linger on a row the new query matched by title. Rebind rows when snippets change;
+        // ordinary deletes keep surviving rows and expanded groups in place.
+        var snippetsChanged = all.Any(entry => entry.MatchSnippet !=
+            (_historyContentHits.TryGetValue(entry.Key, out var hit) ? hit : null));
         foreach (var entry in all)
             entry.MatchSnippet = _historyContentHits.TryGetValue(entry.Key, out var snippet) ? snippet : null;
 
@@ -257,7 +261,14 @@ public sealed partial class MainWindow
             .Select(g => new HistoryGroup(g.Key, g) { IsExpanded = !_collapsedHistoryGroups.Contains(g.Key) })
             .ToList();
 
-        HistoryList.ItemsSource = groups;
+        foreach (var incoming in groups)
+        {
+            var existing = _visibleHistoryGroups.FirstOrDefault(g => g.Project == incoming.Project);
+            if (existing != null)
+                StableCollection.Update(existing, incoming, row => row.Key, (a, b) => !snippetsChanged && ReferenceEquals(a, b));
+        }
+        StableCollection.Update(_visibleHistoryGroups, groups, g => g.Project, (a, b) => true);
+        if (HistoryList.ItemsSource == null) HistoryList.ItemsSource = _visibleHistoryGroups;
 
         var nothingToShow = groups.Count == 0;
         HistoryEmpty.Text = storeEmpty
