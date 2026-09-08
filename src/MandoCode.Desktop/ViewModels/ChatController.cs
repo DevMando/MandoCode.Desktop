@@ -1583,7 +1583,8 @@ public sealed partial class ChatController
         if (recommendedCtx > 0 && recommendedCtx != _config.ContextLength)
         {
             _config.ContextLength = recommendedCtx;
-            _transcript.Append(_html.Dim($"Context window sized to {recommendedCtx / 1024}k tokens for this model tier (applies from your next message)."));
+            if (!DeferModelAnnouncement)
+                _transcript.Append(_html.Dim($"Context window sized to {recommendedCtx / 1024}k tokens for this model tier (applies from your next message)."));
         }
 
         _busy.Start("Switching model...");
@@ -1609,7 +1610,8 @@ public sealed partial class ChatController
         if (MandoCodeConfig.IsCloudModel(modelTag) && !_cloudNoticeShown)
         {
             _cloudNoticeShown = true;
-            _transcript.Append(_html.Dim("Cloud models run on ollama.com and need an active cloud subscription."));
+            if (!DeferModelAnnouncement)
+                _transcript.Append(_html.Dim("Cloud models run on ollama.com and need an active cloud subscription."));
         }
 
         // Only mention the cleared context — and offer a snapshot — when there was actually a

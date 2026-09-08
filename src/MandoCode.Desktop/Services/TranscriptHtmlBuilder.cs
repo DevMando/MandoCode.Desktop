@@ -103,7 +103,8 @@ public sealed class TranscriptHtmlBuilder : ITranscriptHtml
         // Boot/progress narration — true only while it was happening. ("Project root
         // changed to: X" is deliberately NOT here: that's a real event, kept as history.)
         || blockHtml.Contains(">Rebuilding the AI session for the new project…<", StringComparison.Ordinal)
-        || blockHtml.Contains(">✓ Ready.<", StringComparison.Ordinal);
+        || blockHtml.Contains(">✓ Ready.<", StringComparison.Ordinal)
+        || ModelNoticeReplay.IsTransient(blockHtml);
 
     /// <summary>A compact status pill — a colored state dot, a bold primary value, and an
     /// optional dim qualifier. The dot replaces status emoji: crisp and theme-aware.
