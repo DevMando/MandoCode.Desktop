@@ -1,4 +1,4 @@
-<Application
+﻿<Application
     x:Class="MandoCode.Desktop.App"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -43,6 +43,16 @@
                  value, used only until Initialize applies the saved theme. -->
             <Color x:Key="MandoRaisedColor">#3E2753</Color>
             <SolidColorBrush x:Key="MandoRaisedBrush" Color="{StaticResource MandoRaisedColor}" />
+
+            <!-- Translucent panel, for native surfaces that sit OVER the user's chat background
+                 image and have to stay readable on top of whatever it happens to be. Same recipe
+                 as the transcript's message bubbles (transcript.css: panel at ~82-90%), so the
+                 empty state reads like the chat it replaces. Alpha, not Opacity: Opacity on a
+                 container fades its text too, which is the readability problem, not the fix.
+                 This literal is the Mando Dark value, used only until Initialize applies the
+                 saved theme — ThemeManager.ApplyCore re-derives it from each theme's Panel. -->
+            <Color x:Key="MandoGlassColor">#E6201A2E</Color>
+            <SolidColorBrush x:Key="MandoGlassBrush" Color="{StaticResource MandoGlassColor}" />
 
             <!-- Replace the user's Windows accent color with MandoCode purple so
                  accent buttons, toggle switches, sliders, and selection highlights

@@ -925,25 +925,38 @@
                 <Image x:Name="EmptyBgImage" Visibility="Collapsed" Stretch="UniformToFill"
                        Grid.ColumnSpan="5" Grid.RowSpan="3"
                        HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
-                <StackPanel x:Name="EmptyAgentsState" Visibility="Collapsed"
-                            Grid.ColumnSpan="5" Grid.RowSpan="3"
-                            HorizontalAlignment="Center" VerticalAlignment="Center"
-                            Spacing="14" MaxWidth="360">
-                    <FontIcon Glyph="&#xE8BD;" FontSize="40" HorizontalAlignment="Center"
-                              Foreground="{StaticResource MandoAccentBrush}" Opacity="0.85"/>
-                    <TextBlock Text="No agents open" FontSize="20" FontWeight="SemiBold"
-                               HorizontalAlignment="Center"/>
-                    <TextBlock Text="You've closed every agent. Start a new one to begin a conversation — your snapshots and closed conversations are still saved in the rail."
-                               Opacity="0.6" FontSize="13" TextWrapping="Wrap" TextAlignment="Center"/>
-                    <Button Click="AddTab_Click" HorizontalAlignment="Center" Padding="14,7"
-                            Background="{StaticResource MandoAccentBrush}" BorderThickness="0"
-                            AutomationProperties.Name="New agent">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <FontIcon Glyph="&#xE710;" FontSize="13" Foreground="White"/>
-                            <TextBlock Text="New agent" FontSize="13" Foreground="White"/>
-                        </StackPanel>
-                    </Button>
-                </StackPanel>
+                <!-- The copy sits in a bubble, not loose on the backdrop: with a chat background
+                     image behind it (EmptyBgImage, above) plain text landed on whatever the picture
+                     happened to be and was often unreadable. MandoGlassBrush is the panel color with
+                     alpha, the same recipe as the transcript's message bubbles, so the image still
+                     reads THROUGH the card while the text sits on a predictable surface. It stays on
+                     without an image too — panel-on-background is a normal card there, and one
+                     appearance beats a card that pops in and out with the user's wallpaper choice. -->
+                <Border x:Name="EmptyAgentsState" Visibility="Collapsed"
+                        Grid.ColumnSpan="5" Grid.RowSpan="3"
+                        HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Background="{StaticResource MandoGlassBrush}"
+                        BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1"
+                        CornerRadius="14" Padding="32,28">
+                    <StackPanel HorizontalAlignment="Center" Spacing="14" MaxWidth="360">
+                        <FontIcon Glyph="&#xE8BD;" FontSize="40" HorizontalAlignment="Center"
+                                  Foreground="{StaticResource MandoAccentBrush}" Opacity="0.85"/>
+                        <TextBlock Text="No agents open" FontSize="20" FontWeight="SemiBold"
+                                   HorizontalAlignment="Center"/>
+                        <!-- 0.8, not the 0.6 this used to be. Dimming reads as secondary against a
+                             flat panel; over a background image it just costs contrast. -->
+                        <TextBlock Text="You've closed every agent. Start a new one to begin a conversation — your snapshots and closed conversations are still saved in the rail."
+                                   Opacity="0.8" FontSize="13" TextWrapping="Wrap" TextAlignment="Center"/>
+                        <Button Click="AddTab_Click" HorizontalAlignment="Center" Padding="14,7"
+                                Background="{StaticResource MandoAccentBrush}" BorderThickness="0"
+                                AutomationProperties.Name="New agent">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE710;" FontSize="13" Foreground="White"/>
+                                <TextBlock Text="New agent" FontSize="13" Foreground="White"/>
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </Border>
 
                 <!-- ============ SETTINGS PAGE (global defaults) ============
                      The starting point every NEW agent is seeded from. The identical form, bound to
