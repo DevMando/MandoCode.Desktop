@@ -16,6 +16,13 @@
     try { window.chrome.webview.postMessage(JSON.stringify(obj)); } catch (e) { }
   }
 
+  // A blinking-less, invisible cursor: xterm still tracks a cursor position in a read-only
+  // buffer, and showing it would promise a text entry point that does not exist.
+  function readOnlyTheme(t) {
+    const base = makeTheme(t);
+    return Object.assign({}, base, { cursor: "transparent", cursorAccent: base.background });
+  }
+
   function makeTheme(t) {
     return t || {
       background: "#0b0b12",
@@ -31,7 +38,9 @@
     };
   }
 
-  function create(id, cols, rows, theme) {
+  // readOnly backs the agent-output tab: same renderer, but nothing is sent back to C# and no
+  // cursor is drawn, because there is no process on the other end for a keystroke to reach.
+  function create(id, cols, rows, theme, readOnly) {
     if (terms[id]) return;
 
     const el = document.createElement("div");
@@ -47,20 +56,24 @@
       fontFamily: "Cascadia Mono, Consolas, 'Courier New', monospace",
       fontSize: 13,
       lineHeight: 1.1,
-      theme: makeTheme(theme),
+      theme: readOnly ? readOnlyTheme(theme) : makeTheme(theme),
       scrollback: 5000,
-      allowProposedApi: true
+      allowProposedApi: true,
+      disableStdin: !!readOnly
     });
 
     const fit = new FitAddonNS.FitAddon();
     term.loadAddon(fit);
     term.open(el);
 
-    // Keystrokes / pasted text -> C# -> shell stdin.
-    term.onData(d => post({ type: "data", id: id, data: d }));
-    term.onBinary(d => post({ type: "data", id: id, data: d }));
+    // Keystrokes / pasted text -> C# -> shell stdin. Never wired for a read-only terminal, so
+    // input is dropped here rather than travelling to C# to be ignored there.
+    if (!readOnly) {
+      term.onData(d => post({ type: "data", id: id, data: d }));
+      term.onBinary(d => post({ type: "data", id: id, data: d }));
+    }
 
-    terms[id] = { term: term, fit: fit, el: el };
+    terms[id] = { term: term, fit: fit, el: el, readOnly: !!readOnly };
   }
 
   function write(id, b64) {
@@ -89,7 +102,8 @@
 
   function focus(id) {
     const t = terms[id];
-    if (t) setTimeout(() => { try { t.term.focus(); } catch (e) { } }, 0);
+    if (!t || t.readOnly) return;   // nothing to type into; leave the caret where the user put it
+    setTimeout(() => { try { t.term.focus(); } catch (e) { } }, 0);
   }
 
   function dispose(id) {
@@ -117,7 +131,10 @@
   }
 
   function setTheme(theme) {
-    for (const k in terms) terms[k].term.options.theme = makeTheme(theme);
+    for (const k in terms) {
+      terms[k].term.options.theme =
+        terms[k].readOnly ? readOnlyTheme(theme) : makeTheme(theme);
+    }
   }
 
   // C# -> JS (host.PostWebMessageAsJson -> parsed object on e.data).
@@ -125,7 +142,7 @@
     const m = e.data;
     if (!m || !m.type) return;
     switch (m.type) {
-      case "create": create(m.id, m.cols, m.rows, m.theme); break;
+      case "create": create(m.id, m.cols, m.rows, m.theme, m.readOnly); break;
       case "write": write(m.id, m.data); break;
       case "show": show(m.id); break;
       case "fit": fit(m.id); break;

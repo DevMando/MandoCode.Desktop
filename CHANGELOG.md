@@ -16,6 +16,20 @@ for every approved plan. Desktop's version follows the engine generation, so it 
 0.15.0.
 
 ### Added
+- **Watch the agent's shell commands run.** The terminal panel gains a read-only tab per agent
+  showing every command that agent runs — the command and the folder it runs in, its output line by
+  line as it arrives, and whether it finished, failed, or was killed for taking too long. A long
+  build is no longer ninety seconds of silence. The tab is deliberately read-only: the agent's
+  commands still run through captured pipes rather than a terminal, so nothing about what the model
+  receives, how commands are timed out, or how they report their exit code changes. The view keeps
+  more scrollback than the model is given, so the tail of a long build is visible even though the
+  model's copy is truncated. Output is recorded from launch, so opening the panel after a build
+  still shows it. A tab never steals focus while you are working in a shell — its title accents
+  instead — and closing one discards that agent's recorded output. The terminal button on the rail
+  carries a dot when an agent has produced output you have not seen, so the tab is discoverable
+  without opening the panel to find it: the dot pulses while a command is actually running and goes
+  still once it finishes, and following it opens the panel directly on that agent's output rather
+  than on an empty shell. Themes that switch off motion get the still dot in both cases.
 - **PDFs open in the preview pane.** Selecting a PDF in the Explorer shows it in the browser's own
   viewer — scroll, zoom, search, print — instead of only offering to open it in another
   application. This is for reading: a PDF's text and structure are not reachable through the page

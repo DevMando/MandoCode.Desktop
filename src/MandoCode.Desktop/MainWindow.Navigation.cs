@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Text.Json;
 using MandoCode.Models;
@@ -146,6 +146,35 @@ public sealed partial class MainWindow
         NavHistoryIcon.Foreground = HistoryPanelOpen ? accent : normal;
         NavNotesIcon.Foreground = NotesPanelOpen ? accent : normal;
         NavTerminalIcon.Foreground = _terminalOpen ? accent : normal;
+
+        // Unread agent output is cleared the moment the user is actually looking at an agent's
+        // tab — not merely when the panel is open, since it may well be open on a shell.
+        if (_terminalOpen && (_terminal?.ActiveTabIsAgentOutput ?? false)) _agentOutputUnread = false;
+        var showBadge = _agentOutputUnread;
+        NavTerminalBadge.Visibility = showBadge ? Visibility.Visible : Visibility.Collapsed;
+
+        // Motion means "a command is running right now"; a still dot means "output is waiting".
+        // FlatMotion themes opt out of animation entirely, so they get the still dot in both cases
+        // rather than a pulse the theme has said it doesn't want.
+        var pulse = showBadge && AnyAgentCommandRunning && !ThemeManager.Current.FlatMotion;
+        if (pulse)
+        {
+            if (!_navTerminalBadgePulsing) { _navTerminalBadgePulsing = true; NavTerminalBadgePulse.Begin(); }
+        }
+        else if (_navTerminalBadgePulsing)
+        {
+            // Stopped, not just hidden: an animation left running behind a collapsed element keeps
+            // the compositor busy for no visible benefit.
+            _navTerminalBadgePulsing = false;
+            NavTerminalBadgePulse.Stop();
+            NavTerminalBadge.Opacity = 1.0;
+        }
+
+        ToolTipService.SetToolTip(NavTerminal, showBadge
+            ? (AnyAgentCommandRunning
+                ? "Terminal — agent is running a command (Ctrl+`)"
+                : "Terminal — agent output waiting (Ctrl+`)")
+            : "Terminal — open a shell, or watch agent commands (Ctrl+`)");
 
         // MCP acts on the selected agent, so it needs one open. Settings no longer does — it edits
         // the defaults for FUTURE agents, which is exactly the thing you might want to set up before

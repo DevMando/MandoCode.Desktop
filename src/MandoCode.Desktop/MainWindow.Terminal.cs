@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Text.Json;
 using MandoCode.Models;
@@ -52,7 +52,120 @@ public sealed partial class MainWindow
         _terminal.WorkingDirectoryProvider = () => ActiveChat?.Session.ProjectRoot.ProjectRoot;
         _terminal.CloseRequested += (_, _) => CloseTerminalPanel();
         _terminal.MaximizeRequested += (_, _) => ToggleMaximizeTerminal();
+
+        // Agent output tabs can only be built once the xterm host is live. Until then every
+        // agent's AgentCommandLog is holding its own scrollback, so nothing is lost by waiting.
+        _terminal.Ready += (_, _) =>
+        {
+            AttachAllAgentOutputs();
+            // Agent tabs only exist after the line above, and the panel has already put a starter
+            // shell in front by now — so the choice of landing tab has to be made here, once
+            // there's something to choose between.
+            ShowAgentOutputIfWaiting();
+        };
+        _terminal.AgentOutputClosed += (_, key) => FindSessionByKey(key)?.CommandLog.Clear();
+        _terminal.ActiveTabChanged += (_, _) => RefreshNavIcons();   // may clear the unread badge
+        if (_terminal.IsReady) AttachAllAgentOutputs();
         return _terminal;
+    }
+
+    // ============================================================
+    // Agent command output (read-only terminal tabs)
+    // ============================================================
+
+    /// <summary>Agents already piped into the terminal panel, so a second call can't double-subscribe
+    /// and echo every line twice.</summary>
+    private readonly HashSet<string> _agentOutputAttached = new();
+
+    /// <summary>Agents whose badge subscription is live. Separate from <see cref="_agentOutputAttached"/>
+    /// on purpose: that one waits for the terminal panel, and this one must NOT — the badge exists
+    /// to advertise a panel the user has not opened.</summary>
+    private readonly HashSet<string> _agentOutputWatched = new();
+
+    /// <summary>An agent has printed something the user has not looked at yet.</summary>
+    private bool _agentOutputUnread;
+
+    /// <summary>Whether the badge's pulse storyboard is currently running.</summary>
+    private bool _navTerminalBadgePulsing;
+
+    /// <summary>True while ANY open agent has a shell command in flight — the rail is one badge for
+    /// every agent, so it pulses if any of them is working.</summary>
+    private bool AnyAgentCommandRunning => _tabs.Any(t => t.View.Session.CommandLog.IsRunning);
+
+    /// <summary>
+    /// Lights the rail's terminal badge whenever an agent runs a command the user isn't watching.
+    /// Subscribes on agent creation regardless of whether the terminal has ever been opened, which
+    /// is the whole point — the first command a user's agent runs is the one that has to advertise
+    /// the tab they don't know about.
+    /// </summary>
+    private void WatchAgentOutputForBadge(AgentSession session)
+    {
+        if (!_agentOutputWatched.Add(AgentOutputKey(session))) return;
+
+        session.CommandLog.Appended += _ => DispatcherQueue.TryEnqueue(() =>
+        {
+            // Already watching this agent's tab? Then it isn't unread — it's just being read.
+            if (_terminalOpen && (_terminal?.ActiveTabIsAgentOutput ?? false)) return;
+            if (_agentOutputUnread) return;   // already lit; skip the rail refresh
+            _agentOutputUnread = true;
+            RefreshNavIcons();
+        });
+
+        // Start and stop are what drive the pulse, and they bracket the output rather than riding
+        // along with it — a command can run for a minute without printing a line.
+        session.CommandLog.RunningChanged += _ => DispatcherQueue.TryEnqueue(RefreshNavIcons);
+    }
+
+    /// <summary>
+    /// The panel is shared by every agent, so each one's output needs a stable key to own a tab
+    /// with. PersistKey is that key: it already survives restarts and renames.
+    /// </summary>
+    private static string AgentOutputKey(AgentSession session) => session.PersistKey;
+
+    private AgentSession? FindSessionByKey(string key) =>
+        _tabs.FirstOrDefault(t => AgentOutputKey(t.View.Session) == key)?.View.Session;
+
+    private void AttachAllAgentOutputs()
+    {
+        foreach (var tab in _tabs) AttachAgentOutput(tab.View.Session);
+    }
+
+    /// <summary>
+    /// Lands the newly-opened panel on an agent's output when that is what the user came to see.
+    /// Gated on unread output rather than merely on a tab existing, so someone reaching for Ctrl+`
+    /// to get a shell still gets one — the redirect only happens when the rail was advertising
+    /// something. Not focus-stealing: the panel was just opened by hand, and choosing which tab it
+    /// opens on is not the same as switching tabs out from under someone mid-command.
+    /// </summary>
+    private void ShowAgentOutputIfWaiting()
+    {
+        if (!_agentOutputUnread) return;
+        if (_terminal?.FocusAgentOutput() == true) RefreshNavIcons();   // now read: clears the badge
+    }
+
+    /// <summary>
+    /// Pipes one agent's command log into the terminal panel: replays what it has already recorded,
+    /// then follows it live. Safe to call repeatedly — only the first call for an agent subscribes.
+    /// No-op until the panel exists and its xterm host is up; <see cref="AttachAllAgentOutputs"/>
+    /// runs then and catches up whatever was missed.
+    /// </summary>
+    private void AttachAgentOutput(AgentSession session)
+    {
+        var panel = _terminal;
+        if (panel == null || !panel.IsReady) return;
+
+        var key = AgentOutputKey(session);
+        if (!_agentOutputAttached.Add(key)) return;
+
+        var title = session.Title;
+        var backlog = session.CommandLog.Snapshot();
+        if (!string.IsNullOrEmpty(backlog)) panel.WriteAgentOutput(key, title, backlog);
+
+        // Raised on the command's own reader threads — hop to the UI thread before touching the
+        // WebView. The log keeps its copy either way, so a dropped enqueue costs a live update,
+        // never the scrollback.
+        session.CommandLog.Appended += text =>
+            DispatcherQueue.TryEnqueue(() => _terminal?.WriteAgentOutput(key, session.Title, text));
     }
 
     private void NavTerminal_Click(object sender, RoutedEventArgs e) => ToggleTerminal();
@@ -68,6 +181,8 @@ public sealed partial class MainWindow
         var term = EnsureTerminal();
         if (_terminalOpen) { term.FocusActive(); return; }
         _terminalOpen = true;
+        // Ready fires once, on the very first open. Every reopen after that comes through here.
+        ShowAgentOutputIfWaiting();
         RefreshNavIcons();
 
         term.Visibility = Visibility.Visible;

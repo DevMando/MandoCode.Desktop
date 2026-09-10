@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 using MandoCode.Desktop.Services;
 using Microsoft.UI.Xaml;
@@ -19,10 +19,19 @@ public sealed partial class TerminalPanel : UserControl
     private sealed class TerminalTab
     {
         public required string Id { get; init; }
-        public required ShellSpec Shell { get; init; }
-        public required TerminalSession Session { get; init; }
+
+        // Both null for the agent-output tab: it has no shell and no process behind it. That is
+        // what makes it read-only — there is nothing for a keystroke to be written to.
+        public ShellSpec? Shell { get; init; }
+        public TerminalSession? Session { get; init; }
         public required Border Header { get; init; }
         public required TextBlock Title { get; init; }
+
+        /// <summary>The agent this tab mirrors, for an output tab; null for a real shell.</summary>
+        public string? AgentKey { get; init; }
+
+        /// <summary>New output arrived while this tab was not the visible one.</summary>
+        public bool Unread;
 
         // Output coalescing: the read thread appends here; a single UI-thread flush
         // drains it, so a burst of small reads becomes one write across the WebView bridge.
@@ -45,6 +54,30 @@ public sealed partial class TerminalPanel : UserControl
 
     /// <summary>Raised when the user toggles maximize/restore (host owns the row height).</summary>
     public event EventHandler? MaximizeRequested;
+
+    /// <summary>
+    /// Raised once the xterm host is live and tabs can be created. The host waits for this before
+    /// replaying agent scrollback, so nothing has to be buffered twice — <see cref="AgentCommandLog"/>
+    /// already holds it until someone can display it.
+    /// </summary>
+    public event EventHandler? Ready;
+
+    /// <summary>Raised with an agent key when the user closes that agent's output tab.</summary>
+    public event EventHandler<string>? AgentOutputClosed;
+
+    /// <summary>True once the xterm host has reported in and <see cref="WriteAgentOutput"/> works.</summary>
+    public bool IsReady => _webReady;
+
+    /// <summary>Raised when the visible tab changes, so the host can drop an unread cue.</summary>
+    public event EventHandler? ActiveTabChanged;
+
+    /// <summary>
+    /// True when the visible tab is an agent's output rather than a shell. The distinction matters
+    /// for the rail's unread badge: having the panel open on a shell tab is not the same as having
+    /// read what an agent printed.
+    /// </summary>
+    public bool ActiveTabIsAgentOutput =>
+        _activeId != null && _tabs.TryGetValue(_activeId, out var active) && active.AgentKey != null;
 
     /// <summary>Updates the maximize button's glyph/tooltip to reflect the current state.</summary>
     public void SetMaximized(bool maximized)
@@ -193,11 +226,80 @@ public sealed partial class TerminalPanel : UserControl
         });
     }
 
-    private (Border header, TextBlock title) BuildTabHeader(string id, ShellSpec shell)
+    // ---- Agent output tabs (read-only) -----------------------------------------
+
+    /// <summary>
+    /// Writes an agent's shell-command output into that agent's own read-only tab, creating the tab
+    /// on first use. The text is already terminal-formatted by <see cref="AgentCommandFormat"/>.
+    ///
+    /// <para>Creating a tab never switches to it. An agent running a build while you are typing in
+    /// a shell must not steal the panel out from under you — the tab title accents instead, and you
+    /// look when you want to.</para>
+    ///
+    /// <para>Must be called on the UI thread, and only once <see cref="IsReady"/> is true; output
+    /// arriving earlier stays in the agent's <see cref="AgentCommandLog"/> until the host replays
+    /// it.</para>
+    /// </summary>
+    public void WriteAgentOutput(string agentKey, string tabTitle, string text)
+    {
+        if (!_webReady || string.IsNullOrEmpty(text)) return;
+
+        var tab = EnsureAgentTab(agentKey, tabTitle);
+        if (tab == null) return;
+
+        Post(new { type = "write", id = tab.Id, data = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(text)) });
+
+        if (_activeId != tab.Id)
+        {
+            tab.Unread = true;
+            ApplyTabStyle(tab, active: false);
+        }
+    }
+
+    /// <summary>
+    /// Brings an agent output tab to the front, if one exists. Called when the panel is opened with
+    /// output waiting: the panel always creates a starter shell on first open, so without this the
+    /// user follows the rail badge, lands on an empty prompt, and has to hunt for the tab they came
+    /// for. Returns false when there is no output tab to show, leaving the shell in front.
+    /// </summary>
+    public bool FocusAgentOutput()
+    {
+        var tab = _tabs.Values.FirstOrDefault(t => t.AgentKey != null);
+        if (tab == null) return false;
+        SwitchTo(tab.Id);
+        return true;
+    }
+
+    /// <summary>Renames an agent's output tab in place, so a renamed agent stays recognizable.</summary>
+    public void RenameAgentOutput(string agentKey, string tabTitle)
+    {
+        var tab = _tabs.Values.FirstOrDefault(t => t.AgentKey == agentKey);
+        if (tab != null) tab.Title.Text = tabTitle;
+    }
+
+    private TerminalTab? EnsureAgentTab(string agentKey, string tabTitle)
+    {
+        var existing = _tabs.Values.FirstOrDefault(t => t.AgentKey == agentKey);
+        if (existing != null) return existing;
+
+        string id = "a" + (++_tabCounter);
+        var (header, title) = BuildTabHeader(id, shell: null, outputTitle: tabTitle);
+        var tab = new TerminalTab { Id = id, Header = header, Title = title, AgentKey = agentKey };
+        _tabs[id] = tab;
+        TabStrip.Children.Add(header);
+
+        // readOnly tells xterm not to accept or forward input at all; there is no process behind
+        // this tab for a keystroke to reach.
+        Post(new { type = "create", id, cols = 80, rows = 24, readOnly = true });
+        ApplyTabStyle(tab, active: false);
+        return tab;
+    }
+
+    private (Border header, TextBlock title) BuildTabHeader(string id, ShellSpec? shell, string? outputTitle = null)
     {
         var title = new TextBlock
         {
-            Text = shell.DisplayName,
+            Text = outputTitle ?? shell?.DisplayName ?? "Shell",
             FontSize = 12,
             VerticalAlignment = VerticalAlignment.Center,
         };
@@ -218,7 +320,9 @@ public sealed partial class TerminalPanel : UserControl
             Spacing = 6,
             VerticalAlignment = VerticalAlignment.Center,
         };
-        content.Children.Add(new FontIcon { Glyph = "", FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Opacity = 0.7 });
+        // A distinct glyph for the read-only output tab, so it is not mistaken for a
+        // shell you can type in before the cursor ever gets there.
+        content.Children.Add(new FontIcon { Glyph = outputTitle != null ? "\uE9D9" : "\uE756", FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Opacity = 0.7 });
         content.Children.Add(title);
         content.Children.Add(closeButton);
 
@@ -236,12 +340,15 @@ public sealed partial class TerminalPanel : UserControl
 
     private void SwitchTo(string id)
     {
-        if (!_tabs.ContainsKey(id)) return;
+        if (!_tabs.TryGetValue(id, out var target)) return;
         _activeId = id;
+        target.Unread = false;
         Post(new { type = "show", id });
 
         foreach (var t in _tabs.Values)
             ApplyTabStyle(t, active: t.Id == id);
+
+        ActiveTabChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void ApplyTabStyle(TerminalTab tab, bool active)
@@ -250,16 +357,27 @@ public sealed partial class TerminalPanel : UserControl
             ? (Brush)Application.Current.Resources["MandoBackgroundBrush"]
             : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         tab.Title.Opacity = active ? 1.0 : 0.65;
+        // An agent can produce output while you are looking at a different tab. Accenting the
+        // title is the only cue that anything happened — the panel deliberately never switches
+        // tabs on its own, which would yank you out of a shell mid-command.
+        tab.Title.Foreground = tab.Unread && !active
+            ? (Brush)Application.Current.Resources["MandoAccentBrush"]
+            : (Brush)Application.Current.Resources["MandoTextBrush"];
     }
 
     private void CloseTab(string id)
     {
         if (!_tabs.TryGetValue(id, out var tab)) return;
 
-        try { tab.Session.Dispose(); } catch { }
+        try { tab.Session?.Dispose(); } catch { }
         Post(new { type = "dispose", id });
         TabStrip.Children.Remove(tab.Header);
         _tabs.Remove(id);
+
+        // Closing an output tab is a dismissal, not a pause: tell the host so it clears that
+        // agent's scrollback. Otherwise the next command would reopen the tab and replay
+        // everything the user just closed.
+        if (tab.AgentKey != null) AgentOutputClosed?.Invoke(this, tab.AgentKey);
 
         if (_activeId == id) _activeId = null;
 
@@ -335,11 +453,15 @@ public sealed partial class TerminalPanel : UserControl
                 case "ready":
                     _webReady = true;
                     if (_tabs.Count == 0) AddTab(ShellCatalog.Default());
+                    Ready?.Invoke(this, EventArgs.Empty);
                     break;
 
                 case "data":
+                    // Null session = the agent-output tab. xterm is told not to send input for it,
+                    // so this is belt-and-braces: a keystroke that arrives anyway is dropped rather
+                    // than being written into some other tab's shell.
                     if (TryGetTab(root, out var t) && t != null)
-                        t.Session.Write(root.GetProperty("data").GetString() ?? "");
+                        t.Session?.Write(root.GetProperty("data").GetString() ?? "");
                     break;
 
                 case "resize":
@@ -347,7 +469,7 @@ public sealed partial class TerminalPanel : UserControl
                     {
                         short cols = (short)root.GetProperty("cols").GetInt32();
                         short rows = (short)root.GetProperty("rows").GetInt32();
-                        rt.Session.Resize(cols, rows);
+                        rt.Session?.Resize(cols, rows);
                     }
                     break;
             }
@@ -412,7 +534,7 @@ public sealed partial class TerminalPanel : UserControl
     {
         foreach (var tab in _tabs.Values)
         {
-            try { tab.Session.Dispose(); } catch { }
+            try { tab.Session?.Dispose(); } catch { }
         }
         _tabs.Clear();
     }

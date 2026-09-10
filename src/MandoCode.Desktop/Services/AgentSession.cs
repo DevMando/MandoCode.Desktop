@@ -65,6 +65,10 @@ public sealed class AgentSession
     public TokenTrackingService Tokens { get; }
     public PlanHandoff PlanHandoff { get; }
     public SkillLoader Skills { get; }
+
+    /// <summary>This agent's shell-command activity, as terminal-ready text. Always recording, so
+    /// the terminal panel can show work that ran before the user opened it.</summary>
+    public AgentCommandLog CommandLog { get; }
     public McpApprovalGate McpGate { get; }
     public AIService Ai { get; }
     public TaskPlannerService Planner { get; }
@@ -117,7 +121,11 @@ public sealed class AgentSession
         Skills = new SkillLoader(Config, ProjectRoot);
         McpGate = new McpApprovalGate(Config);
 
-        Ai = new AIService(ProjectRoot, Config, Tokens, PlanHandoff, Skills, mcpManager, McpGate, spinner);
+        // Attached once, here: the engine hands the sink to the filesystem plugin on every agent
+        // rebuild, so it survives model switches, settings changes, and folder changes without the
+        // host re-attaching anything.
+        CommandLog = new AgentCommandLog();
+        Ai = new AIService(ProjectRoot, Config, Tokens, PlanHandoff, Skills, mcpManager, McpGate, spinner, CommandLog);
         PreviewTools = new DesktopPreviewTools(ProjectRoot) { RequireTabId = true, ImageSink = new AgentImageSink(new AiServiceAdapter(Ai)) };
         Ai.SetHostTools([
             Microsoft.Extensions.AI.AIFunctionFactory.Create(PreviewTools.ListBrowserFrames, new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "list_browser_frames" }),
