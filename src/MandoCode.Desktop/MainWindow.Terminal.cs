@@ -70,6 +70,46 @@ public sealed partial class MainWindow
     }
 
     // ============================================================
+    // Agent directory (who is mentionable from another tab)
+    // ============================================================
+
+    /// <summary>
+    /// Republishes the open-agent register that '@' mentions and the cross-agent tools read from.
+    /// Called whenever the tab set or a tab's identity changes. A full rebuild rather than a diff:
+    /// the list is a handful of entries, and a rebuild cannot drift out of sync with the tabs.
+    ///
+    /// <para>Busy and plan state are read at publish time and go stale immediately — deliberately.
+    /// The register is a directory, not a live feed; the tools re-read it when they are called, and
+    /// <see cref="RefreshAgentDirectory"/> also runs on every tab-strip refresh, which is what a
+    /// turn starting or ending already triggers.</para>
+    /// </summary>
+    private void RefreshAgentDirectory()
+    {
+        // Lets a delegation digest name what the working agent has actually been running. Set here
+        // rather than at construction because it needs the tab list, which is this class's business.
+        _agentDirectory.CommandsProvider ??= key =>
+            _tabs.FirstOrDefault(t => t.View.Session.PersistKey == key)?.View.Session
+                 .CommandLog.RecentCommands(4) ?? Array.Empty<string>();
+
+        _agentDirectory.Replace(_tabs.Select(t =>
+        {
+            var s = t.View.Session;
+            return new AgentEntry(
+                Key: s.PersistKey,
+                Name: s.Title,
+                ProjectRoot: s.ProjectRoot.ProjectRoot,
+                FolderLabel: System.IO.Path.GetFileName(
+                    s.ProjectRoot.ProjectRoot.TrimEnd(System.IO.Path.DirectorySeparatorChar)) is { Length: > 0 } f
+                        ? f : s.ProjectRoot.ProjectRoot,
+                Model: s.Controller.ModelName,
+                IsBusy: s.Controller.IsProcessing,
+                IsRunningCommand: s.CommandLog.IsRunning,
+                PlanStep: s.Controller.PlanStep,
+                PlanTotal: s.Controller.PlanTotal);
+        }));
+    }
+
+    // ============================================================
     // Agent command output (read-only terminal tabs)
     // ============================================================
 

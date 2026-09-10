@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Text.Json;
 using MandoCode.Models;
@@ -569,6 +569,11 @@ public sealed partial class MainWindow
 
         _tabs.RemoveAt(index);
         TabStrip.Children.Remove(entry.Header);
+
+        // Stop other agents being able to address this one. The register is republished below via
+        // RefreshTabStrip, but the peer has to go explicitly — an entry disappearing from a display
+        // snapshot would still leave a live reference behind it.
+        _agentDirectory.RemovePeer(entry.View.Session.PersistKey);
 
         // Shut down BEFORE unparenting. Removing the view from the tree unloads the WebView2 and
         // nulls its CoreWebView2, so Close() and any last transcript write would hit null.

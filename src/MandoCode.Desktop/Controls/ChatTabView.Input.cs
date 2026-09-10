@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Text.Json;
 using MandoCode.Models;
 using MandoCode.Desktop.Services;
@@ -138,6 +138,22 @@ public sealed partial class ChatTabView
         if (tokenStart < caret && tokenStart < text.Length && text[tokenStart] == '@')
         {
             var fragment = text[(tokenStart + 1)..caret];
+
+            // Open agents rank ABOVE files. They are a small closed set against thousands of paths,
+            // callsigns are single capitalised words so genuine clashes are rare, and '@' already
+            // means "a participant" to anyone who has used Slack. A same-named file is still
+            // reachable — it has an extension or a separator, and neither matches a callsign.
+            var agents = Session.Agents?.Match(fragment, Session.PersistKey) ?? Array.Empty<AgentEntry>();
+            if (agents.Count > 0 && ShowSuggestions(SuggestMode.Agent, tokenStart, caret,
+                    agents.Select(a => new CommandSuggestion
+                    {
+                        Command = a.Name,
+                        Description = a.IsBusy
+                            ? $"agent — {a.FolderLabel} · working"
+                            : $"agent — {a.FolderLabel} · idle"
+                    })))
+                return;
+
             List<string> matches;
             try { matches = _fileProvider.FilterFiles(fragment); }
             catch { matches = new List<string>(); }
@@ -212,7 +228,20 @@ public sealed partial class ChatTabView
 
     private void AcceptSuggestion(CommandSuggestion s)
     {
-        if (_suggestMode == SuggestMode.File)
+        if (_suggestMode == SuggestMode.Agent)
+        {
+            var text = InputBox.Text;
+            var start = Math.Min(_tokenStart, text.Length);
+            var end = Math.Min(_tokenEnd, text.Length);
+
+            // Always closes with a space: a callsign is a whole token, so there is nothing to drill
+            // into the way a folder has.
+            var replacement = "@" + s.Command + " ";
+            InputBox.Text = text[..start] + replacement + text[end..];
+            InputBox.SelectionStart = start + replacement.Length;
+            HideSuggestions();
+        }
+        else if (_suggestMode == SuggestMode.File)
         {
             var text = InputBox.Text;
             var start = Math.Min(_tokenStart, text.Length);

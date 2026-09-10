@@ -28,6 +28,7 @@ public sealed partial class MainWindow : Window
     private readonly ConfigCoordinator _configs;   // owns the app-wide MCP server list (defaults)
     private readonly ItemTagStore _itemTags = new(); // Desktop-only organization metadata for Skills/MCPs
     private readonly TranscriptHtmlBuilder _html;   // app-global, stateless formatter
+    private readonly AgentDirectory _agentDirectory;   // open agents, for '@' mentions across tabs
     private readonly Microsoft.UI.Dispatching.DispatcherQueue _dispatcher;
 
     // Snapshots, History, and Notes share the one docked column left of the content (Grid.Column 1)
@@ -93,6 +94,7 @@ public sealed partial class MainWindow : Window
         _archive = services.GetRequiredService<SessionArchiveStore>();
         _skillCoordinator = services.GetRequiredService<SkillCoordinator>();
         _configs = services.GetRequiredService<ConfigCoordinator>();
+        _agentDirectory = services.GetRequiredService<AgentDirectory>();
 
         // The rail page edits the global defaults. Bound once, for the life of the window: unlike an
         // agent's pane there is nothing to re-point it at.

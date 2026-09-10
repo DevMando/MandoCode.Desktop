@@ -110,6 +110,21 @@ public sealed partial class MainWindow
         // its log records quietly and AttachAllAgentOutputs picks it up when the panel opens.
         AttachAgentOutput(session);
         WatchAgentOutputForBadge(session);
+        RefreshAgentDirectory();   // the new agent is now mentionable from every other tab
+
+        // A finished job is announced in the transcript of the agent that DELEGATED it, which is
+        // where the user was last talking about it. This is the "let me know when it's done" half,
+        // and it costs no model turn — the agent itself learns from its inbox on its next turn.
+        session.DelegationFinished += d => DispatcherQueue.TryEnqueue(() =>
+        {
+            var owner = _tabs.FirstOrDefault(t => t.View.Session.PersistKey == d.FromKey);
+            if (owner == null) return;   // the delegating tab closed while the job ran
+
+            var text = DelegationRegistry.CompletionLine(d);
+            owner.View.Session.Transcript.Append(
+                d.State == DelegationState.Done ? _html.Success(text) : _html.Warn(text));
+            RefreshTabStrip();   // badges the tab so it is noticed from another one
+        });
 
         SelectTab(entry);
         if (SnapshotsPanelOpen) PopulateSnapshots();   // an agent exists now → re-enable Import

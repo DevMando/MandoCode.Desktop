@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Text.Json;
 using MandoCode.Models;
 using MandoCode.Desktop.Services;
@@ -109,7 +109,7 @@ public sealed partial class ChatTabView
                 if (picked.Count < turns.Count)
                     sb.Append($"(Older turns omitted — this is the most recent {picked.Count} of {turns.Count}.)\n\n");
                 foreach (var turn in picked)
-                    sb.Append(turn.R == "u" ? "User: " : "Assistant: ").Append(turn.T).Append("\n\n");
+                    sb.Append(ConversationLog.RoleLabel(turn.R)).Append(": ").Append(turn.T).Append("\n\n");
 
                 _controller.ArmRestoredConversation(
                     "From \"your previous session in this tab\" (verbatim excerpt, not a recap):\n" +

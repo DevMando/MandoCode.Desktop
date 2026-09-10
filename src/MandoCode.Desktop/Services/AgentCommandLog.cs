@@ -67,6 +67,27 @@ public sealed class AgentCommandLog : ICommandOutputSink
         }
     }
 
+    /// <summary>
+    /// The last few commands this agent ran, for another agent's delegation digest. Commands only —
+    /// the header lines carry them, and the output in between is noise at this altitude.
+    /// </summary>
+    public IReadOnlyList<string> RecentCommands(int count)
+    {
+        string text;
+        lock (_lock) { text = _buffer.ToString(); }
+
+        var found = new List<string>();
+        foreach (var line in text.Split('\n'))
+        {
+            // Header lines are the only ones prefixed with the prompt glyph — see AgentCommandFormat.
+            var i = line.IndexOf("$\u001b[0m ", StringComparison.Ordinal);
+            if (i < 0) continue;
+            var cmd = line[(i + 5)..].Trim();
+            if (cmd.Length > 0) found.Add(cmd);
+        }
+        return found.Count <= count ? found : found.TakeLast(count).ToList();
+    }
+
     /// <summary>Everything retained so far — replayed into a view that attaches late.</summary>
     public string Snapshot()
     {

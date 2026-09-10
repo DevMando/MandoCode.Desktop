@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.RegularExpressions;
 using MandoCode.Models;
 using MandoCode.Services;
@@ -108,7 +108,18 @@ public sealed partial class ChatController
     }
 
     private CancellationTokenSource? _requestCts;
-    private bool _isProcessing;
+    /// <summary>
+    /// 0 when this agent is free, 1 while a turn owns it. An int claimed with
+    /// <see cref="Interlocked.CompareExchange(ref int,int,int)"/> rather than a bool, because every
+    /// caller here is doing check-then-act on shared chat history and a bool cannot make that
+    /// atomic.
+    ///
+    /// <para>The bug this closes: <see cref="AnswerPeerAsync"/> READ the old flag but never SET it,
+    /// so a question from another agent did not mark this one busy. A user typing mid-answer — or a
+    /// second agent asking at the same moment — got a concurrent turn on one AIService, interleaving
+    /// two conversations into a single chat history.</para>
+    /// </summary>
+    private int _turnGate;
 
     // Operation tracking for contextual busy messages (port of App.razor fields)
     private int _recentReadCount;
@@ -119,10 +130,64 @@ public sealed partial class ChatController
 
     private const int MaxFileReferenceBudgetChars = 60_000;
 
+    /// <summary>Open agents, for resolving '@' mentions. Null in tests and in any host that has
+    /// not registered a directory.</summary>
+    private readonly AgentDirectory? _agents;
+
+    /// <summary>What happened while this agent was idle, delivered on its next turn.</summary>
+    private readonly AgentInbox? _inbox;
+
+    /// <summary>This agent's own key, so it never resolves a mention of itself.</summary>
+    private readonly string? _selfKey;
+
     public bool IsConnected { get; private set; }
     public bool ModelError { get; private set; }
     public string? ModelWarning { get; private set; }
-    public bool IsProcessing => _isProcessing;
+    public bool IsProcessing => Volatile.Read(ref _turnGate) != 0;
+
+    /// <summary>
+    /// Claims this agent for one turn, or returns null if a turn already owns it. Every path that
+    /// runs the model goes through here — the user's own message, a question from another agent, and
+    /// the setup wizard — so "busy" means the same thing to all of them and cannot be raced.
+    /// </summary>
+    private IDisposable? TryBeginTurn()
+    {
+        if (Interlocked.CompareExchange(ref _turnGate, 1, 0) != 0) return null;
+        StateChanged?.Invoke();
+        return new TurnLease(this);
+    }
+
+    /// <summary>Releases the gate exactly once, however the turn ends.</summary>
+    private sealed class TurnLease : IDisposable
+    {
+        private ChatController? _owner;
+        public TurnLease(ChatController owner) => _owner = owner;
+        public void Dispose()
+        {
+            var owner = Interlocked.Exchange(ref _owner, null);
+            if (owner == null) return;
+            Volatile.Write(ref owner._turnGate, 0);
+            owner.StateChanged?.Invoke();
+        }
+    }
+
+    /// <summary>
+    /// Where this agent is in a running plan, or 0/0 when no plan is executing. Stored alongside
+    /// <see cref="PlanProgressChanged"/> rather than only raised: the cross-agent tools have to ASK
+    /// a running agent where it is, and asking requires state that a listener-only design does not
+    /// keep. Set through <see cref="SetPlanProgress"/> so the two can never disagree.
+    /// </summary>
+    public int PlanStep { get; private set; }
+    public int PlanTotal { get; private set; }
+
+    /// <summary>Records plan position and raises the event — the single path, so a caller cannot
+    /// notify listeners while leaving the queryable state stale.</summary>
+    private void SetPlanProgress(int step, int total, bool running)
+    {
+        PlanStep = running ? step : 0;
+        PlanTotal = running ? total : 0;
+        SetPlanProgress(step, total, running);
+    }
     public string ModelName => _config.GetEffectiveModelName();
 
     /// <summary>
@@ -222,8 +287,15 @@ public sealed partial class ChatController
         ApprovalPromptGate promptGate,
         ConfigCoordinator configs,
         McpCoordinator mcp,
-        SnapshotStore snapshots)
+        SnapshotStore snapshots,
+        AgentDirectory? agents = null,
+        string? selfKey = null)
     {
+        // Optional so the controller stays constructible from tests without a directory. A null
+        // directory simply means no agent resolves and '@' behaves exactly as it did before.
+        _agents = agents;
+        _selfKey = selfKey;
+        _inbox = agents != null && selfKey != null ? agents.InboxFor(selfKey) : null;
         _ai = ai;
         _config = config;
         _tokenTracker = tokenTracker;
@@ -355,10 +427,11 @@ public sealed partial class ChatController
             // here in the chat, like the CLI's onboarding. A fresh user shouldn't have to
             // discover /setup or hand-edit an endpoint on the Settings page for a first reply.
             _transcript.Append(_html.Info("Welcome to MandoCode! Let's get you set up — takes about a minute."));
-            _isProcessing = true;   // input waits until the wizard is done, same as /setup mid-chat
-            StateChanged?.Invoke();
-            try { await RunSetupWizardAsync(); }
-            finally { _isProcessing = false; }
+            // Input waits until the wizard is done, same as /setup mid-chat.
+            using (var wizardLease = TryBeginTurn())
+            {
+                if (wizardLease != null) await RunSetupWizardAsync();
+            }
 
             // Wizard cancelled or didn't get connected — land on Settings as the manual fallback.
             if (!IsConnected) SetupNeeded?.Invoke();
@@ -460,13 +533,78 @@ public sealed partial class ChatController
     /// <summary>Handles one submitted input. Returns immediately if a request is running.</summary>
     private string? _requestBrowserContext;
 
+    /// <summary>
+    /// Answers a question put by ANOTHER agent. A full turn on this agent's own model with all of
+    /// its own tools — the point of asking a colleague is that they can actually go and look.
+    ///
+    /// <para>The framing rides as a host instruction, which the engine carries as "a real, transient
+    /// system-role message… removed afterward", so it steers this turn without contaminating the
+    /// conversation the user is having in this tab. What it cannot do is bind: a host instruction is
+    /// guidance a model can wander past, so this is a framing, not a sandbox. The real containment
+    /// is elsewhere — this agent's own approval gates still hold, and they raise their dialogs in
+    /// this tab, where the user can see who is being asked to do what.</para>
+    ///
+    /// <para>Refuses while busy rather than queueing. A caller that waited would stall its own turn
+    /// behind work of unknown length; the tools tell it to read status and transcript instead, which
+    /// is both faster and usually enough.</para>
+    /// </summary>
+    public async Task<PeerAnswer> AnswerPeerAsync(string askedBy, string question, CancellationToken cancellationToken = default)
+    {
+        // Claims the same gate the user's own turns take, so a peer question and a typed message
+        // cannot both be running on this agent's chat history. This is the authoritative busy check;
+        // the caller's earlier IsBusy read was only a hint for ordering its options.
+        using var lease = TryBeginTurn();
+        if (lease == null) return PeerAnswer.Busy();
+
+        // Announced here, not by the caller: after the claim, so a question refused as busy leaves
+        // no trace of an answer that never happened — and before the turn streams, so it reads in
+        // the order it occurred rather than trailing the reply it prompted.
+        var envelope = PeerMessageEnvelope.Wrap(askedBy, question);
+
+        _transcript.Append(_html.Dim(PeerTurnPolicy.AnnounceLine(askedBy, question)));
+
+        // Recorded like any other turn. Without this the log held the ANSWER with no question
+        // before it — so a restored session re-briefed the model with a dangling reply, and
+        // read_agent_transcript showed another agent's answers with nothing that prompted them.
+        // Logged with the envelope so the provenance survives a relaunch too, which is the one
+        // place a transient host instruction could never reach.
+        ConversationLogger?.Invoke(ConversationLog.AgentRole, envelope);
+
+        // The attribution has to live IN the message, not only in the framing. The framing is
+        // transient by design — the engine removes it after the turn — so a peer's question would
+        // otherwise sit in this agent's history forever as an ordinary user turn. Asked afterwards
+        // who it had been talking to, an agent could only guess from the content, which is exactly
+        // what it looked like in practice: it reported what the message "claimed" rather than what
+        // it knew. The envelope is applied by the host and survives in history, so the distinction
+        // is structural rather than a matter of interpretation.
+
+        var framing = PeerTurnPolicy.BuildFraming(askedBy);
+
+        try
+        {
+            return PeerTurnPolicy.Classify(
+                await _streamer.StreamAsync(envelope, cancellationToken, framing));
+        }
+        catch (OperationCanceledException)
+        {
+            return PeerAnswer.Failed("the question was cancelled before it could be answered");
+        }
+        catch (Exception ex)
+        {
+            return PeerAnswer.Failed($"could not answer: {ex.Message}");
+        }
+    }
+
     public async Task SubmitAsync(string input, string? browserContext = null)
     {
-        if (string.IsNullOrWhiteSpace(input) || _isProcessing) return;
+        if (string.IsNullOrWhiteSpace(input)) return;
 
-        _isProcessing = true;
+        // Claim, don't check: between a check and a set, a question from another agent could take
+        // the same agent and both turns would run on one chat history.
+        using var lease = TryBeginTurn();
+        if (lease == null) return;
+
         _requestBrowserContext = browserContext;
-        StateChanged?.Invoke();
         try
         {
             _transcript.Append(_html.UserEcho(input));
@@ -510,11 +648,17 @@ public sealed partial class ChatController
             // Fold the invisible ride-alongs (imported recaps, emoji reactions, external workspace
             // changes) into the request context. See
             // RequestPreambleComposer for the exact framing.
+            // The inbox is drained here, once per turn, at the only moment this agent is awake and
+            // able to take delivery. Anything that happened while it was idle — a delegated job
+            // finishing, a job's progress — has been waiting for exactly this.
+            var inbox = _inbox == null ? "" : AgentInbox.Format(_inbox.Drain());
+
             processedInput = RequestPreambleComposer.Compose(
                 processedInput,
                 _armedContexts,
                 _pendingReactions.Select(r => (r.Emoji, r.Snippet)).ToList(),
-                _pendingWorkspaceNotes);
+                _pendingWorkspaceNotes,
+                inbox);
 
             // Ride-alongs are one-shot — clear what we just folded in so it isn't sent twice.
             if (_armedContexts.Count > 0)
@@ -536,7 +680,6 @@ public sealed partial class ChatController
         finally
         {
             _requestBrowserContext = null;
-            _isProcessing = false;
             _busy.Reset();
             StateChanged?.Invoke();
             _transcript.CompleteActivity();
@@ -622,8 +765,40 @@ public sealed partial class ChatController
     }
 
     // ============================================================
-    // @file references (port of ProcessFileReferences)
+    // @file references (port of ProcessFileReferences) and @agent mentions
     // ============================================================
+
+    /// <summary>
+    /// Expands '@' tokens that name an OPEN AGENT rather than a file, so a mention resolves instead
+    /// of being reported as a missing path. Returns the agents mentioned, in the order typed.
+    ///
+    /// <para>This has to happen here, not only in the input picker: the picker is an affordance, but
+    /// this method is the mechanism. Before this existed, "@Ninja" reached the file lookup, missed,
+    /// and warned "Couldn't find the referenced file or folder: Ninja" — the mention never survived
+    /// as far as the model.</para>
+    ///
+    /// <para>Agents win over files on a name clash. A callsign is a deliberate act of addressing
+    /// someone; a same-named file is a coincidence, and that file is still reachable by a path with
+    /// a separator or an extension in it.</para>
+    /// </summary>
+    private List<AgentEntry> ExtractAgentMentions(string input, out string remaining)
+    {
+        var found = new List<AgentEntry>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        remaining = input;
+        if (_agents == null) return found;
+
+        // Callsigns are single words, so only bare tokens are considered — anything carrying a
+        // path separator or a dot is a file reference and is left for the loop below.
+        remaining = Regex.Replace(input, @"@([A-Za-z][\w-]*)\b", m =>
+        {
+            var agent = _agents.Resolve(m.Groups[1].Value);
+            if (agent == null || _selfKey == agent.Key) return m.Value;
+            if (seen.Add(agent.Key)) found.Add(agent);
+            return m.Value;   // the mention stays in the user's text; only the file lookup is skipped
+        });
+        return found;
+    }
 
     private string ProcessFileReferences(string input)
     {
@@ -640,6 +815,10 @@ public sealed partial class ChatController
         {
             var filePath = match.Groups[1].Value;
             if (!referencedFiles.Add(filePath)) continue;
+
+            // An open agent's callsign is not a missing file. Skip it here; the mention is carried
+            // to the model as text and answered by the cross-agent tools.
+            if (_agents?.Resolve(filePath) != null) continue;
 
             if (totalExpansionChars >= MaxFileReferenceBudgetChars)
             {
@@ -871,7 +1050,7 @@ public sealed partial class ChatController
 
         _deferredPlans.Outcome = DeferredPlanOutcome.Executed;
         _transcript.Append(_html.PlanStarted(plan.Steps.Count));
-        PlanProgressChanged?.Invoke(0, plan.Steps.Count, true);
+        SetPlanProgress(0, plan.Steps.Count, true);
 
         try
         {
@@ -887,7 +1066,7 @@ public sealed partial class ChatController
         }
         finally
         {
-            PlanProgressChanged?.Invoke(plan.CompletedStepsCount, plan.Steps.Count, false);
+            SetPlanProgress(plan.CompletedStepsCount, plan.Steps.Count, false);
         }
 
         var (outcomeTitle, outcomeDetail, outcomeState) = plan.Status switch
@@ -1036,13 +1215,13 @@ public sealed partial class ChatController
                 _recentReadCount = 0;
                 _recentReadFiles.Clear();
                 _lastOperationType = null;
-                PlanProgressChanged?.Invoke(progressEvent.CurrentStep - 1, progressEvent.TotalSteps, true);
+                SetPlanProgress(progressEvent.CurrentStep - 1, progressEvent.TotalSteps, true);
                 _transcript.Append(_html.StepStarted(progressEvent.CurrentStep, progressEvent.TotalSteps, progressEvent.StepDescription));
                 _busy.Update("Working...");
                 break;
 
             case TaskProgressType.StepCompleted:
-                PlanProgressChanged?.Invoke(progressEvent.CurrentStep, progressEvent.TotalSteps, true);
+                SetPlanProgress(progressEvent.CurrentStep, progressEvent.TotalSteps, true);
                 if (!string.IsNullOrEmpty(progressEvent.Message))
                 {
                     _transcript.Append(_html.PlanStepResult(progressEvent.Message, _config.AgentName));
@@ -1212,7 +1391,7 @@ public sealed partial class ChatController
             PlanRevision.ApplyApproved(plan, failedStep.StepNumber, candidate);
             _transcript.Append(_html.Success(
                 $"Revised plan approved — resuming at step {failedStep.StepNumber} of {plan.Steps.Count}."));
-            PlanProgressChanged?.Invoke(failedStep.StepNumber - 1, plan.Steps.Count, true);
+            SetPlanProgress(failedStep.StepNumber - 1, plan.Steps.Count, true);
             return ReplanDecision.Applied;
         }
     }

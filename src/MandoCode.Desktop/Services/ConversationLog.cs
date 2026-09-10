@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 
 namespace MandoCode.Desktop.Services;
 
@@ -13,6 +13,21 @@ public sealed record ConversationTurn(string R, string T);
 /// </summary>
 public static class ConversationLog
 {
+    /// <summary>Role for a turn that arrived from ANOTHER AGENT rather than from the user.
+    /// A third role rather than reusing "u": a relayed question replayed as "User:" after a restart
+    /// is exactly the confusion the agent-message envelope exists to prevent, and the re-brief is
+    /// the one place that confusion would survive a relaunch.</summary>
+    public const string AgentRole = "g";
+
+    /// <summary>How a role reads when a conversation is replayed to a model — used by the restart
+    /// re-brief and by read_agent_transcript, so the two can never disagree about who said what.</summary>
+    public static string RoleLabel(string role) => role switch
+    {
+        "u" => "User",
+        AgentRole => "Another agent",
+        _ => "Assistant",
+    };
+
     private const int MaxTurns = 200;
     private const int TrimSlack = 64;
     /// <summary>Per-turn size cap — one giant paste must not dominate the re-brief.</summary>

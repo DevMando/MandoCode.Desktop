@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Text.Json;
 using MandoCode.Models;
@@ -575,6 +575,10 @@ public sealed partial class MainWindow
 
     private void RefreshTabStrip()
     {
+        // Piggybacks on the tab strip because the two answer the same question — who is open and
+        // what are they doing — and this already runs on every event that changes either.
+        RefreshAgentDirectory();
+
         var accent = (SolidColorBrush)Application.Current.Resources["MandoAccentBrush"];
         var border = (SolidColorBrush)Application.Current.Resources["MandoBorderBrush"];
         var dim = (SolidColorBrush)Application.Current.Resources["MandoDimBrush"];
