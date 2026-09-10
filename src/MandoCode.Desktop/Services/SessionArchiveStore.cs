@@ -244,6 +244,7 @@ public sealed class SessionArchiveStore
         TranscriptJournal.Delete(key);
         ConversationLog.Delete(key);
         SessionHistoryStore.Delete(key);
+        AgentConfigStore.Delete(key);
     }
 
     private void Persist()

@@ -169,6 +169,17 @@ public sealed partial class ChatController
     /// <summary>Status bar refresh (connection, model, tokens). May fire on any thread.</summary>
     public event Action? StateChanged;
 
+    /// <summary>
+    /// This agent's config was deliberately changed — a Settings edit, /config set, a model switch,
+    /// or new connection settings. AgentSession listens and snapshots the config to disk, which is
+    /// what makes an agent's settings survive a close and reopen.
+    ///
+    /// Raised only for CHANGES the user asked for, never for the incidental config touches during
+    /// boot, and the listener re-checks against what it last wrote — so a spurious raise costs a
+    /// string compare, not a bad write. Prefer raising it to missing a mutation site.
+    /// </summary>
+    public event Action? ConfigChanged;
+
     /// <summary>Plan execution progress: (completedSteps, totalSteps, active).</summary>
     public event Action<int, int, bool>? PlanProgressChanged;
 
@@ -302,6 +313,21 @@ public sealed partial class ChatController
     /// Agents already open keep their own; only the next one you open inherits these.
     /// </summary>
     public void SaveAsDefaults() => _configs.SaveDefaultsFrom(_config);
+
+    /// <summary>
+    /// Reapplies the whole config to this agent after it was replaced wholesale ("Match Global
+    /// Defaults"). Takes the kernel-rebuild path rather than ReinitializeAsync so the CONVERSATION
+    /// SURVIVES: RefreshSettingsAsync rebuilds the system prompt, the agent, and the HTTP client
+    /// (so a changed endpoint, model, or context window all land) while leaving the history in
+    /// place. A model switch through SelectModelAsync would clear it — and would also re-derive the
+    /// context length for the new model tier, which would immediately push the agent back off the
+    /// defaults it was just matched to.
+    /// </summary>
+    public async Task RefreshFromConfigAsync()
+    {
+        await ApplyAgentSettingScopeAsync(ConfigKeySetter.ApplyScope.KernelRebuild);
+        StateChanged?.Invoke();
+    }
 
     // ============================================================
     // Startup (port of InitializeConnectionAsync)
@@ -1411,6 +1437,7 @@ public sealed partial class ChatController
             }
             _transcript.Append(_html.Dim("This agent only. Settings → \"Make Default for New Agents\" to keep it."));
             StateChanged?.Invoke();
+            ConfigChanged?.Invoke();
             return;
         }
 
@@ -1458,6 +1485,7 @@ public sealed partial class ChatController
         }
 
         StateChanged?.Invoke();
+        ConfigChanged?.Invoke();
         return (true, message);
     }
 
@@ -1623,6 +1651,9 @@ public sealed partial class ChatController
         }
 
         StateChanged?.Invoke();
+        // A pinned model (and the context length that came with it) is part of this agent's
+        // settings — persist it the same way a Settings edit is.
+        ConfigChanged?.Invoke();
     }
 
     /// <summary>The outgoing conversation buffered on a model switch (or the live one, for a manual
@@ -1862,6 +1893,8 @@ public sealed partial class ChatController
         {
             _busy.Reset();
             StateChanged?.Invoke();
+            // Endpoint and model are this agent's, even though the onboarding flag above is not.
+            ConfigChanged?.Invoke();
         }
     }
 

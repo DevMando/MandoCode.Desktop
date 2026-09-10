@@ -358,6 +358,7 @@ public sealed partial class ChatTabView
     {
         if (_explorerOpen) SizeExplorer();
         if (_previewOpen) SizePreview();
+        if (_agentSettingsOpen) SizeAgentSettings();
     }
 
     private void SizeExplorer()
@@ -645,15 +646,66 @@ public sealed partial class ChatTabView
         return await dialog.ShowAsync() == ContentDialogResult.Primary;
     }
 
-    private void PreviewAttach_Click(object sender, RoutedEventArgs e)
+    /// <summary>
+    /// What the preview header's "@" and "open externally" buttons act on.
+    ///
+    /// A browser tab backed by a PROJECT FILE resolves to that file, not to the URL on screen: a
+    /// file preview is served through a virtual host mapping (https://&lt;PreviewBrowserHost&gt;/...)
+    /// that exists only inside this WebView, so handing that URL to the system browser or to the
+    /// model would name something neither can reach.
+    ///
+    /// A tab on a real WEBSITE has no file (NavigateBrowserTabAsync nulls FilePath for it), which
+    /// is why both buttons used to do nothing at all there — the null guard swallowed the click
+    /// silently. It resolves to the live URL instead.
+    /// </summary>
+    private (string? Target, bool IsUrl) CurrentPreviewTarget()
     {
-        if (_previewPath != null) InsertFileTokens(new[] { _previewPath });
+        if (_previewPath != null) return (_previewPath, false);
+        if (!_browserPreview || _selectedBrowserTab is not { Closed: false } tab) return (null, false);
+
+        var source = tab.View.CoreWebView2?.Source;
+        return IsLaunchableUrl(source) ? (source, true) : (null, false);
     }
 
+    /// <summary>
+    /// Only http(s) is ever handed to the shell or pasted into the prompt. A WebView can be sitting
+    /// on about:blank, data:, javascript: or a custom scheme, and ShellExecute on an arbitrary
+    /// scheme launches whatever protocol handler is registered for it — not something a preview
+    /// button should be able to reach.
+    /// </summary>
+    private static bool IsLaunchableUrl(string? url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri)
+        && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+
+    /// <summary>Puts the previewed file (as an @token) or web page (as its URL) into the prompt.</summary>
+    private void PreviewAttach_Click(object sender, RoutedEventArgs e)
+    {
+        var (target, isUrl) = CurrentPreviewTarget();
+        if (target == null)
+        {
+            _transcript.Append(_html.Warn("Nothing to attach \u2014 this preview has no project file or web address yet."));
+            return;
+        }
+
+        if (isUrl) InsertAtCaret(target + " ");
+        else InsertFileTokens(new[] { target });
+    }
+
+    /// <summary>Hands the previewed file to its default application, or the previewed page to the
+    /// system's default browser.</summary>
     private void PreviewOpenExternal_Click(object sender, RoutedEventArgs e)
     {
-        if (_previewPath != null && ShellOpen.Try(_previewPath) is { } ex)
-            _transcript.Append(_html.Warn($"Couldn't open file: {ex.Message}"));
+        var (target, isUrl) = CurrentPreviewTarget();
+        if (target == null)
+        {
+            // Never silently: a button that does nothing on click reads as broken, which is exactly
+            // how the website case behaved before.
+            _transcript.Append(_html.Warn("Nothing to open \u2014 this preview has no project file or web address yet."));
+            return;
+        }
+
+        if (ShellOpen.Try(target) is { } ex)
+            _transcript.Append(_html.Warn($"Couldn't open {(isUrl ? "page" : "file")}: {ex.Message}"));
     }
 
     /// <summary>Agent writes can happen in several small operations. Reload once at turn end so

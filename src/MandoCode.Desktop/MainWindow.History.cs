@@ -38,6 +38,7 @@ public sealed partial class MainWindow
             TranscriptJournal.Delete(key);
             ConversationLog.Delete(key);
             SessionHistoryStore.Delete(key);
+            AgentConfigStore.Delete(key);
             return;
         }
 
@@ -356,66 +357,6 @@ public sealed partial class MainWindow
         _archive.RemoveAll(keys, deleteFiles: true);
         _historyText.Forget(keys);
         PopulateHistory();
-    }
-
-    /// <summary>"Make Default for New Agents" — snapshot the selected agent's settings to disk.</summary>
-    private void MakeDefault_Click(object sender, RoutedEventArgs e)
-    {
-        var agent = _sessions.Active;
-        if (agent == null) return;
-
-        _controller.SaveAsDefaults();
-        SettingsStatus.Text = $"Saved {agent.Title}'s settings as the default for new agents. "
-                            + "Agents already open keep their own.";
-    }
-
-    /// <summary>Resets the visible tab's settings to the app's factory defaults (this agent, this
-    /// session). Reads a fresh <see cref="MandoCodeConfig"/> for the defaults and applies each key
-    /// through the same validated path as editing a field. Leaves connection (endpoint/model) and the
-    /// Tavily secret untouched — those aren't "tunable knobs" you'd want wiped by a reset.</summary>
-    private async void ResetTab_Click(object sender, RoutedEventArgs e)
-    {
-        var d = new MandoCodeConfig();   // factory defaults (property initializers)
-        var s = SettingsTabs.SelectedItem;
-        var resets = new List<(string Key, string Value)>();
-        string tabName;
-
-        static string Bool(bool b) => b ? "true" : "false";
-        static string Num(long n) => n.ToString(System.Globalization.CultureInfo.InvariantCulture);
-
-        if (s == Tab_Behavior)
-        {
-            tabName = "Behavior";
-            resets.Add(("taskPlanning", Bool(d.EnableTaskPlanning)));
-            resets.Add(("diffApprovals", Bool(d.EnableDiffApprovals)));
-            resets.Add(("autoContinue", Bool(d.EnableAutoContinuation)));
-            resets.Add(("maxContinuations", Num(d.MaxAutoContinuations)));
-            resets.Add(("timeout", Num(d.RequestTimeoutMinutes)));
-            resets.Add(("modelResponseTimeout", Num(d.ModelResponseTimeoutSeconds)));
-            resets.Add(("toolBudget", Num(d.ToolResultCharBudget)));
-            resets.Add(("renderTimeout", Num(d.MarkdownRenderTimeoutSeconds)));
-        }
-        else if (s == Tab_Integrations)
-        {
-            tabName = "Integrations";
-            resets.Add(("webSearch", Bool(d.EnableWebSearch)));
-        }
-        else
-        {
-            tabName = "Model";
-            resets.Add(("temperature", d.Temperature.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)));
-            resets.Add(("maxTokens", Num(d.MaxTokens)));
-            resets.Add(("contextLength", Num(d.ContextLength)));
-            resets.Add(("streaming", d.ResponseStreaming));
-        }
-
-        ResetTabButton.IsEnabled = false;
-        foreach (var (key, value) in resets)
-            await _controller.ApplyConfigKeyAsync(key, value);
-        ResetTabButton.IsEnabled = true;
-
-        LoadSettings();   // reflect the restored values (also clears the status line)
-        SettingsStatus.Text = $"{tabName} settings reset to factory defaults.";
     }
 
     private (Border Header, TextBlock Label, Ellipse Badge) BuildTabHeader(string title)

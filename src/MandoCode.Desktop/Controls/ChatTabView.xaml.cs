@@ -139,7 +139,15 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
     private void OnAgentTitleChanged(string _) => OnUi(UpdateHeader);
     private void OnControllerStateChanged() => OnUi(UpdateHeader);
     private void OnPlanProgress(int done, int total, bool active) => OnUi(() => UpdatePlanProgress(done, total, active));
-    private void OnSetupNeeded() => OnUi(() => SetupRequested?.Invoke());
+    /// <summary>
+    /// /config, and first-run "not connected", want the settings of THIS agent — so they open this
+    /// tab's own pane rather than the rail page, which now holds the defaults for future agents.
+    /// </summary>
+    private void OnSetupNeeded() => OnUi(() =>
+    {
+        SetupRequested?.Invoke();   // brings the chat page forward if a rail page is showing
+        ToggleAgentSettings(true);
+    });
     private void OnMcpEditorRequested(string? name) => OnUi(() => McpEditorRequested?.Invoke(name));
     private void OnClipboardCopy(string text) => OnUi(() => ClipboardCopyRequested?.Invoke(text));
     private void OnExitRequested() => OnUi(() => ExitRequested?.Invoke());

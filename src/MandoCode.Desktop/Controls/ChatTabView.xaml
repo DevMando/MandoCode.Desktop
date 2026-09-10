@@ -122,6 +122,14 @@
                         ToolTipService.ToolTip="Snapshot this conversation's context">
                     <FontIcon Glyph="&#xE722;" FontSize="15"/>
                 </Button>
+                <!-- This agent's own settings. A DIFFERENT gear from the rail's (E713): that one
+                     holds the defaults every new agent starts from, this one holds the settings of
+                     the agent you are looking at, and the two must not read as the same button. -->
+                <Button x:Name="AgentSettingsButton" Click="AgentSettingsButton_Click" Padding="8,5"
+                        ToolTipService.ToolTip="This agent's settings — model, behavior, and limits for this agent alone"
+                        AutomationProperties.Name="This agent's settings">
+                    <FontIcon Glyph="&#xE115;" FontSize="15"/>
+                </Button>
                 <Button x:Name="OpenFolderButton" Click="OpenFolderButton_Click" Padding="8,5"
                         ToolTipService.ToolTip="Change this tab's project folder">
                     <FontIcon Glyph="&#xE8B7;" FontSize="15"/>
@@ -140,6 +148,8 @@
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
@@ -184,11 +194,11 @@
                     <Button x:Name="PreviewSaveButton" Grid.Column="3" Click="PreviewSave_Click" Padding="6" Background="Transparent" BorderThickness="0"
                             IsEnabled="False" ToolTipService.ToolTip="Save changes (Ctrl+S)"><FontIcon Glyph="&#xE74E;" FontSize="12"/></Button>
                     <Button Grid.Column="4" Click="PreviewAttach_Click" Padding="6" Background="Transparent" BorderThickness="0"
-                            ToolTipService.ToolTip="Attach this file to the chat prompt"><TextBlock Text="@" FontSize="13"/></Button>
+                            ToolTipService.ToolTip="Attach this file to the chat prompt (a web page attaches as its URL)"><TextBlock Text="@" FontSize="13"/></Button>
                     <Button x:Name="PreviewReloadButton" Grid.Column="5" Click="PreviewReload_Click" Padding="6" Background="Transparent" BorderThickness="0"
                             Visibility="Collapsed" ToolTipService.ToolTip="Reload browser preview"><FontIcon Glyph="&#xE72C;" FontSize="12"/></Button>
                     <Button Grid.Column="6" Click="PreviewOpenExternal_Click" Padding="6" Background="Transparent" BorderThickness="0"
-                            ToolTipService.ToolTip="Open in the default application"><FontIcon Glyph="&#xE8A7;" FontSize="12"/></Button>
+                            ToolTipService.ToolTip="Open this file in its default application, or this page in your default browser"><FontIcon Glyph="&#xE8A7;" FontSize="12"/></Button>
                     <Button Grid.Column="7" Click="PreviewClose_Click" Padding="6" Background="Transparent" BorderThickness="0"
                             ToolTipService.ToolTip="Close file preview"><FontIcon Glyph="&#xE711;" FontSize="12"/></Button>
                 </Grid>
@@ -445,6 +455,53 @@
                         </StackPanel>
                     </Button>
                 </Border>
+
+            </Grid>
+
+            <!-- Drag splitter for the settings pane — same pointer-event pattern as the explorer's. -->
+            <controls:ResizeGrip x:Name="AgentSettingsSplitter" Grid.Column="5" Width="6"
+                                 Visibility="Collapsed" Background="Transparent"
+                                 GripOrientation="Vertical"
+                                 PointerPressed="AgentSettingsSplitter_PointerPressed"
+                                 PointerMoved="AgentSettingsSplitter_PointerMoved"
+                                 PointerReleased="AgentSettingsSplitter_PointerReleased"/>
+
+            <!-- ======= This agent's settings =======
+                 The same SettingsForm the rail's Settings page hosts, bound to THIS agent instead of
+                 to the defaults. Docked in its own column like the explorer, so opening it resizes
+                 the transcript rather than covering it. -->
+            <Grid x:Name="AgentSettingsPanel" Grid.Column="6" Visibility="Collapsed" Width="380"
+                  Background="{StaticResource MandoPanelBrush}"
+                  BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1,0,0,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <Grid Grid.Row="0" Padding="12,8,6,8" ColumnSpacing="8"
+                      BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="0,0,0,1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <FontIcon Glyph="&#xE115;" FontSize="14" VerticalAlignment="Center"
+                              Foreground="{StaticResource MandoAccentBrush}"/>
+                    <!-- The agent's name IS the heading: this pane's whole point is that it belongs
+                         to one agent, and a generic "Settings" title beside the rail's page of the
+                         same name is exactly the confusion the split exists to remove. -->
+                    <TextBlock x:Name="AgentSettingsTitle" Grid.Column="1" FontWeight="SemiBold"
+                               FontSize="13" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"/>
+                    <Button Grid.Column="2" Click="AgentSettingsClose_Click" Padding="6"
+                            Background="Transparent" BorderThickness="0"
+                            ToolTipService.ToolTip="Close this agent's settings"
+                            AutomationProperties.Name="Close agent settings">
+                        <FontIcon Glyph="&#xE711;" FontSize="12"/>
+                    </Button>
+                </Grid>
+
+                <controls:SettingsForm x:Name="AgentSettingsForm" Grid.Row="1" Margin="12,10,12,12"/>
             </Grid>
         </Grid>
 
