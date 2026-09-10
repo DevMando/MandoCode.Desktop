@@ -1,4 +1,4 @@
-using MandoCode.Desktop.ViewModels;
+﻿using MandoCode.Desktop.ViewModels;
 using MandoCode.Models;
 using MandoCode.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -284,14 +284,35 @@ public sealed class AgentSession
         _persistedConfigJson = AgentConfigStore.Fingerprint(Config);
     }
 
-    /// <summary>Repoints this tab at a different project folder and rebuilds its AI session.</summary>
+    /// <summary>
+    /// Repoints this tab at a different project folder, KEEPING the conversation. Changing folders
+    /// is a navigation step inside one piece of work — "now look at this repo" — not the start of a
+    /// new one, so everything said up to here still applies.
+    /// </summary>
     public async Task ChangeProjectRootAsync(string folder)
     {
         // The tab keeps its name ("Agent N" or a user rename) across a folder change — the folder
         // is shown in the header, so the label doesn't need to track it.
         ProjectRoot.ProjectRoot = folder;
         FileProvider.RefreshCache();
-        await Ai.ReinitializeAsync(Config);
+
+        // The new folder brings its own project skills, and the skill index is baked into the
+        // system prompt — so the rescan has to happen BEFORE the prompt is recomposed below.
+        Skills.Reload();
+
+        // RefreshSettingsAsync, not ReinitializeAsync: both rebuild the system prompt, the agent,
+        // and the MCP tool set, but ReinitializeAsync ends in ClearHistoryAsync — which is what
+        // used to wipe the conversation on every folder change. The tools themselves need no
+        // rebuild to follow the move: they hold the live ProjectRootAccessor mutated above, not a
+        // copied path. Same trade as ChatController.RefreshFromConfigAsync.
+        await Ai.RefreshSettingsAsync(Config);
+
+        // The model has just been handed a new working folder while still holding a conversation
+        // about the old one. Without this it keeps resolving remembered paths against a root that
+        // moved out from under it — the history survives, but silently goes stale.
+        Ai.AppendUserNote(
+            $"[Project root changed to: {folder}. Earlier messages refer to the previous folder — " +
+            "re-read any file you need rather than reusing paths or contents from before this point.]");
     }
 
     private static string FolderLabel(string path)

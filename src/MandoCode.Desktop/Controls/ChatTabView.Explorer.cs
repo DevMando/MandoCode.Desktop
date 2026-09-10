@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Text.Json;
 using MandoCode.Models;
 using MandoCode.Desktop.Services;
@@ -269,7 +269,7 @@ public sealed partial class ChatTabView
         if (folder == null) return;
 
         _transcript.Append(_html.Info($"Project root changed to: {folder.Path}"));
-        _transcript.Append(_html.Dim("Rebuilding the AI session for the new project…"));
+        _transcript.Append(_html.Dim(TranscriptHtmlBuilder.ProjectSwitchNotice));
 
         // Retargets THIS tab only — its own ProjectRootAccessor, file cache, and kernel.
         // Other agents keep working in their own folders.
