@@ -895,20 +895,16 @@
                     <ColumnDefinition Width="Auto"/>   <!-- permanent buttons -->
                 </Grid.ColumnDefinitions>
 
-                <!-- Label and chips scroll together, so four chips on a narrow window can never
-                     push the pinned buttons off the bar. -->
-                <ScrollViewer Grid.Column="0" HorizontalScrollBarVisibility="Auto"
-                              VerticalScrollBarVisibility="Disabled" VerticalScrollMode="Disabled"
-                              VerticalAlignment="Center">
-                    <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                        <FontIcon Glyph="&#xE7C4;" FontSize="12" Opacity="0.7" VerticalAlignment="Center"/>
-                        <TextBlock Text="Split view" FontWeight="SemiBold" FontSize="13"
-                                   VerticalAlignment="Center"/>
-                        <!-- One chip per pane, in pane order. Rebuilt by RefreshSplitBar. -->
-                        <StackPanel x:Name="PaneChips" Orientation="Horizontal" Spacing="6"
-                                    VerticalAlignment="Center"/>
-                    </StackPanel>
-                </ScrollViewer>
+                <!-- No per-pane chips: each pane names itself in its own header now, so the bar
+                     carries only the controls that act on the split as a whole. -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                    <FontIcon Glyph="&#xE7C4;" FontSize="12" Opacity="0.7" VerticalAlignment="Center"/>
+                    <TextBlock Text="Split view" FontWeight="SemiBold" FontSize="13"
+                               VerticalAlignment="Center"/>
+                    <TextBlock Text="drag a tab onto a pane to put that agent there" FontSize="11"
+                               Opacity="0.45" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"/>
+                </StackPanel>
 
                 <!-- Outside the scroller, so the shape stays readable however many chips there are. -->
                 <TextBlock x:Name="PaneLayoutHint" Grid.Column="1" FontSize="11" Opacity="0.45"
