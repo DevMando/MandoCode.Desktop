@@ -209,6 +209,13 @@ for every approved plan. Desktop's version follows the engine generation, so it 
   a sticky header, or the suggestion list a field opens when it is filled.
 
 ### Fixed
+- **The per-turn token count is readable in every theme.** It was faint text trailing at the right
+  edge, which put the smallest, palest thing on screen in the exact corner where the themes that
+  imitate a screen are darkest — measured at well under half the contrast it needed, and effectively
+  invisible on the CRT and amber terminal themes. It now sits in a small pill with its own
+  background and border, so it reads as a deliberate element rather than trailing text and survives
+  a busy chat wallpaper too. The corner shading on those themes was also too heavy in general and
+  has been eased, which helps ordinary text near the edges of the pane as well.
 - **Secondary text is readable in every theme.** Timestamps, file paths, status lines and the hints
   under headings were below the accessibility contrast floor in half the shipped themes — several
   faithfully so, since palettes like Dracula and One Dark ship famously faint comment colours

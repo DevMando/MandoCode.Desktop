@@ -345,8 +345,18 @@ public sealed class TranscriptHtmlBuilder : ITranscriptHtml
         _ => "▶️",
     };
 
+    /// <summary>
+    /// The per-turn token metric, as a pill rather than a trailing line of faint text.
+    ///
+    /// <para>Note the wrapper is NOT <c>chip-row</c>, even though the pill inside is an ordinary
+    /// <c>chip</c>: <see cref="IsEphemeralStatus"/> drops every <c>chip-row</c> from a restored
+    /// session, on the grounds that status pills describe a dead process's live state. A token
+    /// count is the opposite — it is what that turn actually cost, and it belongs to the
+    /// conversation's history. Reusing the row class here would have silently deleted these from
+    /// every reopened session.</para>
+    /// </summary>
     public string TokenSummary(string text) =>
-        $"<div class=\"line dim token-summary\">{E(text)}</div>";
+        $"<div class=\"token-summary\"><span class=\"chip token-chip\">{E(text)}</span></div>";
 
     public string HelpCard(IEnumerable<(string Command, string Description)> rows)
     {
