@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Text.Json;
 using MandoCode.Models;
@@ -52,7 +52,60 @@ public sealed partial class MainWindow
         _terminal.WorkingDirectoryProvider = () => ActiveChat?.Session.ProjectRoot.ProjectRoot;
         _terminal.CloseRequested += (_, _) => CloseTerminalPanel();
         _terminal.MaximizeRequested += (_, _) => ToggleMaximizeTerminal();
+
+        // Agent output tabs can only be built once the xterm host is live. Until then every
+        // agent's AgentCommandLog is holding its own scrollback, so nothing is lost by waiting.
+        _terminal.Ready += (_, _) => AttachAllAgentOutputs();
+        _terminal.AgentOutputClosed += (_, key) => FindSessionByKey(key)?.CommandLog.Clear();
+        if (_terminal.IsReady) AttachAllAgentOutputs();
         return _terminal;
+    }
+
+    // ============================================================
+    // Agent command output (read-only terminal tabs)
+    // ============================================================
+
+    /// <summary>Agents already piped into the terminal panel, so a second call can't double-subscribe
+    /// and echo every line twice.</summary>
+    private readonly HashSet<string> _agentOutputAttached = new();
+
+    /// <summary>
+    /// The panel is shared by every agent, so each one's output needs a stable key to own a tab
+    /// with. PersistKey is that key: it already survives restarts and renames.
+    /// </summary>
+    private static string AgentOutputKey(AgentSession session) => session.PersistKey;
+
+    private AgentSession? FindSessionByKey(string key) =>
+        _tabs.FirstOrDefault(t => AgentOutputKey(t.View.Session) == key)?.View.Session;
+
+    private void AttachAllAgentOutputs()
+    {
+        foreach (var tab in _tabs) AttachAgentOutput(tab.View.Session);
+    }
+
+    /// <summary>
+    /// Pipes one agent's command log into the terminal panel: replays what it has already recorded,
+    /// then follows it live. Safe to call repeatedly — only the first call for an agent subscribes.
+    /// No-op until the panel exists and its xterm host is up; <see cref="AttachAllAgentOutputs"/>
+    /// runs then and catches up whatever was missed.
+    /// </summary>
+    private void AttachAgentOutput(AgentSession session)
+    {
+        var panel = _terminal;
+        if (panel == null || !panel.IsReady) return;
+
+        var key = AgentOutputKey(session);
+        if (!_agentOutputAttached.Add(key)) return;
+
+        var title = session.Title;
+        var backlog = session.CommandLog.Snapshot();
+        if (!string.IsNullOrEmpty(backlog)) panel.WriteAgentOutput(key, title, backlog);
+
+        // Raised on the command's own reader threads — hop to the UI thread before touching the
+        // WebView. The log keeps its copy either way, so a dropped enqueue costs a live update,
+        // never the scrollback.
+        session.CommandLog.Appended += text =>
+            DispatcherQueue.TryEnqueue(() => _terminal?.WriteAgentOutput(key, session.Title, text));
     }
 
     private void NavTerminal_Click(object sender, RoutedEventArgs e) => ToggleTerminal();
