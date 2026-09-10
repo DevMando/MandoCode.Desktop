@@ -203,6 +203,12 @@ for every approved plan. Desktop's version follows the engine generation, so it 
   user's decision instead of showing retry choices or reporting an unexpected failure afterward.
 - **Approval and recovery cards stay out of persisted transcript history.** They are live controls,
   not conversation messages, so stale actions are not replayed into a restored session.
+- **Changing an agent's project folder no longer erases the conversation.** Pointing an agent at a
+  different folder rebuilt its session from scratch and cleared everything said up to that moment,
+  so a folder change part-way through a task lost all context. The conversation is now kept. The
+  agent still repoints its tools, system prompt, and project skills at the new folder, and is told
+  the folder moved so it re-reads files rather than reusing paths from before the change. Only
+  folder changes from here on benefit — conversations already cleared cannot be recovered.
 
 ### Test coverage
 330 Desktop tests pass. New host-level coverage exercises deferred plan execution, instruction

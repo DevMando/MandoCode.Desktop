@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text;
 using MandoCode.Models;
 using MandoCode.Services;
@@ -91,6 +91,11 @@ public sealed class TranscriptHtmlBuilder : ITranscriptHtml
     public string PlanStarted(int totalSteps) =>
         PlanActivity("Executing plan", $"Preparing {totalSteps} step{(totalSteps == 1 ? "" : "s")}");
 
+    /// <summary>The "switching folders" progress line. Lives here as a const because
+    /// <see cref="IsEphemeralStatus"/> matches on it verbatim — reworded in one place only, the
+    /// notice would silently start replaying on session restore.</summary>
+    public const string ProjectSwitchNotice = "Switching to the new project — this conversation is kept…";
+
     /// <summary>True for blocks that describe LIVE session state (status chips: connection,
     /// model ready, MCP counts, pending offers) rather than conversation history. Session
     /// restore replays journaled transcripts — replaying a dead process's state pills next
@@ -102,7 +107,7 @@ public sealed class TranscriptHtmlBuilder : ITranscriptHtml
         || blockHtml.StartsWith("<div class=\"panel checkpoint-card\"", StringComparison.Ordinal)
         // Boot/progress narration — true only while it was happening. ("Project root
         // changed to: X" is deliberately NOT here: that's a real event, kept as history.)
-        || blockHtml.Contains(">Rebuilding the AI session for the new project…<", StringComparison.Ordinal)
+        || blockHtml.Contains($">{ProjectSwitchNotice}<", StringComparison.Ordinal)
         || blockHtml.Contains(">✓ Ready.<", StringComparison.Ordinal)
         || ModelNoticeReplay.IsTransient(blockHtml);
 
