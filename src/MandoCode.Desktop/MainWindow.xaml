@@ -209,10 +209,45 @@
         <StackPanel Grid.Row="1" Padding="4,8" Spacing="6">
             <Border Background="{StaticResource MandoBorderBrush}" Height="1"
                     HorizontalAlignment="Stretch" Margin="8,2" Opacity="0.6"/>
+            <!-- The badge is the ONLY way the agent-output tab is discoverable: the panel it lives
+                 in is closed by default, so without a cue on the always-visible rail nobody learns
+                 the tab exists. Driven by command activity rather than by panel state, because the
+                 panel isn't even built until first opened — and the very first command a user runs
+                 is exactly the one that most needs to advertise itself. Cleared in RefreshNavIcons
+                 once they're actually looking at an agent's tab. -->
             <Button x:Name="NavTerminal" Click="NavTerminal_Click" Padding="10,8" Background="Transparent"
-                    BorderThickness="0" HorizontalAlignment="Stretch"
-                    ToolTipService.ToolTip="Terminal — open a shell (Ctrl+`)">
-                <FontIcon x:Name="NavTerminalIcon" Glyph="&#xE756;" FontSize="16"/>
+                    BorderThickness="0" HorizontalAlignment="Stretch">
+                <Grid>
+                    <Grid.Resources>
+                        <!-- Runs ONLY while a command is actually in flight, and is stopped the
+                             moment it isn't — a permanently animating rail is exactly the kind of
+                             perpetual repaint the transcript and terminal both avoid. Deliberately
+                             unhurried: a fast blink reads as an error demanding attention, and this
+                             is an invitation, not an alarm. Opacity plus a slight swell so it
+                             registers in peripheral vision without pulling the eye off the chat. -->
+                        <Storyboard x:Name="NavTerminalBadgePulse" RepeatBehavior="Forever" AutoReverse="True">
+                            <DoubleAnimation Storyboard.TargetName="NavTerminalBadge" Storyboard.TargetProperty="Opacity"
+                                             From="1.0" To="0.35" Duration="0:0:0.85" EnableDependentAnimation="True"/>
+                            <DoubleAnimation Storyboard.TargetName="NavTerminalBadgeScale" Storyboard.TargetProperty="ScaleX"
+                                             From="1.0" To="1.35" Duration="0:0:0.85" EnableDependentAnimation="True"/>
+                            <DoubleAnimation Storyboard.TargetName="NavTerminalBadgeScale" Storyboard.TargetProperty="ScaleY"
+                                             From="1.0" To="1.35" Duration="0:0:0.85" EnableDependentAnimation="True"/>
+                        </Storyboard>
+                    </Grid.Resources>
+                    <FontIcon x:Name="NavTerminalIcon" Glyph="&#xE756;" FontSize="16"/>
+                    <!-- Sits over the glyph's top-right corner. The ring is the rail's own
+                         background, so the dot stays legible against the glyph's strokes. -->
+                    <Ellipse x:Name="NavTerminalBadge" Visibility="Collapsed"
+                             Width="8" Height="8" Margin="0,-4,-6,0"
+                             HorizontalAlignment="Right" VerticalAlignment="Top"
+                             RenderTransformOrigin="0.5,0.5"
+                             Fill="{StaticResource MandoAccentBrush}"
+                             Stroke="{StaticResource MandoBackgroundBrush}" StrokeThickness="1.5">
+                        <Ellipse.RenderTransform>
+                            <ScaleTransform x:Name="NavTerminalBadgeScale"/>
+                        </Ellipse.RenderTransform>
+                    </Ellipse>
+                </Grid>
             </Button>
         </StackPanel>
         </Grid>

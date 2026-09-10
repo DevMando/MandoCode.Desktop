@@ -109,6 +109,7 @@ public sealed partial class MainWindow
         // A new agent gets its output tab too, but only if the terminal is already up. Otherwise
         // its log records quietly and AttachAllAgentOutputs picks it up when the panel opens.
         AttachAgentOutput(session);
+        WatchAgentOutputForBadge(session);
 
         SelectTab(entry);
         if (SnapshotsPanelOpen) PopulateSnapshots();   // an agent exists now → re-enable Import

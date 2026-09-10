@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using MandoCode.Services;
 
 namespace MandoCode.Desktop.Services;
@@ -29,17 +29,43 @@ public sealed class AgentCommandLog : ICommandOutputSink
     private readonly object _lock = new();
     private readonly StringBuilder _buffer = new();
 
+    private int _running;
+
     /// <summary>Fresh terminal text, already formatted. Raised on arbitrary threads.</summary>
     public event Action<string>? Appended;
 
-    public void CommandStarted(string command, string workingDirectory) =>
+    /// <summary>Raised when <see cref="IsRunning"/> flips. Raised on arbitrary threads.</summary>
+    public event Action<bool>? RunningChanged;
+
+    /// <summary>
+    /// True while at least one command is in flight. Lets the rail distinguish "work is happening
+    /// right now" from "output is sitting here unread" — the same badge means both, and only the
+    /// first deserves motion.
+    /// </summary>
+    public bool IsRunning => Volatile.Read(ref _running) > 0;
+
+    public void CommandStarted(string command, string workingDirectory)
+    {
+        // Counted rather than a bool: a plan step can have a command in flight while another is
+        // still closing out, and a bool would report idle the moment the first one finished.
+        if (Interlocked.Increment(ref _running) == 1) RunningChanged?.Invoke(true);
         Append(AgentCommandFormat.Header(command, workingDirectory));
+    }
 
     public void CommandOutput(string line, bool isError) =>
         Append(AgentCommandFormat.Line(line, isError));
 
-    public void CommandFinished(int? exitCode, string? killReason) =>
+    public void CommandFinished(int? exitCode, string? killReason)
+    {
         Append(AgentCommandFormat.Footer(exitCode, killReason));
+        // Clamped: a sink is only ever finished once per start, but an unbalanced call must not
+        // drive the counter negative and leave the rail pulsing forever.
+        if (Interlocked.Decrement(ref _running) <= 0)
+        {
+            Interlocked.Exchange(ref _running, 0);
+            RunningChanged?.Invoke(false);
+        }
+    }
 
     /// <summary>Everything retained so far — replayed into a view that attaches late.</summary>
     public string Snapshot()

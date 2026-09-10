@@ -120,6 +120,66 @@ public class AgentCommandOutputTests
         Assert.Equal(log.Snapshot(), live);
     }
 
+    // ---- Running state (drives the rail's pulse) --------------------------------
+
+    [Fact]
+    public void RunningIsTrueOnlyBetweenStartAndFinish()
+    {
+        var log = new AgentCommandLog();
+        Assert.False(log.IsRunning);
+
+        log.CommandStarted("dotnet build", @"C:\src");
+        Assert.True(log.IsRunning);
+
+        log.CommandFinished(0, null);
+        Assert.False(log.IsRunning);
+    }
+
+    [Fact]
+    public void OverlappingCommandsStayRunningUntilTheLastOneEnds()
+    {
+        // Counted, not a flag: a plan step can have one command in flight while another closes out,
+        // and a flag would report idle — stopping the pulse — while work was still going.
+        var log = new AgentCommandLog();
+
+        log.CommandStarted("first", @"C:\src");
+        log.CommandStarted("second", @"C:\src");
+        log.CommandFinished(0, null);
+
+        Assert.True(log.IsRunning);
+        log.CommandFinished(0, null);
+        Assert.False(log.IsRunning);
+    }
+
+    [Fact]
+    public void RunningChangedFiresOnlyOnRealTransitions()
+    {
+        var log = new AgentCommandLog();
+        var seen = new List<bool>();
+        log.RunningChanged += running => seen.Add(running);
+
+        log.CommandStarted("first", @"C:\src");
+        log.CommandStarted("second", @"C:\src");
+        log.CommandFinished(0, null);
+        log.CommandFinished(0, null);
+
+        Assert.Equal(new[] { true, false }, seen);
+    }
+
+    [Fact]
+    public void AnUnbalancedFinishCannotLeaveTheRailPulsingForever()
+    {
+        // The sink contract pairs every finish with a start, but the rail animates off this state,
+        // so a stray call must not drive the counter negative and wedge it "running".
+        var log = new AgentCommandLog();
+
+        log.CommandFinished(0, null);
+        log.CommandStarted("later", @"C:\src");
+        log.CommandFinished(0, null);
+
+        Assert.False(log.IsRunning);
+    }
+
     [Fact]
     public void ClearDropsWhatTheUserDismissed()
     {

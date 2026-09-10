@@ -68,6 +68,17 @@ public sealed partial class TerminalPanel : UserControl
     /// <summary>True once the xterm host has reported in and <see cref="WriteAgentOutput"/> works.</summary>
     public bool IsReady => _webReady;
 
+    /// <summary>Raised when the visible tab changes, so the host can drop an unread cue.</summary>
+    public event EventHandler? ActiveTabChanged;
+
+    /// <summary>
+    /// True when the visible tab is an agent's output rather than a shell. The distinction matters
+    /// for the rail's unread badge: having the panel open on a shell tab is not the same as having
+    /// read what an agent printed.
+    /// </summary>
+    public bool ActiveTabIsAgentOutput =>
+        _activeId != null && _tabs.TryGetValue(_activeId, out var active) && active.AgentKey != null;
+
     /// <summary>Updates the maximize button's glyph/tooltip to reflect the current state.</summary>
     public void SetMaximized(bool maximized)
     {
@@ -245,6 +256,20 @@ public sealed partial class TerminalPanel : UserControl
         }
     }
 
+    /// <summary>
+    /// Brings an agent output tab to the front, if one exists. Called when the panel is opened with
+    /// output waiting: the panel always creates a starter shell on first open, so without this the
+    /// user follows the rail badge, lands on an empty prompt, and has to hunt for the tab they came
+    /// for. Returns false when there is no output tab to show, leaving the shell in front.
+    /// </summary>
+    public bool FocusAgentOutput()
+    {
+        var tab = _tabs.Values.FirstOrDefault(t => t.AgentKey != null);
+        if (tab == null) return false;
+        SwitchTo(tab.Id);
+        return true;
+    }
+
     /// <summary>Renames an agent's output tab in place, so a renamed agent stays recognizable.</summary>
     public void RenameAgentOutput(string agentKey, string tabTitle)
     {
@@ -322,6 +347,8 @@ public sealed partial class TerminalPanel : UserControl
 
         foreach (var t in _tabs.Values)
             ApplyTabStyle(t, active: t.Id == id);
+
+        ActiveTabChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void ApplyTabStyle(TerminalTab tab, bool active)
