@@ -89,7 +89,7 @@
       linear-gradient(to bottom,
         transparent calc(66.6% - 1px), rgba(0,0,0,0.30) 66.6%, transparent calc(66.6% + 1px)),
       /* tube-edge vignette */
-      radial-gradient(ellipse 100% 100% at center, transparent 60%, rgba(0,0,0,0.55) 100%);
+      radial-gradient(ellipse 100% 100% at center, transparent 60%, rgba(0,0,0,0.34) 100%);
   }
   /* ---- Media-matched background image (Appearance toggle) -------------------------------
      Opt-in, and off by default: a chat background in full colour sits perfectly well behind any of
@@ -279,7 +279,7 @@
     content: ""; position: fixed; inset: 0; z-index: 9999; pointer-events: none;
     background:
       /* the smoked filter: darkest at the edges where the glass meets the bezel */
-      radial-gradient(ellipse 120% 120% at center, rgba(0,0,0,0) 55%, rgba(0,0,0,0.45) 100%),
+      radial-gradient(ellipse 120% 120% at center, rgba(0,0,0,0) 55%, rgba(0,0,0,0.28) 100%),
       /* a faint vertical segment ruling — the grid the anodes are printed on */
       repeating-linear-gradient(to right,
         rgba(0,0,0,0.10) 0 1px, rgba(0,0,0,0) 1px 4px);
@@ -332,7 +332,7 @@
       /* a scratch down the gate */
       linear-gradient(to bottom, rgba(20,30,40,0.10) 0 100%),
       /* the lens vignette — heavier than a tube's, because it is an optical edge, not a curve */
-      radial-gradient(ellipse 88% 92% at center, rgba(0,0,0,0) 42%, rgba(30,45,60,0.42) 100%);
+      radial-gradient(ellipse 88% 92% at center, rgba(0,0,0,0) 42%, rgba(30,45,60,0.26) 100%);
     background-size: 100% 100%, 100% 100%, 100% 100%, 100% 100%, 100% 100%, 1px 100%, 100% 100%;
     background-position: 0 0, 0 0, 0 0, 0 0, 0 0, 73% 0, 0 0;
     background-repeat: no-repeat;
@@ -385,7 +385,7 @@
     content: ""; position: fixed; inset: 0; z-index: 9999; pointer-events: none;
     /* Tube glass only: a gentle centre-bright falloff, no grille and no scanlines. */
     background: radial-gradient(ellipse 110% 110% at center,
-      rgba(120, 255, 160, 0.022) 0%, rgba(0,0,0,0) 55%, rgba(0,0,0,0.38) 100%);
+      rgba(120, 255, 160, 0.022) 0%, rgba(0,0,0,0) 55%, rgba(0,0,0,0.24) 100%);
   }
   /* Dense code under a wide bloom becomes a smear — same trade the CRT block makes. */
   html[data-vector] pre, html[data-vector] pre *, html[data-vector] code,
@@ -563,7 +563,25 @@
   .dim { color: var(--dim); }
   .sky { color: var(--sky); }
   .red { color: var(--red); }
-  .token-summary { text-align: right; font-size: 12px; }
+  /* The per-turn token metric. It used to be --dim text trailing at the right edge, and that put
+     the smallest, faintest thing in the app in the one place every themed overlay is darkest — its
+     corner vignette. Measured at 2.0-2.9:1 there, against a 4.5 floor.
+
+     A palette-level contrast floor cannot fix that, which is worth understanding: scanlines
+     attenuate UNIFORMLY, so a raised floor answers them, but a vignette attenuates by position, so
+     the very same colour passes mid-pane and fails in the corner. There is no value to pick.
+
+     So the metric gets a surface instead. On its own themed pill it carries its own background and
+     border, reads as a deliberate element rather than trailing text, and survives a busy chat
+     wallpaper — the same reasoning the plan-activity card already uses. De-emphasis now comes from
+     size and containment rather than from faintness, which is the durable way to do it: small and
+     bounded stays legible everywhere, whereas faint stops being legible the moment anything is
+     painted over it. */
+  .token-summary { text-align: right; margin: 2px 0; }
+  .token-chip { font-size: 11.5px; padding: 2px 11px; color: var(--fg);
+    /* The status-pill family pads to a shared 190px so those line up with each other. This one is
+       not part of that set and should hug its own text. */
+    min-width: 0; }
 
   /* Live plan status is operationally important, not ordinary transcript narration. Give it a
      high-opacity themed surface so a bright or busy chat wallpaper cannot wash out the active
