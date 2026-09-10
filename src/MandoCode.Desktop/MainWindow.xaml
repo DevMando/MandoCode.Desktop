@@ -804,8 +804,26 @@
 
                 <!-- Bottom margin mirrors the tab content's scrollbar lane so the title centers in
                      the same region as the (top-aligned) tabs, instead of sitting lower. -->
-                <TextBlock Text="MandoCode" FontSize="17" FontWeight="Bold" VerticalAlignment="Center"
-                           Margin="0,0,0,18" Foreground="{StaticResource MandoAccentBrush}"/>
+                <!-- Permanent Marker, bundled under Assets\fonts (see the csproj). The "#Permanent
+                     Marker" suffix is the FAMILY name inside the file, not the file name — XAML
+                     needs both, and the two do not match here. The comma-separated fallback is what
+                     renders if the font is ever missing from a build's output.
+
+                     No FontWeight: the family ships one weight only, so asking for Bold would get a
+                     synthesised smear rather than a bolder cut.
+
+                     24px, not the 21 this started at, and the size is a CONTRAST decision more than
+                     a typographic one. The wordmark paints in MandoAccentBrush, which is each
+                     theme's brand colour and therefore varies enormously — four themes put it under
+                     4.5:1 (Solarized Light is the worst at 3.41). At 24px it clears WCAG's
+                     large-text threshold, where the bar drops to 3:1, and every shipped theme
+                     passes that with room to spare. Lifting the accent itself would have been the
+                     other fix and the wrong one: #007ACC IS the Visual Studio blue, and correcting
+                     it would break the exact thing that theme exists to reproduce. The bottom
+                     margin comes down with the size to hold the baseline against the tab strip. -->
+                <TextBlock Text="MandoCode" FontSize="24" VerticalAlignment="Center"
+                           FontFamily="ms-appx:///Assets/fonts/PermanentMarker-Regular.ttf#Permanent Marker, Segoe UI"
+                           Margin="0,0,0,14" Foreground="{StaticResource MandoAccentBrush}"/>
 
                 <!-- Vertical divider between the brand and the agent tabs. Insets align it with the
                      tab band (bottom inset matches the tabs' scrollbar lane). -->
@@ -1213,6 +1231,22 @@
                                                    Opacity="0.6" FontSize="12" TextWrapping="Wrap"/>
                                         <ToggleSwitch x:Name="BoxedMessagesToggle" Toggled="BoxedMessages_Toggled"
                                                       OnContent="Cards" OffContent="Flat"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Media-matched background -->
+                                <Border Background="{StaticResource MandoPanelBrush}"
+                                        BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1"
+                                        CornerRadius="8" Padding="16">
+                                    <StackPanel Spacing="8">
+                                        <StackPanel Orientation="Horizontal" Spacing="10">
+                                            <FontIcon Glyph="&#xEB9F;" FontSize="16"/>
+                                            <TextBlock Text="Background matches the theme" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                        <TextBlock Text="Themes that imitate a screen or a printing process also process your background image the way that medium would have reproduced it — quantised to a passive-matrix panel's few shades, rendered as amber phosphor, or laid down as two-ink riso halftone. Turn it off to keep your picture in full colour. Only affects those themes, and only when you have set a background."
+                                                   Opacity="0.6" FontSize="12" TextWrapping="Wrap"/>
+                                        <ToggleSwitch x:Name="MediaBackgroundToggle" Toggled="MediaBackground_Toggled"
+                                                      OnContent="In character" OffContent="Full colour"/>
                                     </StackPanel>
                                 </Border>
 

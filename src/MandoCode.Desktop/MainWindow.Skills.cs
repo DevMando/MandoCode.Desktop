@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Text.Json;
 using MandoCode.Models;
@@ -297,7 +297,7 @@ public sealed partial class MainWindow
         Sk_BodySize.Text = (tokens >= 1000 ? $"≈{tokens / 1000.0:0.0}k tokens" : $"≈{tokens} tokens")
             + (large ? " · large — heavy on local models" : "");
         Sk_BodySize.Foreground = new SolidColorBrush(
-            ThemeManager.C(large ? ThemeManager.Current.Gold : ThemeManager.Current.Dim));
+            ThemeManager.C(large ? ThemeManager.Current.Gold : ThemeManager.Current.ReadableDim));
     }
 
     /// <summary>Fills the AI model dropdown: the active agent's model shown selected instantly, then

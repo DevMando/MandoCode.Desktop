@@ -1,0 +1,9 @@
+# Scoped deliberately to the bundled fonts rather than declaring rules for the whole repo:
+# a repo-wide text/eol policy would rewrite line endings across every existing file, which is
+# its own change with its own review. This only guarantees the one thing that would silently
+# corrupt an asset — a font is binary, and any newline "normalisation" applied to it produces a
+# file that still has the right name and no longer renders.
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary

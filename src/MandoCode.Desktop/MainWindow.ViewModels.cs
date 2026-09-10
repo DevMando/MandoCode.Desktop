@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.Json;
@@ -238,7 +238,7 @@ public sealed class SkillRow : INotifyPropertyChanged
         (ApproxTokens >= 1000 ? $"≈{ApproxTokens / 1000.0:0.0}k tok" : $"≈{ApproxTokens} tok")
         + (IsLarge ? " · large" : "");
     public SolidColorBrush SizeBrush =>
-        new(ThemeManager.C(IsLarge ? ThemeManager.Current.Gold : ThemeManager.Current.Dim));
+        new(ThemeManager.C(IsLarge ? ThemeManager.Current.Gold : ThemeManager.Current.ReadableDim));
 }
 
 /// <summary>Chip model for the MCP editor's tool preview (test results).</summary>
@@ -258,7 +258,7 @@ public sealed class ThemeVm
     public SolidColorBrush BgBrush => new(ThemeManager.C(Theme.Background));
     public SolidColorBrush EdgeBrush => new(ThemeManager.C(Theme.Border));
     public SolidColorBrush FgBrush => new(ThemeManager.C(Theme.Text));
-    public SolidColorBrush DimBrush => new(ThemeManager.C(Theme.Dim));
+    public SolidColorBrush DimBrush => new(ThemeManager.C(Theme.ReadableDim));
     public SolidColorBrush AccentBrush => new(ThemeManager.C(Theme.Accent));
     public SolidColorBrush GoldBrush => new(ThemeManager.C(Theme.Gold));
     public SolidColorBrush SkyBrush => new(ThemeManager.C(Theme.Sky));

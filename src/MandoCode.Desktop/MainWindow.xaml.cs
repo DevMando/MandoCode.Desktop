@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Text.Json;
 using MandoCode.Models;
@@ -80,6 +80,7 @@ public sealed partial class MainWindow : Window
         S_BgOpacity.Value = ThemeManager.ChatBackgroundOpacity * 100;
         S_BgOpacityLabel.Text = $"{(int)S_BgOpacity.Value}%";
         BoxedMessagesToggle.IsOn = ThemeManager.BoxedMessages;
+        MediaBackgroundToggle.IsOn = ThemeManager.MediaBackground;
         UpdateBgControls();
         _appearanceReady = true;   // opacity handlers may persist from here on
 

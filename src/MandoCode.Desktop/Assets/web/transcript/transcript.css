@@ -45,12 +45,28 @@
      scanline, no flicker (that is the continuous-repaint trap we keep avoiding); the tube look
      is fixed gradients only, one paint. The set's native chrome outside the WebView is untouched,
      exactly like a real TV where only the picture tube carries scanlines. */
-  html[data-crt] body {
-    /* phosphor bloom on every glyph — a tight bright core + a wider soft halo reads more
+  html[data-crt] body,
+  html[data-crt] body * {
+    /* Phosphor bloom on every glyph — a tight bright core plus a wider soft halo reads more
        like real phosphor than one big blur (and keeps text legible). Static, so no per-frame
-       cost even though it rides the streaming-text repaint. */
-    text-shadow: 0 0 2px rgba(120, 210, 255, 0.55), 0 0 9px rgba(120, 210, 255, 0.42),
-                 0 0 18px rgba(120, 210, 255, 0.22);
+       cost even though it rides the streaming-text repaint.
+
+       currentColor, not a fixed blue: on a real tube the glow IS the phosphor being excited,
+       so a red error glows red and green output glows green. Hardcoding one tint put a blue
+       halo around red text, which is the single place this overlay stopped obeying its own
+       physics. Applied to descendants as well because text-shadow inherits its VALUE, not its
+       resolution — set only on body, every child would bloom in body's colour, which is the
+       fixed-tint bug wearing a different hat.
+
+       Alphas are lower than the old fixed tint: that blue-white sat near the background's own
+       hue, while a saturated red or green halo at the same strength smears its own glyph. */
+    text-shadow: 0 0 2px currentColor, 0 0 8px color-mix(in srgb, currentColor 45%, transparent),
+                 0 0 16px color-mix(in srgb, currentColor 22%, transparent);
+  }
+  /* Code wells are dense, small, and often coloured by the highlighter — full bloom there turns
+     a syntax-highlighted block into a smear. The tight core survives; the halo does not. */
+  html[data-crt] pre, html[data-crt] pre *, html[data-crt] code, html[data-crt] code * {
+    text-shadow: 0 0 2px color-mix(in srgb, currentColor 50%, transparent);
   }
   html[data-crt] body::before {
     content: ""; position: fixed; inset: 0; z-index: 9998; pointer-events: none;
@@ -75,6 +91,307 @@
       /* tube-edge vignette */
       radial-gradient(ellipse 100% 100% at center, transparent 60%, rgba(0,0,0,0.55) 100%);
   }
+  /* ---- Media-matched background image (Appearance toggle) -------------------------------
+     Opt-in, and off by default: a chat background in full colour sits perfectly well behind any of
+     these themes, and the opacity slider already answers "too loud". This is for when you want the
+     illusion to go all the way down — the picture processed the way the medium would actually have
+     reproduced it. Filters are defined once in TranscriptHtmlBuilder's SVG defs; each costs one
+     paint, because #bg is fixed and static.
+
+     E-Ink is deliberately absent: its dithering is unconditional, because there the halftone is not
+     an effect laid over the theme, it IS the theme. */
+  html[data-mediabg][data-lcd] #bg { filter: url(#lcd); }
+  html[data-mediabg][data-mono] #bg { filter: url(#amber); }
+  html[data-mediabg][data-fanfold] #bg { filter: url(#fanfold); }
+  html[data-mediabg][data-riso] #bg { filter: url(#riso); }
+  html[data-mediabg][data-vfd] #bg { filter: url(#vfd); }
+  html[data-mediabg][data-splitflap] #bg { filter: url(#splitflap); }
+  html[data-mediabg][data-fiche] #bg { filter: url(#fiche); }
+  html[data-mediabg][data-cyano] #bg { filter: url(#cyano); }
+  html[data-mediabg][data-vector] #bg { filter: url(#vector); }
+
+  /* ---- Monochrome phosphor (single-hue tube) -------------------------------------------
+     Scoped to html[data-mono], and always alongside data-crt — an amber tube is still a tube, so
+     it keeps the scanlines, the grille and the bloom from the block above. What this adds is the
+     constraint the hardware imposes: ONE phosphor, so syntax highlighting cannot use hue and has
+     to carry meaning in brightness and weight instead. That is the whole idea. Painting amber over
+     a colour scheme would be a filter; taking the colours away is the theme.
+
+     Every hljs colour collapses to the foreground and is re-separated by opacity — which reads as
+     phosphor intensity, exactly the axis a real single-gun tube varies. Same trick E-Ink plays with
+     ink, one medium over. */
+  html[data-mono] .hljs,
+  html[data-mono] [class*="hljs-"] { color: var(--fg); }
+  html[data-mono] .hljs-comment, html[data-mono] .hljs-quote { opacity: 0.55; font-style: italic; }
+  html[data-mono] .hljs-keyword, html[data-mono] .hljs-selector-tag,
+  html[data-mono] .hljs-literal, html[data-mono] .hljs-doctag { opacity: 1; font-weight: 700; }
+  html[data-mono] .hljs-string, html[data-mono] .hljs-regexp { opacity: 0.88; }
+  html[data-mono] .hljs-number, html[data-mono] .hljs-symbol,
+  html[data-mono] .hljs-bullet, html[data-mono] .hljs-meta,
+  html[data-mono] .hljs-built_in { opacity: 0.78; }
+  html[data-mono] .hljs-title, html[data-mono] .hljs-section, html[data-mono] .hljs-name,
+  html[data-mono] .hljs-attr, html[data-mono] .hljs-attribute,
+  html[data-mono] .hljs-variable, html[data-mono] .hljs-type { opacity: 1; text-decoration: underline;
+    text-underline-offset: 2px; text-decoration-thickness: 1px; }
+  /* Add/remove can't be green/red here, so the glyph carries it — same resolution E-Ink reached. */
+  html[data-mono] .hljs-addition { opacity: 1; font-weight: 700; }
+  html[data-mono] .hljs-deletion { opacity: 0.5; text-decoration: line-through; }
+  /* Emoji are full-colour raster and would be the only chromatic thing on a single-gun tube. */
+  html[data-mono] .md, html[data-mono] .user-echo, html[data-mono] .rx-pill {
+    filter: grayscale(1) sepia(1) saturate(4) hue-rotate(-18deg); }
+
+  /* ---- Green-bar fanfold (continuous-feed printer paper) --------------------------------
+     Scoped to html[data-fanfold]. Tractor-feed stationery: pale green bands alternating every six
+     lines with sprocket-hole margins down both edges. Static, and paired with FlatMotion in the
+     palette — paper does not animate.
+
+     The bands are locked to the TEXT's line grid, not to pixels: body is 14px at line-height 1.5,
+     so one line is 21px and a six-line band is 126px. That alignment is the whole tell. A striped
+     background whose stripes drift across the lines reads as wallpaper; stripes that contain
+     exactly six lines of text read as fanfold, because that is how the paper was actually printed. */
+  html[data-fanfold] body {
+    /* Clears the 30px sprocket margins above, plus a little air so text isn't tight to the
+       perforation — the same reason real fanfold prints inside the holes, not across them. */
+    padding-left: 42px; padding-right: 42px;
+    background-image:
+      repeating-linear-gradient(to bottom,
+        rgba(122, 158, 122, 0.16) 0, rgba(122, 158, 122, 0.16) 126px,
+        rgba(0, 0, 0, 0) 126px, rgba(0, 0, 0, 0) 252px);
+    background-attachment: local;   /* bands travel WITH the paper as it scrolls */
+  }
+  /* The sprocket margins are the other tell — fixed to the viewport, because on a real printer the
+     holes are a property of the paper's edge, which is always there however far you have fed it. */
+  html[data-fanfold] body::before {
+    content: ""; position: fixed; inset: 0; z-index: 9998; pointer-events: none;
+    background-image:
+      /* Punched holes down the left margin, then the right. A single radial-gradient TILED by
+         background-size + repeat-y, deliberately not repeating-radial-gradient: that repeats
+         concentrically in every direction and fills the whole pane with rings, which is a
+         different picture entirely and lands squarely on top of the text. Each tile is 30px wide
+         (the margin) by 12px tall (the hole pitch), so the darkness cannot leave the margins. */
+      radial-gradient(circle at 15px 6px, rgba(0,0,0,0.26) 0 3px, rgba(0,0,0,0) 3.5px),
+      radial-gradient(circle at 15px 6px, rgba(0,0,0,0.26) 0 3px, rgba(0,0,0,0) 3.5px),
+      /* the perforated tear-off lines the margins detach along */
+      linear-gradient(to right, rgba(0,0,0,0.16) 0 1px, rgba(0,0,0,0) 1px),
+      linear-gradient(to right, rgba(0,0,0,0.16) 0 1px, rgba(0,0,0,0) 1px);
+    background-size: 30px 12px, 30px 12px, 1px 100%, 1px 100%;
+    background-position: left top, right top, 30px top, calc(100% - 30px) top;
+    background-repeat: repeat-y, repeat-y, no-repeat, no-repeat;
+  }
+  /* Impact printing: the ribbon strikes hard and slightly unevenly, and the paper is not a screen,
+     so nothing glows and nothing is pure black. */
+  html[data-fanfold] body, html[data-fanfold] .md, html[data-fanfold] .user-echo {
+    font-family: "Cascadia Mono", Consolas, "Courier New", monospace; }
+  html[data-fanfold] .md pre, html[data-fanfold] .md code,
+  html[data-fanfold] .panel { background: rgba(0,0,0,0.03); }
+
+  /* ---- Matrix LCD (passive-matrix liquid crystal) ---------------------------------------
+     Scoped to html[data-lcd]. The deliberate opposite of the CRT block: liquid crystal does not
+     emit light, it twists a backlight through a polarizer. So there is no bloom anywhere — instead
+     a passive matrix SMEARS, because the row/column addressing cannot switch a cell cleanly and
+     the previous frame lingers a moment behind the new one. That ghost, offset a pixel down and
+     right, is the signature.
+
+     Nothing here is ever true black either: "off" is the polarizer at its darkest, which on these
+     panels is a muddy olive. The palette carries that; this block adds the grid and the smear. */
+  html[data-lcd] body { text-shadow: 1px 1px 0 rgba(60, 80, 40, 0.32); }
+  html[data-lcd] body::before {
+    content: ""; position: fixed; inset: 0; z-index: 9998; pointer-events: none;
+    background:
+      /* the cell grid — visible gaps between pixels, which is what makes a passive matrix look
+         coarse next to anything modern */
+      repeating-linear-gradient(to bottom,
+        rgba(40, 56, 26, 0.16) 0 1px, rgba(0,0,0,0) 1px 3px),
+      repeating-linear-gradient(to right,
+        rgba(40, 56, 26, 0.16) 0 1px, rgba(0,0,0,0) 1px 3px);
+  }
+  html[data-lcd] body::after {
+    content: ""; position: fixed; inset: 0; z-index: 9999; pointer-events: none;
+    /* Uneven backlight from an edge-lit panel: brighter near the lamp, falling off across the
+       glass. A CRT's vignette is radial because the tube is curved; an LCD's is directional
+       because the lamp is along one edge. */
+    background: linear-gradient(to bottom right,
+      rgba(255, 255, 220, 0.07) 0%, rgba(0,0,0,0) 45%, rgba(20, 30, 10, 0.12) 100%);
+  }
+  /* Four shades, total. A passive panel of this era had no meaningful greyscale, so semantic
+     colour quantises to "on", "half on", and "off" — the same collapse E-Ink and the mono tube
+     make, arrived at from a different direction. */
+  html[data-lcd] .hljs, html[data-lcd] [class*="hljs-"] { color: var(--fg); }
+  html[data-lcd] .hljs-comment, html[data-lcd] .hljs-quote { color: var(--dim); }
+  html[data-lcd] .hljs-keyword, html[data-lcd] .hljs-title,
+  html[data-lcd] .hljs-name, html[data-lcd] .hljs-addition { font-weight: 700; }
+  html[data-lcd] .hljs-deletion { color: var(--dim); text-decoration: line-through; }
+  html[data-lcd] .md, html[data-lcd] .user-echo { filter: grayscale(0.8) sepia(0.4) hue-rotate(35deg); }
+
+  /* ---- Risograph (two-drum stencil duplicator) -------------------------------------------
+     Scoped to html[data-riso]. A riso lays one spot ink per drum, one pass each, and the paper
+     shifts a hair between passes — so the two never line up perfectly. That misregistration is the
+     entire signature: everyone who has held a riso print recognises it instantly, and no amount of
+     paper texture reads as riso without it.
+
+     Implemented as a text-shadow in the SECOND ink, offset one pixel. Not a blur: a riso edge is
+     hard, because it is a stencil, not a spray. */
+  html[data-riso] body { text-shadow: 1px 1px 0 color-mix(in srgb, var(--accent) 42%, transparent); }
+  /* Ink sits unevenly on the drum, so coverage mottles across a page — the flaw people print riso
+     FOR. Two coarse gradients at odd angles beat a noise texture here: static, cheap, and it never
+     tiles visibly at the sizes a transcript actually reaches. */
+  html[data-riso] body::before {
+    content: ""; position: fixed; inset: 0; z-index: 9998; pointer-events: none;
+    background:
+      repeating-linear-gradient(63deg,
+        rgba(120, 90, 60, 0.045) 0 3px, rgba(0,0,0,0) 3px 7px),
+      repeating-linear-gradient(-27deg,
+        rgba(120, 90, 60, 0.035) 0 2px, rgba(0,0,0,0) 2px 9px);
+  }
+  html[data-riso] body::after {
+    content: ""; position: fixed; inset: 0; z-index: 9999; pointer-events: none;
+    /* Paper tooth: uncoated stock, so the sheet itself is slightly uneven before any ink lands. */
+    background: repeating-linear-gradient(0deg,
+      rgba(90, 70, 45, 0.03) 0 1px, rgba(0,0,0,0) 1px 4px);
+  }
+  /* Two inks and the paper. Every semantic colour has to land on one of three values, so the
+     highlighter is re-mapped rather than merely recoloured — a riso cannot print a fourth hue
+     without a third pass the machine does not have loaded. */
+  html[data-riso] .hljs, html[data-riso] [class*="hljs-"] { color: var(--fg); }
+  html[data-riso] .hljs-keyword, html[data-riso] .hljs-selector-tag,
+  html[data-riso] .hljs-literal, html[data-riso] .hljs-title,
+  html[data-riso] .hljs-name, html[data-riso] .hljs-section { color: var(--accent); font-weight: 700; }
+  html[data-riso] .hljs-string, html[data-riso] .hljs-regexp,
+  html[data-riso] .hljs-number, html[data-riso] .hljs-meta,
+  html[data-riso] .hljs-built_in, html[data-riso] .hljs-attr { color: var(--red); }
+  html[data-riso] .hljs-comment, html[data-riso] .hljs-quote { color: var(--dim); font-style: italic; }
+  /* The misregistered shadow is charming on prose and unreadable on dense code. */
+  html[data-riso] pre, html[data-riso] code, html[data-riso] pre * { text-shadow: none; }
+
+  /* ---- VFD (vacuum-fluorescent display) --------------------------------------------------
+     Scoped to html[data-vfd]. Emissive like a tube, but with none of a tube's geometry — no
+     scanlines, no grille, no curvature, because a VFD has no beam to sweep. A segment is either
+     energised or it is not, so the glow has a HARD edge: a tight core and a short halo, unlike the
+     wide phosphor bloom on Cathode Ray. Getting that difference wrong is what makes most "retro
+     display" themes collapse into one look.
+
+     The other tell is the glass. A VFD sits behind a smoked filter, so the unlit field is darker
+     than the bezel around it — the panel reads as a hole cut in the device. */
+  html[data-vfd] body {
+    text-shadow: 0 0 1px currentColor, 0 0 6px color-mix(in srgb, currentColor 55%, transparent);
+  }
+  html[data-vfd] body::after {
+    content: ""; position: fixed; inset: 0; z-index: 9999; pointer-events: none;
+    background:
+      /* the smoked filter: darkest at the edges where the glass meets the bezel */
+      radial-gradient(ellipse 120% 120% at center, rgba(0,0,0,0) 55%, rgba(0,0,0,0.45) 100%),
+      /* a faint vertical segment ruling — the grid the anodes are printed on */
+      repeating-linear-gradient(to right,
+        rgba(0,0,0,0.10) 0 1px, rgba(0,0,0,0) 1px 4px);
+  }
+
+  /* ---- Split-flap (Solari departure board) ------------------------------------------------
+     Scoped to html[data-splitflap]. The only MECHANICAL surface in the set, and the only one whose
+     constraint is about which glyphs exist rather than which colours do: a flap carries one printed
+     character, so the board can only ever show the character set it was built with. Hence uppercase
+     and monospace — not styling, but the machine's actual limit.
+
+     The tell is the seam. Every cell is two flaps hinged in the middle, so a horizontal line runs
+     through the waist of every character, with the upper flap's shadow falling just below it. */
+  html[data-splitflap] body, html[data-splitflap] .md, html[data-splitflap] .user-echo {
+    font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  /* Code is the exception the machine would not have made, and the one place we break character:
+     uppercasing source would corrupt it, so code keeps its own case. */
+  html[data-splitflap] pre, html[data-splitflap] code { text-transform: none; letter-spacing: 0; }
+  html[data-splitflap] body::before {
+    content: ""; position: fixed; inset: 0; z-index: 9998; pointer-events: none;
+    /* The hinge line through every character cell, on the text's own 21px line grid, plus the
+       shadow the overhanging upper flap casts on the lower one. */
+    background: repeating-linear-gradient(to bottom,
+      rgba(0,0,0,0) 0 9px,
+      rgba(0,0,0,0.38) 9px 10px,
+      rgba(0,0,0,0.16) 10px 12px,
+      rgba(0,0,0,0) 12px 21px);
+  }
+
+  /* ---- Microfiche (film in a reader) ------------------------------------------------------
+     Scoped to html[data-fiche]. A projected positive: cool, slightly soft, and vignetted hard by
+     the reader's lens.
+
+     The tell is WHERE the dirt lives. Dust and scratches are on the reader's GLASS, not on the
+     film — so they hold still while the page travels underneath. That is why this layer is fixed
+     and the blur is not: the glass is stationary, the document moves. Nothing else in this file
+     gets to make that distinction, and it is the whole reason the illusion holds. */
+  html[data-fiche] body { filter: blur(0.18px); }
+  html[data-fiche] body::after {
+    content: ""; position: fixed; inset: 0; z-index: 9999; pointer-events: none;
+    background:
+      /* emulsion dust and hairs, fixed to the glass */
+      radial-gradient(circle 1px at 18% 24%, rgba(20,30,40,0.30) 0 100%, transparent 100%),
+      radial-gradient(circle 1px at 63% 11%, rgba(20,30,40,0.24) 0 100%, transparent 100%),
+      radial-gradient(circle 2px at 41% 72%, rgba(20,30,40,0.16) 0 100%, transparent 100%),
+      radial-gradient(circle 1px at 86% 58%, rgba(20,30,40,0.26) 0 100%, transparent 100%),
+      radial-gradient(circle 1px at 29% 91%, rgba(20,30,40,0.20) 0 100%, transparent 100%),
+      /* a scratch down the gate */
+      linear-gradient(to bottom, rgba(20,30,40,0.10) 0 100%),
+      /* the lens vignette — heavier than a tube's, because it is an optical edge, not a curve */
+      radial-gradient(ellipse 88% 92% at center, rgba(0,0,0,0) 42%, rgba(30,45,60,0.42) 100%);
+    background-size: 100% 100%, 100% 100%, 100% 100%, 100% 100%, 100% 100%, 1px 100%, 100% 100%;
+    background-position: 0 0, 0 0, 0 0, 0 0, 0 0, 73% 0, 0 0;
+    background-repeat: no-repeat;
+  }
+
+  /* ---- Cyanotype (blueprint) --------------------------------------------------------------
+     Scoped to html[data-cyano]. The one NEGATIVE surface: a cyanotype exposes everywhere the light
+     reaches and washes out everywhere it does not, so the glyphs are unexposed paper and the field
+     is Prussian blue. That inverts what emphasis means — "bolder" is LESS exposure, not more ink,
+     so weight reads as a cleaner, whiter stroke rather than a heavier one.
+
+     No glow: this is a contact print in a tray, the only surface here that never emitted anything.
+     What it has instead is wash — the sensitiser goes on with a brush, so coverage is uneven and
+     the edges of the sheet are lighter where it thinned out. */
+  html[data-cyano] body::after {
+    content: ""; position: fixed; inset: 0; z-index: 9999; pointer-events: none;
+    background:
+      /* brush wash: uneven sensitiser, heavier through the middle of the sheet */
+      linear-gradient(103deg, rgba(255,255,255,0.05) 0 12%, rgba(0,0,0,0) 26% 74%, rgba(255,255,255,0.04) 88% 100%),
+      repeating-linear-gradient(87deg, rgba(255,255,255,0.022) 0 2px, rgba(0,0,0,0) 2px 11px),
+      /* the sheet's edges, where the coat ran thin */
+      radial-gradient(ellipse 96% 96% at center, rgba(0,0,0,0) 70%, rgba(255,255,255,0.07) 100%);
+  }
+  /* Emphasis inverts with the process. */
+  html[data-cyano] strong, html[data-cyano] b, html[data-cyano] .hljs-strong,
+  html[data-cyano] .hljs-keyword, html[data-cyano] .hljs-title {
+    color: #FFFFFF; font-weight: 600; }
+
+  /* ---- Vector scope (electrostatic beam, long persistence) --------------------------------
+     Scoped to html[data-vector]. There is no raster here, so — unlike every other emissive surface
+     in this file — there are NO scanlines: the beam is steered straight to where the stroke goes.
+     What it leaves behind is persistence, the fading trace of where it has already been, rendered
+     as a soft ghost offset slightly up and left (the direction the beam came from).
+
+     Deliberately built WITHOUT the round aperture and scintillation noise a scope really has. Both
+     are period-correct and both are hostile to prose — a circular mask wastes a rectangular pane
+     and the noise fights the text. This keeps the part that reads well, which is the phosphor. */
+  html[data-vector] body {
+    /* Two layers, not four, and at roughly a third of the alpha this started with. A steered beam
+       really does glow harder than a raster one — it dwells on the stroke instead of sweeping past
+       — but rendering that honestly turns white-on-green prose into a light source you have to
+       squint at. The persistence ghost survives because it is what distinguishes a scope from
+       every other emissive surface here; it is just no longer shouting. */
+    text-shadow:
+      0 0 1px color-mix(in srgb, currentColor 55%, transparent),
+      0 0 6px color-mix(in srgb, currentColor 24%, transparent),
+      -1px -1px 4px color-mix(in srgb, currentColor 12%, transparent);
+  }
+  html[data-vector] body::after {
+    content: ""; position: fixed; inset: 0; z-index: 9999; pointer-events: none;
+    /* Tube glass only: a gentle centre-bright falloff, no grille and no scanlines. */
+    background: radial-gradient(ellipse 110% 110% at center,
+      rgba(120, 255, 160, 0.022) 0%, rgba(0,0,0,0) 55%, rgba(0,0,0,0.38) 100%);
+  }
+  /* Dense code under a wide bloom becomes a smear — same trade the CRT block makes. */
+  html[data-vector] pre, html[data-vector] pre *, html[data-vector] code,
+  html[data-vfd] pre, html[data-vfd] pre *, html[data-vfd] code {
+    text-shadow: 0 0 2px color-mix(in srgb, currentColor 45%, transparent); }
+
   /* ---- Boxed messages (Appearance toggle, theme-agnostic) ---------------------------
      Each prompt/response on its own card surface: hard message boundaries and skimmable
      rhythm for long sessions, versus the default flat terminal look. Only theme variables,

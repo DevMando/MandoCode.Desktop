@@ -6,220 +6,6 @@ using Windows.UI;
 namespace MandoCode.Desktop.Services;
 
 /// <summary>
-/// One selectable UI theme. Hex values (#RRGGBB) are used verbatim as the transcript's
-/// CSS variables and parsed into XAML brushes, so the WebView2 chat and the native
-/// pages always agree on every surface color.
-/// </summary>
-public sealed record UiTheme
-{
-    public required string Name { get; init; }
-    public required string Description { get; init; }
-    public bool IsLight { get; init; }
-    public required string Background { get; init; }
-    public required string Panel { get; init; }
-    public required string Border { get; init; }
-    public required string Text { get; init; }
-    public required string Dim { get; init; }
-    public required string Accent { get; init; }
-    public required string Gold { get; init; }
-    public required string Sky { get; init; }
-    public required string Green { get; init; }
-    public required string Red { get; init; }
-    public required string DiffAdd { get; init; }
-
-    /// <summary>When true, the transcript suppresses all motion — no fade-in on new
-    /// blocks, no hover transitions, no smooth scroll — for the still, instant repaint
-    /// of an e-reader page. Gated in the WebView via an html[data-flat] attribute.</summary>
-    public bool FlatMotion { get; init; }
-
-    /// <summary>When true, the transcript wears a CRT-tube overlay (scanlines, aperture
-    /// grille, Trinitron damper wires, vignette, phosphor bloom) — all STATIC gradients,
-    /// no animation. Gated in the WebView via an html[data-crt] attribute.</summary>
-    public bool Crt { get; init; }
-
-    /// <summary>When true, the transcript wears Windows-98 chrome: square corners, two-tone
-    /// 3D bevels lit from the top-left, navy title-bar gradients on panels, Tahoma, classic
-    /// chunky scrollbars. Gated in the WebView via an html[data-win98] attribute.</summary>
-    public bool Win98 { get; init; }
-
-    public static readonly IReadOnlyList<UiTheme> All = new[]
-    {
-        // First entry is the default for fresh installs (ThemeManager falls back to All[0]).
-        new UiTheme
-        {
-            Name = "Visual Studio Dark",
-            Description = "The classic VS / VS Code dark — charcoal and signature blue.",
-            Background = "#1E1E1E", Panel = "#252526", Border = "#3F3F46",
-            Text = "#D4D4D4", Dim = "#858585",
-            Accent = "#007ACC", Gold = "#DCDCAA", Sky = "#9CDCFE",
-            Green = "#89D185", Red = "#F44747", DiffAdd = "#4EC9B0",
-        },
-        new UiTheme
-        {
-            Name = "Mando Dark",
-            Description = "The classic MandoCode look — deep purple, gold, and sky.",
-            Background = "#16121F", Panel = "#201A2E", Border = "#362C4D",
-            Text = "#E6E1F0", Dim = "#8F87A3",
-            Accent = "#C864FF", Gold = "#FFC850", Sky = "#38B6FF",
-            Green = "#4EC94E", Red = "#E05252", DiffAdd = "#87CEFA",
-        },
-        new UiTheme
-        {
-            Name = "Midnight Ocean",
-            Description = "Deep navy and cyan — calm, cool, focused.",
-            Background = "#0B1622", Panel = "#132335", Border = "#27405A",
-            Text = "#DCE9F5", Dim = "#7C93AB",
-            Accent = "#22D3EE", Gold = "#FFB454", Sky = "#7AA7FF",
-            Green = "#34D399", Red = "#F0566A", DiffAdd = "#6EE7B7",
-        },
-        new UiTheme
-        {
-            Name = "Phosphor Fwog",
-            Description = "Tree-fwog green on a dark pond — Phosphor's terminal roots, but froggier. 🐸",
-            Background = "#0B1410", Panel = "#15211A", Border = "#294A34",
-            Text = "#D8F3CF", Dim = "#7FA383",
-            Accent = "#63D94B", Gold = "#FFCB47", Sky = "#4FD6C2",
-            Green = "#63D94B", Red = "#FF6F5B", DiffAdd = "#A7E86A",
-        },
-        new UiTheme
-        {
-            Name = "Sunset Ember",
-            Description = "Warm charcoal with amber and orange heat.",
-            Background = "#1B120D", Panel = "#281A12", Border = "#4A3222",
-            Text = "#F5E9DE", Dim = "#AA8F7C",
-            Accent = "#FF8C42", Gold = "#FFC850", Sky = "#5CB3FF",
-            Green = "#58C97C", Red = "#E8524A", DiffAdd = "#FFD08A",
-        },
-        new UiTheme
-        {
-            Name = "One Dark Pro",
-            Description = "Atom's One Dark — the most-installed VS Code theme.",
-            Background = "#282C34", Panel = "#21252B", Border = "#3E4451",
-            Text = "#ABB2BF", Dim = "#5C6370",
-            Accent = "#61AFEF", Gold = "#E5C07B", Sky = "#56B6C2",
-            Green = "#98C379", Red = "#E06C75", DiffAdd = "#98C379",
-        },
-        new UiTheme
-        {
-            Name = "Dracula",
-            Description = "The famous purple-tinted vampire palette.",
-            Background = "#282A36", Panel = "#343746", Border = "#44475A",
-            Text = "#F8F8F2", Dim = "#6272A4",
-            Accent = "#BD93F9", Gold = "#F1FA8C", Sky = "#8BE9FD",
-            Green = "#50FA7B", Red = "#FF5555", DiffAdd = "#50FA7B",
-        },
-        new UiTheme
-        {
-            Name = "Monokai",
-            Description = "Sublime's legendary pink-and-lime classic.",
-            Background = "#272822", Panel = "#3E3D32", Border = "#49483E",
-            Text = "#F8F8F2", Dim = "#75715E",
-            Accent = "#F92672", Gold = "#E6DB74", Sky = "#66D9EF",
-            Green = "#A6E22E", Red = "#FF6159", DiffAdd = "#A6E22E",
-        },
-        new UiTheme
-        {
-            Name = "Tokyo Night",
-            Description = "Moody indigo night with neon pastels.",
-            Background = "#1A1B26", Panel = "#24283B", Border = "#3B4261",
-            Text = "#C0CAF5", Dim = "#565F89",
-            Accent = "#7AA2F7", Gold = "#E0AF68", Sky = "#7DCFFF",
-            Green = "#9ECE6A", Red = "#F7768E", DiffAdd = "#9ECE6A",
-        },
-        new UiTheme
-        {
-            // Cathode Ray — a Trinitron-style aperture-grille CRT: a deep, near-black picture
-            // tube with vivid, saturated phosphors that glow. Crt=true drapes the transcript in
-            // the tube overlay (scanlines + aperture grille + the two damper wires + vignette +
-            // bloom), all static gradients. The palette is punchy on purpose — CRT phosphors are
-            // high-saturation and the scanlines darken everything, so colors need headroom.
-            // Positioned as the last of the dark themes.
-            Name = "Cathode Ray (CRT)",
-            Description = "Deep-black picture tube with glowing phosphors and cathode-ray scanlines. 📺",
-            Crt = true,
-            Background = "#0B0B0D", Panel = "#131318", Border = "#2A2A33",
-            Text = "#E9EEEC", Dim = "#7C8A86",
-            Accent = "#33CCFF", Gold = "#FFC747", Sky = "#6FD3FF",
-            Green = "#43E37A", Red = "#FF5B54", DiffAdd = "#43E37A",
-        },
-        new UiTheme
-        {
-            // Warm paper + black ink, fully grayscale — reads like a Kindle page. Positioned as
-            // the first of the light themes. Every accent collapses to a shade of warm ink (the
-            // desaturation is what sells "e-ink," more than the cream background does), and
-            // FlatMotion strips the transcript's animation so pages repaint still and instant
-            // like an e-reader. Diffs read as a paper-edit metaphor: changed lines are dark ink
-            // over faded context; the +/- glyphs (not hue) carry add-vs-remove.
-            Name = "E-Ink Paper",
-            Description = "Warm paper, black ink, grayscale, no motion — reads like a Kindle. 📖",
-            IsLight = true,
-            FlatMotion = true,
-            Background = "#E9E5DB", Panel = "#DED9CC", Border = "#C6BFAE",
-            Text = "#211C16", Dim = "#726B5B",
-            Accent = "#3B342A", Gold = "#6A5E48", Sky = "#4C4636",
-            Green = "#5A5240", Red = "#2E251E", DiffAdd = "#3B342A",
-        },
-        new UiTheme
-        {
-            // The whole palette is era-authentic: 3D-face silver surfaces, white sunken
-            // content wells, the 16-color navy/olive/teal-adjacent accents (hyperlink blue
-            // for links), black text. FlatMotion is period-correct — nothing animated in
-            // 1998. The real costume is the data-win98 CSS in TranscriptHtmlBuilder:
-            // square corners, two-tone bevels, and navy title-bar gradients on every panel.
-            Name = "W98 - Y2K",
-            Description = "Silver bevels, navy title bars, teal desktop. Party like it's 1998. 🖥️",
-            IsLight = true,
-            FlatMotion = true,
-            Win98 = true,
-            Background = "#C0C0C0", Panel = "#FFFFFF", Border = "#808080",
-            Text = "#000000", Dim = "#5A5A5A",
-            Accent = "#000080", Gold = "#806000", Sky = "#0000CC",
-            Green = "#008000", Red = "#B00000", DiffAdd = "#008000",
-        },
-        new UiTheme
-        {
-            Name = "Paper Light",
-            Description = "A clean light theme with royal purple accents.",
-            IsLight = true,
-            Background = "#F6F4FA", Panel = "#FFFFFF", Border = "#DCD4EA",
-            Text = "#241C33", Dim = "#6E6584",
-            Accent = "#7C2FE0", Gold = "#A87400", Sky = "#0069C2",
-            Green = "#1D8A3C", Red = "#C43333", DiffAdd = "#0069C2",
-        },
-        new UiTheme
-        {
-            Name = "Solarized Light",
-            Description = "The warm, low-contrast cream classic.",
-            IsLight = true,
-            Background = "#FDF6E3", Panel = "#EEE8D5", Border = "#D9CFB0",
-            Text = "#586E75", Dim = "#93A1A1",
-            Accent = "#268BD2", Gold = "#B58900", Sky = "#2AA198",
-            Green = "#859900", Red = "#DC322F", DiffAdd = "#859900",
-        },
-        new UiTheme
-        {
-            Name = "GitHub Light",
-            Description = "Bright and familiar — straight from github.com.",
-            IsLight = true,
-            Background = "#FFFFFF", Panel = "#F6F8FA", Border = "#D0D7DE",
-            Text = "#1F2328", Dim = "#656D76",
-            Accent = "#0969DA", Gold = "#9A6700", Sky = "#0550AE",
-            Green = "#1A7F37", Red = "#CF222E", DiffAdd = "#1A7F37",
-        },
-        new UiTheme
-        {
-            Name = "One Light",
-            Description = "Atom's gentle gray-on-white counterpart to One Dark.",
-            IsLight = true,
-            Background = "#FAFAFA", Panel = "#EAEAEB", Border = "#DBDBDC",
-            Text = "#383A42", Dim = "#A0A1A7",
-            Accent = "#4078F2", Gold = "#986801", Sky = "#0184BC",
-            Green = "#50A14F", Red = "#E45649", DiffAdd = "#50A14F",
-        },
-    };
-}
-
-/// <summary>
 /// Applies a UiTheme across the whole app: the shared Mando* brushes (mutated in
 /// place, so every StaticResource reference recolors live), the system accent family
 /// (accent buttons, toggles, sliders), the root light/dark element theme, and — via
@@ -255,6 +41,28 @@ public static class ThemeManager
     /// first impression; the flat-density crowd knows where settings live. Theme-agnostic —
     /// the CSS uses only theme variables. W98 ignores this: its message windows are bespoke.</summary>
     public static bool BoxedMessages { get; private set; } = true;
+
+    /// <summary>
+    /// When on, a chat background image is processed to match themes that simulate a display or a
+    /// printing process — quantised to a passive-matrix panel's four shades, laid down as riso
+    /// halftone, and so on. ON by default: these themes are chosen for the illusion, and a
+    /// full-colour photograph behind one is the thing that breaks it. Someone who wants the picture
+    /// untouched turns it off, which is a discoverable one-click reversal; someone who would have
+    /// loved the effect would never have gone looking for a switch to enable it.
+    ///
+    /// <para>Only affects the themes that simulate a medium, and only when a background image is
+    /// set, so for most users and most themes this setting does nothing at all.</para>
+    ///
+    /// <para>E-Ink is not governed by this — its picture is grayscale-dithered unconditionally,
+    /// because there the halftone is not an effect applied to the theme, it IS the theme.</para>
+    /// </summary>
+    public static bool MediaBackground { get; private set; } = true;
+
+    public static void SetMediaBackground(bool on)
+    {
+        MediaBackground = on;
+        Save();
+    }
 
     public static void SetBoxedMessages(bool on)
     {
@@ -295,6 +103,7 @@ public static class ThemeManager
                 if (saved?.Opacity is > 0) WindowOpacity = Math.Clamp(saved.Opacity, 0.3, 1.0);
                 // Null = setting predates the feature (or fresh file): take the current default.
                 BoxedMessages = saved?.Boxed ?? true;
+                MediaBackground = saved?.MediaBg ?? true;
                 if (saved?.ChatBgOpacity is > 0) ChatBackgroundOpacity = Math.Clamp(saved.ChatBgOpacity, 0.05, 1.0);
                 if (!string.IsNullOrEmpty(saved?.ChatBackground))
                 {
@@ -426,6 +235,7 @@ public static class ThemeManager
                     ChatBgBuiltIn = ChatBackgroundBuiltIn,
                     ChatBgOpacity = ChatBackgroundOpacity,
                     Boxed = BoxedMessages,
+                    MediaBg = MediaBackground,
                 }));
         }
         catch { /* persistence is best-effort; the setting is still applied */ }
@@ -444,7 +254,7 @@ public static class ThemeManager
         SetBrush(res, "MandoPanelBrush", t.Panel);
         SetBrush(res, "MandoBorderBrush", t.Border);
         SetBrush(res, "MandoTextBrush", t.Text);
-        SetBrush(res, "MandoDimBrush", t.Dim);
+        SetBrush(res, "MandoDimBrush", t.ReadableDim);
         SetBrush(res, "MandoRaisedBrush", Raised(t));
         // Panel with alpha, for native surfaces painted over the chat background image.
         // 0xE6 rather than the transcript's 82%, because XAML has no backdrop blur to
@@ -482,7 +292,7 @@ public static class ThemeManager
         "(function(){var s=document.documentElement.style;" +
         $"s.setProperty('--bg','{t.Background}');" +
         $"s.setProperty('--fg','{t.Text}');" +
-        $"s.setProperty('--dim','{t.Dim}');" +
+        $"s.setProperty('--dim','{t.ReadableDim}');" +
         $"s.setProperty('--accent','{t.Accent}');" +
         $"s.setProperty('--gold','{t.Gold}');" +
         $"s.setProperty('--sky','{t.Sky}');" +
@@ -502,9 +312,39 @@ public static class ThemeManager
         (t.Win98
             ? "document.documentElement.setAttribute('data-win98','1');"
             : "document.documentElement.removeAttribute('data-win98');") +
+        (t.Monochrome
+            ? "document.documentElement.setAttribute('data-mono','1');"
+            : "document.documentElement.removeAttribute('data-mono');") +
+        (t.Fanfold
+            ? "document.documentElement.setAttribute('data-fanfold','1');"
+            : "document.documentElement.removeAttribute('data-fanfold');") +
+        (t.Lcd
+            ? "document.documentElement.setAttribute('data-lcd','1');"
+            : "document.documentElement.removeAttribute('data-lcd');") +
+        (t.Riso
+            ? "document.documentElement.setAttribute('data-riso','1');"
+            : "document.documentElement.removeAttribute('data-riso');") +
+        (t.Vfd
+            ? "document.documentElement.setAttribute('data-vfd','1');"
+            : "document.documentElement.removeAttribute('data-vfd');") +
+        (t.SplitFlap
+            ? "document.documentElement.setAttribute('data-splitflap','1');"
+            : "document.documentElement.removeAttribute('data-splitflap');") +
+        (t.Fiche
+            ? "document.documentElement.setAttribute('data-fiche','1');"
+            : "document.documentElement.removeAttribute('data-fiche');") +
+        (t.Cyanotype
+            ? "document.documentElement.setAttribute('data-cyano','1');"
+            : "document.documentElement.removeAttribute('data-cyano');") +
+        (t.Vector
+            ? "document.documentElement.setAttribute('data-vector','1');"
+            : "document.documentElement.removeAttribute('data-vector');") +
         (BoxedMessages
             ? "document.documentElement.setAttribute('data-cards','1');"
             : "document.documentElement.removeAttribute('data-cards');") +
+        (MediaBackground
+            ? "document.documentElement.setAttribute('data-mediabg','1');"
+            : "document.documentElement.removeAttribute('data-mediabg');") +
         "})();";
 
     /// <summary>Accent tint used for the raised surface. The strong value is what nearly every theme
@@ -567,21 +407,11 @@ public static class ThemeManager
         return MixToward(panel, accent, RaisedTintGentle);
     }
 
-    /// <summary>WCAG relative luminance of an sRGB color.</summary>
-    private static double Luminance(Color c)
-    {
-        static double Ch(byte v)
-        {
-            var s = v / 255.0;
-            return s <= 0.03928 ? s / 12.92 : Math.Pow((s + 0.055) / 1.055, 2.4);
-        }
-        return 0.2126 * Ch(c.R) + 0.7152 * Ch(c.G) + 0.0722 * Ch(c.B);
-    }
-
-    /// <summary>WCAG contrast ratio between two colors, 1.0 (identical) to 21.0 (black on white).</summary>
+    /// <summary>WCAG contrast ratio between two colors. Thin wrapper over <see cref="ColorMath"/>,
+    /// which owns the arithmetic so the palette can be checked without a UI type in the way.</summary>
     private static double Contrast(Color a, Color b)
     {
-        var (la, lb) = (Luminance(a), Luminance(b));
+        var (la, lb) = (ColorMath.Luminance(a.R, a.G, a.B), ColorMath.Luminance(b.R, b.G, b.B));
         return (Math.Max(la, lb) + 0.05) / (Math.Min(la, lb) + 0.05);
     }
 
@@ -628,5 +458,9 @@ public static class ThemeManager
         /// <summary>Nullable on purpose: absent (pre-feature settings file) means "use the
         /// current default", so changing the default never fights a user's explicit choice.</summary>
         public bool? Boxed { get; set; }
+        /// <summary>Nullable for the same reason as <see cref="Boxed"/>: absent means the current
+        /// default rather than a stored "off", so an existing settings file written before this
+        /// setting existed picks the default up instead of being pinned to the old behaviour.</summary>
+        public bool? MediaBg { get; set; }
     }
 }

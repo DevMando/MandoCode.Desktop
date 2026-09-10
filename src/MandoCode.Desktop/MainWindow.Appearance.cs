@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Text.Json;
 using MandoCode.Models;
@@ -70,6 +70,13 @@ public sealed partial class MainWindow
         if (!_appearanceReady) return;   // see _appearanceReady — a Save() here wipes settings
         ThemeManager.SetBoxedMessages(BoxedMessagesToggle.IsOn);
         ApplyThemeToAllTabs();   // live — existing messages re-skin instantly
+    }
+
+    private void MediaBackground_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (!_appearanceReady) return;   // see _appearanceReady — a Save() here wipes settings
+        ThemeManager.SetMediaBackground(MediaBackgroundToggle.IsOn);
+        ApplyThemeToAllTabs();   // live — the filter attaches to the existing #bg layer
     }
 
     private void BgOpacity_Changed(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
