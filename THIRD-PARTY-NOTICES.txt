@@ -15,6 +15,17 @@ highlight.js — https://highlightjs.org
   License: BSD 3-Clause (Appendix C)
 
 --------------------------------------------------------------------------
+Bundled fonts (shipped in Assets/fonts, used for the application wordmark)
+--------------------------------------------------------------------------
+
+Permanent Marker — https://fonts.google.com/specimen/Permanent+Marker
+  Copyright (c) 2010 Font Diner, Inc.
+  License: Apache License 2.0 (Appendix D)
+  The unmodified font file ships with its full license text alongside it, at
+  Assets/fonts/LICENSE.txt. Upstream publishes no NOTICE file for this family,
+  so section 4(d) of the license imposes no further attribution.
+
+--------------------------------------------------------------------------
 .NET package dependencies (compiled into the application)
 --------------------------------------------------------------------------
 
@@ -152,3 +163,26 @@ INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
 CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
+
+--------------------------------------------------------------------------
+Appendix D — Apache License 2.0 (Permanent Marker)
+--------------------------------------------------------------------------
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not
+use this file except in compliance with the License. You may obtain a copy of
+the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+License for the specific language governing permissions and limitations under
+the License.
+
+The complete, unabridged license text is distributed with the font itself, at
+Assets/fonts/LICENSE.txt, and is installed alongside the application.
+
+Apache-2.0 is a permissive, non-copyleft license. Including this font does not
+place any condition on the terms of MandoCode Desktop's own source, which
+remains under the MIT License (see LICENSE).

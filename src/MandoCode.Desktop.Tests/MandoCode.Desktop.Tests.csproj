@@ -60,6 +60,8 @@
     <Compile Include="..\MandoCode.Desktop\Services\StableCollection.cs" Link="src\StableCollection.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\AgentCommandFormat.cs" Link="src\AgentCommandFormat.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\AgentCommandLog.cs" Link="src\AgentCommandLog.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\ColorMath.cs" Link="src\ColorMath.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\UiTheme.cs" Link="src\UiTheme.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\ConversationLog.cs" Link="src\ConversationLog.cs" />
     <!-- History's full-text matching + snippet extraction. Pure (text in, match out); the file reads
          and caching live in ConversationTextCache, which is NOT compiled here because it touches

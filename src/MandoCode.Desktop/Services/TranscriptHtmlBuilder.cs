@@ -374,7 +374,7 @@ public sealed class TranscriptHtmlBuilder : ITranscriptHtml
     /// UiTheme; ThemeManager.BuildTranscriptScript re-points the same CSS variables at runtime.</summary>
     public static string BaseDocument(UiTheme theme) => $$"""
 <!DOCTYPE html>
-<html{{(theme.FlatMotion ? " data-flat=\"1\"" : "")}}{{(theme.Crt ? " data-crt=\"1\"" : "")}}{{(theme.Win98 ? " data-win98=\"1\"" : "")}}{{(ThemeManager.BoxedMessages ? " data-cards=\"1\"" : "")}}>
+<html{{(theme.FlatMotion ? " data-flat=\"1\"" : "")}}{{(theme.Crt ? " data-crt=\"1\"" : "")}}{{(theme.Win98 ? " data-win98=\"1\"" : "")}}{{(theme.Monochrome ? " data-mono=\"1\"" : "")}}{{(theme.Fanfold ? " data-fanfold=\"1\"" : "")}}{{(theme.Lcd ? " data-lcd=\"1\"" : "")}}{{(theme.Riso ? " data-riso=\"1\"" : "")}}{{(theme.Vfd ? " data-vfd=\"1\"" : "")}}{{(theme.SplitFlap ? " data-splitflap=\"1\"" : "")}}{{(theme.Fiche ? " data-fiche=\"1\"" : "")}}{{(theme.Cyanotype ? " data-cyano=\"1\"" : "")}}{{(theme.Vector ? " data-vector=\"1\"" : "")}}{{(ThemeManager.BoxedMessages ? " data-cards=\"1\"" : "")}}{{(ThemeManager.MediaBackground ? " data-mediabg=\"1\"" : "")}}>
 <head>
 <meta charset="utf-8">
 <script src="https://mandocode.assets/highlight.min.js"></script>
@@ -382,7 +382,7 @@ public sealed class TranscriptHtmlBuilder : ITranscriptHtml
   :root {
     --bg: {{theme.Background}};
     --fg: {{theme.Text}};
-    --dim: {{theme.Dim}};
+    --dim: {{theme.ReadableDim}};
     --accent: {{theme.Accent}};
     --gold: {{theme.Gold}};
     --sky: {{theme.Sky}};
@@ -420,6 +420,225 @@ public sealed class TranscriptHtmlBuilder : ITranscriptHtml
       <feFuncR type="discrete" tableValues="0 1"/>
       <feFuncG type="discrete" tableValues="0 1"/>
       <feFuncB type="discrete" tableValues="0 1"/>
+      <feFuncA type="discrete" tableValues="1 1"/>
+    </feComponentTransfer>
+  </filter>
+
+  <!-- Matrix LCD. A passive-matrix panel cannot show a photograph: it has a handful of addressable
+       levels and one colour of backlight. So the picture is quantised to FOUR shades (the dither
+       is what stops that banding into posterised mush) and then mapped onto the panel's own olive
+       ramp — darkest is the polarizer at full twist, lightest is the backlight through bare glass.
+       The result is the Game Boy Camera, which is exactly what a photo on this hardware looked
+       like. Same structure as #eink, one extra level and a duotone tail. -->
+  <filter id="lcd" x="0%" y="0%" width="100%" height="100%" color-interpolation-filters="sRGB">
+    <feColorMatrix type="matrix" result="g"
+      values="0.299 0.587 0.114 0 0  0.299 0.587 0.114 0 0  0.299 0.587 0.114 0 0  0 0 0 1 0"/>
+    <feComponentTransfer in="g" result="gc">
+      <feFuncR type="linear" slope="1.25" intercept="-0.12"/>
+      <feFuncG type="linear" slope="1.25" intercept="-0.12"/>
+      <feFuncB type="linear" slope="1.25" intercept="-0.12"/>
+    </feComponentTransfer>
+    <feImage result="ltile" x="0" y="0" width="16" height="16" preserveAspectRatio="none"
+      href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAo0lEQVR42pXLEXMCABgA0C4IgiAIBkEQBINgEAyCIAiCYBAEgyAYDILugiAIgiAIgiAIgmAwGARBMBgEwWAQBIPBYHe7e//ge/4SSYYUWJJmTIk1iXB4o8onHQ7UudAlHspsyTKlwgs3zImHb554p8kvfU48EA8ZJtyyIcWIIivi4UiDKz321PjikXi455U8C+7YkWNGPPwx4EybH575oEU4/AOvd36QFSHM3wAAAABJRU5ErkJggg=="/>
+    <feTile in="ltile" result="lbayer"/>
+    <feComposite in="gc" in2="lbayer" operator="arithmetic" k1="0" k2="1" k3="-0.34" k4="0.17" result="ld"/>
+    <feComponentTransfer in="ld" result="lq">
+      <feFuncR type="discrete" tableValues="0 0.34 0.67 1"/>
+      <feFuncG type="discrete" tableValues="0 0.34 0.67 1"/>
+      <feFuncB type="discrete" tableValues="0 0.34 0.67 1"/>
+      <feFuncA type="discrete" tableValues="1 1"/>
+    </feComponentTransfer>
+    <!-- #1B2410 (polarizer, darkest) through #C4CFA1 (backlight, lightest) -->
+    <feComponentTransfer in="lq">
+      <feFuncR type="table" tableValues="0.106 0.769"/>
+      <feFuncG type="table" tableValues="0.141 0.812"/>
+      <feFuncB type="table" tableValues="0.063 0.631"/>
+    </feComponentTransfer>
+  </filter>
+
+  <!-- Pheteven Phosphor. One gun, one phosphor — the tube physically cannot resolve a colour image,
+       so the picture becomes an amber duotone. Deliberately NOT dithered, unlike the paper and
+       panel filters: a CRT draws continuous tone, and banding it would be borrowing a limitation
+       from the wrong medium. Contrast is pushed because the scanline overlay lands on top. -->
+  <filter id="amber" x="0%" y="0%" width="100%" height="100%" color-interpolation-filters="sRGB">
+    <feColorMatrix type="matrix" result="ag"
+      values="0.299 0.587 0.114 0 0  0.299 0.587 0.114 0 0  0.299 0.587 0.114 0 0  0 0 0 1 0"/>
+    <feComponentTransfer in="ag" result="agc">
+      <feFuncR type="linear" slope="1.30" intercept="-0.16"/>
+      <feFuncG type="linear" slope="1.30" intercept="-0.16"/>
+      <feFuncB type="linear" slope="1.30" intercept="-0.16"/>
+    </feComponentTransfer>
+    <!-- #100A02 (unlit tube) through #FFB000 (P3 amber at full beam) -->
+    <feComponentTransfer in="agc">
+      <feFuncR type="table" tableValues="0.063 1.000"/>
+      <feFuncG type="table" tableValues="0.039 0.690"/>
+      <feFuncB type="table" tableValues="0.008 0.000"/>
+      <feFuncA type="discrete" tableValues="1 1"/>
+    </feComponentTransfer>
+  </filter>
+
+  <!-- Green-Bar Fanfold. A line printer renders an image the only way it can: one ribbon, struck
+       or not struck, at whatever density the dot pitch allows. So this is 1-bit like #eink — but
+       mapped to ribbon ink on warm stock rather than black on white, because the paper is not
+       white and the ink is not black. -->
+  <filter id="fanfold" x="0%" y="0%" width="100%" height="100%" color-interpolation-filters="sRGB">
+    <feColorMatrix type="matrix" result="fg"
+      values="0.299 0.587 0.114 0 0  0.299 0.587 0.114 0 0  0.299 0.587 0.114 0 0  0 0 0 1 0"/>
+    <feComponentTransfer in="fg" result="fgc">
+      <feFuncR type="linear" slope="1.40" intercept="-0.20"/>
+      <feFuncG type="linear" slope="1.40" intercept="-0.20"/>
+      <feFuncB type="linear" slope="1.40" intercept="-0.20"/>
+    </feComponentTransfer>
+    <feImage result="ftile" x="0" y="0" width="16" height="16" preserveAspectRatio="none"
+      href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAo0lEQVR42pXLEXMCABgA0C4IgiAIBkEQBINgEAyCIAiCYBAEgyAYDILugiAIgiAIgiAIgmAwGARBMBgEwWAQBIPBYHe7e//ge/4SSYYUWJJmTIk1iXB4o8onHQ7UudAlHspsyTKlwgs3zImHb554p8kvfU48EA8ZJtyyIcWIIivi4UiDKz321PjikXi455U8C+7YkWNGPPwx4EybH575oEU4/AOvd36QFSHM3wAAAABJRU5ErkJggg=="/>
+    <feTile in="ftile" result="fbayer"/>
+    <feComposite in="fgc" in2="fbayer" operator="arithmetic" k1="0" k2="1" k3="-1" k4="0.5" result="fd"/>
+    <feComponentTransfer in="fd" result="fq">
+      <feFuncR type="discrete" tableValues="0 1"/>
+      <feFuncG type="discrete" tableValues="0 1"/>
+      <feFuncB type="discrete" tableValues="0 1"/>
+      <feFuncA type="discrete" tableValues="1 1"/>
+    </feComponentTransfer>
+    <!-- #2A2822 (ribbon) through #F4F1E4 (stock) -->
+    <feComponentTransfer in="fq">
+      <feFuncR type="table" tableValues="0.165 0.957"/>
+      <feFuncG type="table" tableValues="0.157 0.945"/>
+      <feFuncB type="table" tableValues="0.133 0.894"/>
+    </feComponentTransfer>
+  </filter>
+
+  <!-- Risograph. A riso reproduces a photo as halftone in its loaded inks — so the picture is
+       dithered like the paper filters, then mapped across BOTH drums: blue in the shadows, pink
+       through the midtones, bare stock in the highlights. Three stops rather than two is what
+       makes it read as a two-colour print instead of a blue-tinted photograph. Six levels, because
+       a stencil holds more tone than a printer ribbon does. -->
+  <filter id="riso" x="0%" y="0%" width="100%" height="100%" color-interpolation-filters="sRGB">
+    <feColorMatrix type="matrix" result="rg"
+      values="0.299 0.587 0.114 0 0  0.299 0.587 0.114 0 0  0.299 0.587 0.114 0 0  0 0 0 1 0"/>
+    <feComponentTransfer in="rg" result="rgc">
+      <feFuncR type="linear" slope="1.20" intercept="-0.10"/>
+      <feFuncG type="linear" slope="1.20" intercept="-0.10"/>
+      <feFuncB type="linear" slope="1.20" intercept="-0.10"/>
+    </feComponentTransfer>
+    <feImage result="rtile" x="0" y="0" width="16" height="16" preserveAspectRatio="none"
+      href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAo0lEQVR42pXLEXMCABgA0C4IgiAIBkEQBINgEAyCIAiCYBAEgyAYDILugiAIgiAIgiAIgmAwGARBMBgEwWAQBIPBYHe7e//ge/4SSYYUWJJmTIk1iXB4o8onHQ7UudAlHspsyTKlwgs3zImHb554p8kvfU48EA8ZJtyyIcWIIivi4UiDKz321PjikXi455U8C+7YkWNGPPwx4EybH575oEU4/AOvd36QFSHM3wAAAABJRU5ErkJggg=="/>
+    <feTile in="rtile" result="rbayer"/>
+    <feComposite in="rgc" in2="rbayer" operator="arithmetic" k1="0" k2="1" k3="-0.2" k4="0.1" result="rd"/>
+    <feComponentTransfer in="rd" result="rq">
+      <feFuncR type="discrete" tableValues="0 0.2 0.4 0.6 0.8 1"/>
+      <feFuncG type="discrete" tableValues="0 0.2 0.4 0.6 0.8 1"/>
+      <feFuncB type="discrete" tableValues="0 0.2 0.4 0.6 0.8 1"/>
+      <feFuncA type="discrete" tableValues="1 1"/>
+    </feComponentTransfer>
+    <!-- #1A4A8F (federal blue) → #C42A63 (fluorescent pink) → #F3EFE6 (stock) -->
+    <feComponentTransfer in="rq">
+      <feFuncR type="table" tableValues="0.102 0.769 0.953"/>
+      <feFuncG type="table" tableValues="0.290 0.165 0.937"/>
+      <feFuncB type="table" tableValues="0.561 0.388 0.902"/>
+    </feComponentTransfer>
+  </filter>
+
+  <!-- VFD. The panel has one phosphor colour, so a picture behind it becomes a cyan duotone. Not dithered — a VFD segment is fully on or fully off, but the image is behind the SMOKED GLASS rather than in the segments, so it keeps continuous tone and simply loses its colour. -->
+  <filter id="vfd" x="0%" y="0%" width="100%" height="100%" color-interpolation-filters="sRGB">
+    <feColorMatrix type="matrix" result="vfdg"
+      values="0.299 0.587 0.114 0 0  0.299 0.587 0.114 0 0  0.299 0.587 0.114 0 0  0 0 0 1 0"/>
+    <feComponentTransfer in="vfdg" result="vfdc">
+      <feFuncR type="linear" slope="1.3" intercept="-0.16"/>
+      <feFuncG type="linear" slope="1.3" intercept="-0.16"/>
+      <feFuncB type="linear" slope="1.3" intercept="-0.16"/>
+    </feComponentTransfer>
+    <feComponentTransfer in="vfdc">
+      <feFuncR type="table" tableValues="0.020 0.498"/>
+      <feFuncG type="table" tableValues="0.031 1.000"/>
+      <feFuncB type="table" tableValues="0.039 0.894"/>
+      <feFuncA type="discrete" tableValues="1 1"/>
+    </feComponentTransfer>
+  </filter>
+
+  <!-- Split-Flap. A flap is a printed card: it holds ink or it doesn't, so the picture is 1-bit and lands as the board's own two colours. Coarser dithering than the paper filters, because a board's resolution is measured in whole characters. -->
+  <filter id="splitflap" x="0%" y="0%" width="100%" height="100%" color-interpolation-filters="sRGB">
+    <feColorMatrix type="matrix" result="splitflapg"
+      values="0.299 0.587 0.114 0 0  0.299 0.587 0.114 0 0  0.299 0.587 0.114 0 0  0 0 0 1 0"/>
+    <feComponentTransfer in="splitflapg" result="splitflapc">
+      <feFuncR type="linear" slope="1.45" intercept="-0.22"/>
+      <feFuncG type="linear" slope="1.45" intercept="-0.22"/>
+      <feFuncB type="linear" slope="1.45" intercept="-0.22"/>
+    </feComponentTransfer>
+    <feImage result="splitflapt" x="0" y="0" width="16" height="16" preserveAspectRatio="none"
+      href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAo0lEQVR42pXLEXMCABgA0C4IgiAIBkEQBINgEAyCIAiCYBAEgyAYDILugiAIgiAIgiAIgmAwGARBMBgEwWAQBIPBYHe7e//ge/4SSYYUWJJmTIk1iXB4o8onHQ7UudAlHspsyTKlwgs3zImHb554p8kvfU48EA8ZJtyyIcWIIivi4UiDKz321PjikXi455U8C+7YkWNGPPwx4EybH575oEU4/AOvd36QFSHM3wAAAABJRU5ErkJggg=="/>
+    <feTile in="splitflapt" result="splitflapb"/>
+    <feComposite in="splitflapc" in2="splitflapb" operator="arithmetic" k1="0" k2="1" k3="-1" k4="0.5" result="splitflapd"/>
+    <feComponentTransfer in="splitflapd" result="splitflapq">
+      <feFuncR type="discrete" tableValues="0 1"/>
+      <feFuncG type="discrete" tableValues="0 1"/>
+      <feFuncB type="discrete" tableValues="0 1"/>
+      <feFuncA type="discrete" tableValues="1 1"/>
+    </feComponentTransfer>
+    <feComponentTransfer in="splitflapq">
+      <feFuncR type="table" tableValues="0.063 0.961"/>
+      <feFuncG type="table" tableValues="0.063 0.918"/>
+      <feFuncB type="table" tableValues="0.078 0.784"/>
+      <feFuncA type="discrete" tableValues="1 1"/>
+    </feComponentTransfer>
+  </filter>
+
+  <!-- Microfiche. Silver-halide film in a cool reader — continuous tone, no colour, and a slightly compressed range because a projected positive never reaches true black. -->
+  <filter id="fiche" x="0%" y="0%" width="100%" height="100%" color-interpolation-filters="sRGB">
+    <feColorMatrix type="matrix" result="ficheg"
+      values="0.299 0.587 0.114 0 0  0.299 0.587 0.114 0 0  0.299 0.587 0.114 0 0  0 0 0 1 0"/>
+    <feComponentTransfer in="ficheg" result="fichec">
+      <feFuncR type="linear" slope="1.05" intercept="0.02"/>
+      <feFuncG type="linear" slope="1.05" intercept="0.02"/>
+      <feFuncB type="linear" slope="1.05" intercept="0.02"/>
+    </feComponentTransfer>
+    <feComponentTransfer in="fichec">
+      <feFuncR type="table" tableValues="0.227 0.851"/>
+      <feFuncG type="table" tableValues="0.275 0.875"/>
+      <feFuncB type="table" tableValues="0.314 0.886"/>
+      <feFuncA type="discrete" tableValues="1 1"/>
+    </feComponentTransfer>
+  </filter>
+
+  <!-- Cyanotype. A photogram of the picture: exposure runs from unexposed paper to saturated Prussian blue. Inverted against the others, because on a cyanotype the LIGHT areas of a negative are what turn blue. -->
+  <filter id="cyano" x="0%" y="0%" width="100%" height="100%" color-interpolation-filters="sRGB">
+    <feColorMatrix type="matrix" result="cyanog"
+      values="0.299 0.587 0.114 0 0  0.299 0.587 0.114 0 0  0.299 0.587 0.114 0 0  0 0 0 1 0"/>
+    <feComponentTransfer in="cyanog" result="cyanoc">
+      <feFuncR type="linear" slope="1.15" intercept="-0.06"/>
+      <feFuncG type="linear" slope="1.15" intercept="-0.06"/>
+      <feFuncB type="linear" slope="1.15" intercept="-0.06"/>
+    </feComponentTransfer>
+    <feComponentTransfer in="cyanoc">
+      <feFuncR type="table" tableValues="0.929 0.055"/>
+      <feFuncG type="table" tableValues="0.957 0.227"/>
+      <feFuncB type="table" tableValues="0.973 0.373"/>
+      <feFuncA type="discrete" tableValues="1 1"/>
+    </feComponentTransfer>
+  </filter>
+
+  <!-- Vector Scope. A scope cannot display a raster image at all — a beam draws strokes. So the picture is reduced to a few phosphor intensities, which is as close as steered-beam hardware gets to a photograph. -->
+  <filter id="vector" x="0%" y="0%" width="100%" height="100%" color-interpolation-filters="sRGB">
+    <feColorMatrix type="matrix" result="vectorg"
+      values="0.299 0.587 0.114 0 0  0.299 0.587 0.114 0 0  0.299 0.587 0.114 0 0  0 0 0 1 0"/>
+    <feComponentTransfer in="vectorg" result="vectorc">
+      <feFuncR type="linear" slope="1.25" intercept="-0.14"/>
+      <feFuncG type="linear" slope="1.25" intercept="-0.14"/>
+      <feFuncB type="linear" slope="1.25" intercept="-0.14"/>
+    </feComponentTransfer>
+    <feImage result="vectort" x="0" y="0" width="16" height="16" preserveAspectRatio="none"
+      href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAo0lEQVR42pXLEXMCABgA0C4IgiAIBkEQBINgEAyCIAiCYBAEgyAYDILugiAIgiAIgiAIgmAwGARBMBgEwWAQBIPBYHe7e//ge/4SSYYUWJJmTIk1iXB4o8onHQ7UudAlHspsyTKlwgs3zImHb554p8kvfU48EA8ZJtyyIcWIIivi4UiDKz321PjikXi455U8C+7YkWNGPPwx4EybH575oEU4/AOvd36QFSHM3wAAAABJRU5ErkJggg=="/>
+    <feTile in="vectort" result="vectorb"/>
+    <feComposite in="vectorc" in2="vectorb" operator="arithmetic" k1="0" k2="1" k3="-0.34" k4="0.17" result="vectord"/>
+    <feComponentTransfer in="vectord" result="vectorq">
+      <feFuncR type="discrete" tableValues="0 0.34 0.67 1"/>
+      <feFuncG type="discrete" tableValues="0 0.34 0.67 1"/>
+      <feFuncB type="discrete" tableValues="0 0.34 0.67 1"/>
+      <feFuncA type="discrete" tableValues="1 1"/>
+    </feComponentTransfer>
+    <feComponentTransfer in="vectorq">
+      <feFuncR type="table" tableValues="0.024 0.475"/>
+      <feFuncG type="table" tableValues="0.059 0.851"/>
+      <feFuncB type="table" tableValues="0.035 0.573"/>
       <feFuncA type="discrete" tableValues="1 1"/>
     </feComponentTransfer>
   </filter>

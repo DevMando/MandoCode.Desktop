@@ -16,6 +16,23 @@ for every approved plan. Desktop's version follows the engine generation, so it 
 0.15.0.
 
 ### Added
+- **Nine themes that imitate a physical medium, not just a colour scheme.** Alongside the existing
+  e-ink and CRT looks, MandoCode Desktop now ships a monochrome amber terminal, a vacuum-fluorescent
+  panel, a vector scope, a passive-matrix LCD, a Solari split-flap board, a cyanotype blueprint, a
+  two-ink risograph print, continuous-feed printer paper, and microfiche. Each reproduces how its
+  medium actually made an image rather than only borrowing its colours — the LCD ghosts instead of
+  glowing, the split-flap board can only show uppercase because a flap carries one printed
+  character, and the cyanotype is a negative, so emphasis is a whiter stroke rather than a heavier
+  one. The theme list is ordered so neighbours share a mechanism, which keeps it skimmable now that
+  there are twenty-five entries.
+- **Your chat background can match the theme.** Themes that imitate a screen or a printing process
+  also process your background image the way that medium would have reproduced it — quantised to a
+  panel's few shades, rendered as amber phosphor, or laid down as two-ink halftone. On by default,
+  with a switch in Settings → Appearance to keep the picture in full colour. It affects only those
+  themes, and only when a background is set.
+- **The MandoCode wordmark has its own typeface.** The name in the top-left is now set in Permanent
+  Marker, bundled with the app rather than fetched from a font service, so it renders identically
+  offline. It takes each theme's accent colour, so it re-inks itself as you switch themes.
 - **Watch the agent's shell commands run.** The terminal panel gains a read-only tab per agent
   showing every command that agent runs — the command and the folder it runs in, its output line by
   line as it arrives, and whether it finished, failed, or was killed for taking too long. A long
@@ -192,6 +209,18 @@ for every approved plan. Desktop's version follows the engine generation, so it 
   a sticky header, or the suggestion list a field opens when it is filled.
 
 ### Fixed
+- **Secondary text is readable in every theme.** Timestamps, file paths, status lines and the hints
+  under headings were below the accessibility contrast floor in half the shipped themes — several
+  faithfully so, since palettes like Dracula and One Dark ship famously faint comment colours
+  upstream. Those palettes are unchanged; the text is now lifted just far enough to clear the floor,
+  blended toward each theme's own text colour so it stays that theme's shade rather than drifting
+  grey. A theme that was already readable is left exactly as it was. Themes viewed through an
+  overlay, such as the CRT tube, are held to a higher bar, because scanlines take contrast the
+  palette's own numbers do not account for.
+- **The CRT theme's phosphor glow follows the text it surrounds.** Every glyph glowed the same
+  blue regardless of its colour, so red errors carried a blue halo. On a real tube the glow is the
+  phosphor being excited, so error text now glows red and success green. Code blocks keep a tighter
+  glow, since a full halo turns syntax highlighting into a smear.
 - **The "no agents open" message stays readable over a chat background image.** With a background
   image set, closing the last agent left the message painted straight onto the picture, where a
   busy or light image could make it hard to read. The message now sits in a translucent card — the
