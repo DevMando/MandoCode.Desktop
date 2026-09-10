@@ -178,6 +178,12 @@ for every approved plan. Desktop's version follows the engine generation, so it 
   a sticky header, or the suggestion list a field opens when it is filled.
 
 ### Fixed
+- **The "no agents open" message stays readable over a chat background image.** With a background
+  image set, closing the last agent left the message painted straight onto the picture, where a
+  busy or light image could make it hard to read. The message now sits in a translucent card — the
+  same treatment the chat's own message bubbles use — so the image still shows through while the
+  text keeps a predictable surface behind it. The explanatory line under the heading is also less
+  dimmed, since dimming costs contrast that a background image has already spent.
 - **The preview pane's open and attach buttons now work on web pages.** Both acted only on a
   project file, so on a website they did nothing at all and gave no reason why. Open now hands the
   page to the system's default browser and the attach button puts its address into the prompt,

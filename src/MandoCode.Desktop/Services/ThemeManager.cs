@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 using Windows.UI;
@@ -446,6 +446,10 @@ public static class ThemeManager
         SetBrush(res, "MandoTextBrush", t.Text);
         SetBrush(res, "MandoDimBrush", t.Dim);
         SetBrush(res, "MandoRaisedBrush", Raised(t));
+        // Panel with alpha, for native surfaces painted over the chat background image.
+        // 0xE6 rather than the transcript's 82%, because XAML has no backdrop blur to
+        // soften what shows through — the extra opacity does that job instead.
+        SetBrush(res, "MandoGlassBrush", WithAlpha(C(t.Panel), 0xE6));
 
         // Accent family: Light2 feeds accent fills in dark themes, Dark1 in light
         // themes — both pinned to the exact brand accent so fills never drift.
