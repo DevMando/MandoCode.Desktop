@@ -66,6 +66,9 @@ public sealed class AgentSession
     public PlanHandoff PlanHandoff { get; }
     public SkillLoader Skills { get; }
 
+    /// <summary>Open agents, so this tab's '@' picker can offer the others.</summary>
+    public AgentDirectory Agents { get; }
+
     /// <summary>This agent's shell-command activity, as terminal-ready text. Always recording, so
     /// the terminal panel can show work that ran before the user opened it.</summary>
     public AgentCommandLog CommandLog { get; }
@@ -124,10 +127,21 @@ public sealed class AgentSession
         // Attached once, here: the engine hands the sink to the filesystem plugin on every agent
         // rebuild, so it survives model switches, settings changes, and folder changes without the
         // host re-attaching anything.
+        Agents = globals.GetRequiredService<AgentDirectory>();
         CommandLog = new AgentCommandLog();
         Ai = new AIService(ProjectRoot, Config, Tokens, PlanHandoff, Skills, mcpManager, McpGate, spinner, CommandLog);
         PreviewTools = new DesktopPreviewTools(ProjectRoot) { RequireTabId = true, ImageSink = new AgentImageSink(new AiServiceAdapter(Ai)) };
+        // Cross-agent observation. Registered alongside the browser tools because both are host
+        // knowledge the engine cannot have: the engine sees one project root, the host sees the
+        // whole window.
+        var agentTools = new AgentDirectoryTools(Agents, PersistKey, () => Title, StartDelegation);
         Ai.SetHostTools([
+            Microsoft.Extensions.AI.AIFunctionFactory.Create(agentTools.ListAgents, new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "list_agents" }),
+            Microsoft.Extensions.AI.AIFunctionFactory.Create(agentTools.GetAgentStatus, new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "get_agent_status" }),
+            Microsoft.Extensions.AI.AIFunctionFactory.Create(agentTools.AskAgent, new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "ask_agent" }),
+            Microsoft.Extensions.AI.AIFunctionFactory.Create(agentTools.ReadAgentTranscript, new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "read_agent_transcript" }),
+            Microsoft.Extensions.AI.AIFunctionFactory.Create(agentTools.DelegateToAgent, new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "delegate_to_agent" }),
+            Microsoft.Extensions.AI.AIFunctionFactory.Create(agentTools.CheckDelegations, new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "check_delegations" }),
             Microsoft.Extensions.AI.AIFunctionFactory.Create(PreviewTools.ListBrowserFrames, new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "list_browser_frames" }),
             Microsoft.Extensions.AI.AIFunctionFactory.Create(PreviewTools.ListBrowserTabs, new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "list_browser_tabs" }),
             Microsoft.Extensions.AI.AIFunctionFactory.Create(PreviewTools.OpenBrowserTab, new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "open_browser_tab" }),
@@ -204,7 +218,12 @@ public sealed class AgentSession
             new AiServiceAdapter(Ai), Config, Tokens, PlanHandoff, Planner, PlanRunners,
             mcpManager, McpGate, Skills, FileProvider, ProjectRoot,
             music, updateCheck, Approvals, Transcript, html, Busy, Shell, PromptGate,
-            configs, mcp, Snapshots);
+            configs, mcp, Snapshots,
+            globals.GetRequiredService<AgentDirectory>(), PersistKey);
+
+        // Addressable by other agents from here on. Registered after the controller exists because
+        // answering a question is a turn on it.
+        Agents.RegisterPeer(new SessionAgentPeer(PersistKey, Controller, Busy));
 
         // Tier-3 persistence: plain-text turns feed the ConversationLog so a restored
         // session can re-brief the model.
@@ -291,6 +310,50 @@ public sealed class AgentSession
         // the user makes a fresh change.
         _persistedConfigJson = AgentConfigStore.Fingerprint(Config);
     }
+
+    /// <summary>
+    /// Runs a delegated job on the target in the background and reports the outcome into the
+    /// delegating agent's inbox. Fire-and-forget on purpose: the whole point is that the delegating
+    /// agent's turn ends immediately, so the user keeps their agent while the work happens.
+    ///
+    /// <para>Nothing awaits this, so nothing can surface an exception — hence the catch-all. A job
+    /// that died silently would leave its delegation reading "still working" forever, which looks
+    /// like a hung agent rather than a failure.</para>
+    /// </summary>
+    private void StartDelegation(Delegation delegation, IAgentPeer target)
+    {
+        var inbox = Agents.InboxFor(delegation.FromKey);
+        var entry = () => Agents.All.FirstOrDefault(a => a.Key == delegation.ToKey);
+
+        // Filed at once, so the digest exists from the moment the job starts rather than appearing
+        // only after something has happened.
+        inbox.Post(DelegationRegistry.Digest(delegation, entry(), Agents.RecentCommandsFor(delegation.ToKey)));
+
+        _ = Task.Run(async () =>
+        {
+            DelegationState state;
+            string? result;
+            try
+            {
+                var answer = await target.AskAsync(delegation.FromName, delegation.Task);
+                state = answer.Answered ? DelegationState.Done : DelegationState.Failed;
+                result = answer.Text;
+            }
+            catch (Exception ex)
+            {
+                state = DelegationState.Failed;
+                result = ex.Message;
+            }
+
+            var finished = Agents.Delegations.Complete(delegation.Id, state, result) ?? delegation;
+            inbox.Post(DelegationRegistry.Digest(finished, entry(), Agents.RecentCommandsFor(finished.ToKey)));
+            DelegationFinished?.Invoke(finished);
+        });
+    }
+
+    /// <summary>Raised when a job this agent handed out ends, so the host can show it and badge the
+    /// tab. Raised on a background thread.</summary>
+    public event Action<Delegation>? DelegationFinished;
 
     /// <summary>
     /// Repoints this tab at a different project folder, KEEPING the conversation. Changing folders

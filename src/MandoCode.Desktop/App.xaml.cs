@@ -1,4 +1,4 @@
-using MandoCode.Models;
+﻿using MandoCode.Models;
 using MandoCode.Services;
 using MandoCode.Desktop.Services;
 using MandoCode.Desktop.ViewModels;
@@ -85,6 +85,7 @@ public partial class App : Application
         // package — the CLI's UpdateCheckService is deliberately NOT registered.
         services.AddSingleton<UiUpdateCheckService>();
         services.AddSingleton<TranscriptHtmlBuilder>();   // stateless formatter
+        services.AddSingleton<AgentDirectory>();          // who else is open, for @mentions
 
         // App-wide store of context snapshots taken when a tab switches its model, so any tab can
         // re-import a conversation captured by another. Session-scoped, not persisted.

@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Text.Json;
 using MandoCode.Models;
 using MandoCode.Desktop.Services;
@@ -49,7 +49,10 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
 
     private readonly ObservableCollection<CommandSuggestion> _suggestions = new();
 
-    private enum SuggestMode { None, Command, File, Emoji }
+    // Agent is its own mode rather than a flavour of File: AcceptSuggestion branches on the mode,
+    // and a callsign substitutes differently from a path — no trailing-'/' drill-in, and the text
+    // inserted is a name rather than a file reference.
+    private enum SuggestMode { None, Command, File, Emoji, Agent }
     private SuggestMode _suggestMode = SuggestMode.None;
     private int _tokenStart;   // index of the '@' (File mode) — replaced on accept
     private int _tokenEnd;     // caret position when suggestions were computed

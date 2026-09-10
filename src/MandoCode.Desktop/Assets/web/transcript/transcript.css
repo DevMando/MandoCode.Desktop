@@ -578,10 +578,17 @@
      bounded stays legible everywhere, whereas faint stops being legible the moment anything is
      painted over it. */
   .token-summary { text-align: right; margin: 2px 0; }
-  .token-chip { font-size: 11.5px; padding: 2px 11px; color: var(--fg);
-    /* The status-pill family pads to a shared 190px so those line up with each other. This one is
+  /* Written as .chip.token-chip, not .token-chip, and the extra class is load-bearing: the .chip
+     rule is defined LATER in this file, so at equal specificity it won. The pill kept .chip's
+     shared 190px floor and, being a flex row that packs to flex-start, left the token text sitting
+     against the left edge of an over-wide bubble. Two classes outrank one regardless of order. */
+  .chip.token-chip {
+    font-size: 11.5px; padding: 2px 11px; color: var(--fg);
+    /* The status-pill family pads to a shared width so those line up with each other. This one is
        not part of that set and should hug its own text. */
-    min-width: 0; }
+    min-width: 0;
+    /* Belt and braces: even at the natural width, content packs to the trailing edge. */
+    justify-content: flex-end; }
 
   /* Live plan status is operationally important, not ordinary transcript narration. Give it a
      high-opacity themed surface so a bright or busy chat wallpaper cannot wash out the active

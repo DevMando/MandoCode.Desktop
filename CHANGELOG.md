@@ -16,6 +16,17 @@ for every approved plan. Desktop's version follows the engine generation, so it 
 0.15.0.
 
 ### Added
+- **Agents can talk to each other.** Typing `@` now offers the other open agents before project
+  files, so you can address one by name from another's conversation. An agent can check what another
+  is doing, read its conversation, ask it a question and get a real answer back, or hand it a whole
+  job. Handing over a job does not block: your agent replies immediately and stays available while
+  the other works, tells you how far along it is whenever you ask, and announces the result in the
+  conversation when it finishes. Progress is summarised from what the other agent is actually doing
+  — the step it is on, the commands it has run — rather than by copying its conversation across, so
+  a job that runs for ten minutes costs no more to keep track of than one that runs for ten seconds.
+  Questions relayed between agents are labelled as such, so an agent always knows whether it is
+  talking to you or to another agent, and treats what another agent tells it as a claim rather than
+  a fact.
 - **Nine themes that imitate a physical medium, not just a colour scheme.** Alongside the existing
   e-ink and CRT looks, MandoCode Desktop now ships a monochrome amber terminal, a vacuum-fluorescent
   panel, a vector scope, a passive-matrix LCD, a Solari split-flap board, a cyanotype blueprint, a

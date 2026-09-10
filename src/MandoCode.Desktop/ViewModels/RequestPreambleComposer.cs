@@ -1,4 +1,4 @@
-namespace MandoCode.Desktop.ViewModels;
+﻿namespace MandoCode.Desktop.ViewModels;
 
 /// <summary>
 /// Assembles the invisible preamble that rides along with a user's message — imported snapshot
@@ -15,9 +15,16 @@ public static class RequestPreambleComposer
         string request,
         IReadOnlyList<string> armedContexts,
         IReadOnlyList<(string Emoji, string Snippet)> reactions,
-        IReadOnlyList<string> workspaceNotes)
+        IReadOnlyList<string> workspaceNotes,
+        string? inbox = null)
     {
         var result = request;
+
+        // Inbox first, so it reads as the oldest background — it describes work that was already
+        // under way before any of the rest of this turn's framing applied. Optional and last in the
+        // parameter list so existing callers are untouched.
+        if (!string.IsNullOrWhiteSpace(inbox))
+            result = inbox + "\n\n[Current request:]\n" + result;
 
         // Imported snapshots ride along ONCE as background the model already knows — the user's
         // echoed message stays their own text. Multiple imports accumulate, each a distinct recap.
