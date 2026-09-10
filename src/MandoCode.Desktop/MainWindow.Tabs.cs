@@ -61,6 +61,10 @@ public sealed partial class MainWindow
     private void AddTab_Click(object sender, RoutedEventArgs e)
     {
         var entry = CreateChatTab();
+        // No restore cascade on a brand-new agent — nothing is going to move its config out from
+        // under it, so its settings can persist from the first change. (Restored tabs are armed by
+        // InitTabAsync instead, once their saved model has landed.)
+        entry.View.Session.ConfigPersistenceArmed = true;
         _ = entry.View.InitializeAsync();
         SaveWorkspace();
     }
@@ -71,7 +75,9 @@ public sealed partial class MainWindow
         if (!string.IsNullOrWhiteSpace(title)) session.Title = title;
         var view = new ChatTabView(this, session, _html) { Visibility = Visibility.Collapsed };
 
-        view.SetupRequested += () => SwitchPage("settings");
+        // The agent opens its OWN settings pane (ChatTabView.OnSetupNeeded); all this has to do is
+        // make sure the chat is the visible page, so the pane isn't opening behind a rail page.
+        view.SetupRequested += () => SwitchPage("chat");
         view.McpEditorRequested += name =>
         {
             SwitchPage("mcp");

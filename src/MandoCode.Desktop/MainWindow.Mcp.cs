@@ -38,7 +38,7 @@ public sealed partial class MainWindow
         // at the agent level. Make sure the active agent actually attaches tools (new agents inherit
         // EnableMcp=true from defaults; this only fires for an agent someone turned off previously).
         if (!_controller.Config.EnableMcp)
-            await ApplySettingAsync("mcp", "true");
+            await _controller.ApplyConfigKeyAsync("mcp", "true");
 
         McpPageStatus.Text = "Checking server status…";
         var rows = await Task.Run(_controller.GetMcpStatusRowsAsync);

@@ -80,8 +80,7 @@ public sealed partial class MainWindow
         switch (page)
         {
             case "settings":
-                LoadSettings();
-                _ = RefreshModelListAsync();
+                LoadSettings();   // SettingsForm.Reload — it fetches its own model list
                 break;
             case "mcp":
                 _ = RefreshMcpListAsync();
@@ -148,10 +147,13 @@ public sealed partial class MainWindow
         NavNotesIcon.Foreground = NotesPanelOpen ? accent : normal;
         NavTerminalIcon.Foreground = _terminalOpen ? accent : normal;
 
-        // Settings and MCP act on the selected agent — disable them while none is open.
-        var hasAgent = _sessions.Active != null;
-        NavSettings.IsEnabled = hasAgent;
-        NavMcp.IsEnabled = hasAgent;
+        // MCP acts on the selected agent, so it needs one open. Settings no longer does — it edits
+        // the defaults for FUTURE agents, which is exactly the thing you might want to set up before
+        // opening any. (An agent's own settings are behind its gear icon instead.)
+        NavMcp.IsEnabled = _sessions.Active != null;
+        // The guided wizard renders into a chat transcript, so it needs one open even though what
+        // it configures is app-wide.
+        DefaultsSettingsForm.SetupWizardEnabled = _sessions.Active != null;
         ToolTipService.SetToolTip(NavChat, approvalPending ? "Agents — approval waiting" : "Agents");
     }
 

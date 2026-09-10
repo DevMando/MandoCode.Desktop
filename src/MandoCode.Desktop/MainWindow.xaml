@@ -16,8 +16,10 @@
         </Grid.ColumnDefinitions>
 
         <!-- ======= Sidebar rail =======
-             Full-screen pages, not tabs. Settings acts on whichever agent tab is currently selected
-             (per-agent). Snapshots, MCP servers, and Appearance are app-global — one surface for the
+             Full-screen pages, not tabs. Settings holds the DEFAULTS every new agent is seeded from;
+             a single agent's own settings live in the pane behind the gear icon in its header (same
+             SettingsForm control, bound to that agent). Snapshots, MCP servers, and Appearance are
+             app-global — one surface for the
              whole app, regardless of which agent is active. -->
         <Grid Grid.Column="0" Background="{StaticResource MandoPanelBrush}">
             <Grid.RowDefinitions>
@@ -73,7 +75,7 @@
             </Button>
             <Button x:Name="NavSettings" Click="NavSettings_Click" Padding="10,8" Background="Transparent"
                     BorderThickness="0" HorizontalAlignment="Stretch"
-                    ToolTipService.ToolTip="Settings — the selected agent's config">
+                    ToolTipService.ToolTip="Default Settings — what every new agent starts with. To change one agent, use the gear in its header.">
                 <FontIcon x:Name="NavSettingsIcon" Glyph="&#xE713;" FontSize="16"/>
             </Button>
             <!-- Divider: everything below is app-global, not per-agent. -->
@@ -943,7 +945,10 @@
                     </Button>
                 </StackPanel>
 
-                <!-- ============ SETTINGS PAGE ============ -->
+                <!-- ============ SETTINGS PAGE (global defaults) ============
+                     The starting point every NEW agent is seeded from. The identical form, bound to
+                     one agent instead, lives in the pane behind that agent's gear icon — one
+                     SettingsForm control, two hosts, so the two can never drift apart. -->
                 <Grid x:Name="SettingsPage" Visibility="Collapsed" Padding="24,16,24,16" RowSpacing="12"
                       Grid.ColumnSpan="5" Grid.RowSpan="3">
                     <Grid.RenderTransform>
@@ -951,231 +956,26 @@
                     </Grid.RenderTransform>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
-                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
-                    <StackPanel Spacing="4">
-                        <StackPanel Orientation="Horizontal" Spacing="10">
-                            <TextBlock Text="Settings" FontSize="22" FontWeight="SemiBold"
-                                       Foreground="{StaticResource MandoAccentBrush}"/>
-                            <Border Background="{StaticResource MandoPanelBrush}"
-                                    BorderBrush="{StaticResource MandoSkyBrush}" BorderThickness="1"
-                                    CornerRadius="12" Padding="10,3" VerticalAlignment="Center">
-                                <TextBlock x:Name="SettingsAgentChip" Text="" FontSize="12"
-                                           Foreground="{StaticResource MandoSkyBrush}"/>
-                            </Border>
-                        </StackPanel>
-                        <TextBlock Text="These settings belong to the selected agent, for this session — another agent keeps its own."
-                                   Opacity="0.6" FontSize="12" TextWrapping="Wrap"/>
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <TextBlock Text="Default Settings" FontSize="22" FontWeight="SemiBold"
+                                   Foreground="{StaticResource MandoAccentBrush}"/>
+                        <Border Background="{StaticResource MandoPanelBrush}"
+                                BorderBrush="{StaticResource MandoSkyBrush}" BorderThickness="1"
+                                CornerRadius="12" Padding="10,3" VerticalAlignment="Center">
+                            <TextBlock Text="every new agent" FontSize="12"
+                                       Foreground="{StaticResource MandoSkyBrush}"/>
+                        </Border>
                     </StackPanel>
 
-                    <SelectorBar Grid.Row="1" x:Name="SettingsTabs" SelectionChanged="SettingsTabs_SelectionChanged">
-                        <SelectorBarItem x:Name="Tab_Model" Text="Model"/>
-                        <SelectorBarItem x:Name="Tab_Behavior" Text="Behavior"/>
-                        <SelectorBarItem x:Name="Tab_Integrations" Text="Integrations"/>
-                    </SelectorBar>
-
-                    <ScrollViewer Grid.Row="2">
-                        <Grid>
-                            <StackPanel x:Name="TabPanel_Model" Visibility="Collapsed" Spacing="14" MaxWidth="680"
-                                        HorizontalAlignment="Left" Padding="0,4,0,8">
-                                <TextBlock Text="Connection" FontSize="13" FontWeight="SemiBold"
-                                           Foreground="{StaticResource MandoAccentBrush}"/>
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <Button Click="RunSetupWizard_Click"
-                                            ToolTipService.ToolTip="Guided setup: reach Ollama, install or start it if needed, and pick a model — the same wizard that runs on first launch.">
-                                        <StackPanel Orientation="Horizontal" Spacing="6">
-                                            <FontIcon Glyph="&#xE945;" FontSize="13"/>
-                                            <TextBlock Text="Run guided setup"/>
-                                        </StackPanel>
-                                    </Button>
-                                    <TextBlock Text="walks through connection + model, like first launch"
-                                               VerticalAlignment="Center" FontSize="12" Opacity="0.6"/>
-                                </StackPanel>
-                                <TextBlock Text="Ollama endpoint" FontSize="13" Opacity="0.8"/>
-                                <TextBox x:Name="EndpointBox" PlaceholderText="http://localhost:11434" MinWidth="560"
-                                         HorizontalAlignment="Left"
-                                         ToolTipService.ToolTip="Where the Ollama server listens. Every model request goes here — point it at another machine or port to run the model remotely."/>
-                                <TextBlock Text="Model" FontSize="13" Opacity="0.8"/>
-                                <Grid ColumnSpacing="8">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <ComboBox x:Name="ModelCombo" IsEditable="True" HorizontalAlignment="Stretch"
-                                              PlaceholderText="e.g. qwen2.5-coder:14b" MinWidth="512"
-                                              ToolTipService.ToolTip="The model that powers every response. Bigger models reason better but respond slower and need more memory; coder-tuned models follow tool-calling instructions most reliably.">
-                                        <ComboBox.Resources>
-                                            <services:PinnedOpacityConverter x:Key="PinnedOpacity"/>
-                                        </ComboBox.Resources>
-                                        <ComboBox.ItemTemplate>
-                                            <DataTemplate>
-                                                <Grid ColumnSpacing="8" HorizontalAlignment="Stretch">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="*"/>
-                                                        <ColumnDefinition Width="Auto"/>
-                                                    </Grid.ColumnDefinitions>
-                                                    <TextBlock Text="{Binding}" VerticalAlignment="Center"
-                                                               TextTrimming="CharacterEllipsis"/>
-                                                    <Button Grid.Column="1" Tag="{Binding}" Tapped="ModelPin_Tapped"
-                                                            Background="Transparent" BorderThickness="0" Padding="4"
-                                                            ToolTipService.ToolTip="Pin this model to the top of the list"
-                                                            AutomationProperties.Name="Pin model to top">
-                                                        <FontIcon Glyph="&#xE718;" FontSize="12"
-                                                                  Opacity="{Binding Converter={StaticResource PinnedOpacity}}"/>
-                                                    </Button>
-                                                </Grid>
-                                            </DataTemplate>
-                                        </ComboBox.ItemTemplate>
-                                    </ComboBox>
-                                    <Button Grid.Column="1" Click="RefreshModels_Click"
-                                            ToolTipService.ToolTip="Fetch pulled models">
-                                        <FontIcon Glyph="&#xE72C;" FontSize="14"/>
-                                    </Button>
-                                </Grid>
-                                <StackPanel Orientation="Horizontal" Spacing="12">
-                                    <Button Content="Save &amp; Reconnect" Click="SettingsSave_Click"
-                                            Style="{StaticResource AccentButtonStyle}"
-                                            ToolTipService.ToolTip="Apply the endpoint and model above, then reconnect to Ollama."/>
-                                    <TextBlock x:Name="ModelListStatus" Text="" VerticalAlignment="Center"
-                                               FontSize="12" Opacity="0.7"/>
-                                </StackPanel>
-
-                                <Border Height="1" Background="{StaticResource MandoBorderBrush}" Margin="0,4"/>
-                                <TextBlock Text="Generation" FontSize="13" FontWeight="SemiBold"
-                                           Foreground="{StaticResource MandoAccentBrush}"/>
-                                <Grid ColumnSpacing="12">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <Slider x:Name="S_Temperature" Header="Temperature" Minimum="0" Maximum="1"
-                                            StepFrequency="0.05" ValueChanged="Temperature_Changed"
-                                            ToolTipService.ToolTip="Controls randomness. Low = precise, repeatable answers (best for coding); high = more creative but less reliable tool calls. 0.2–0.4 is a good coding range."/>
-                                    <TextBlock x:Name="S_TemperatureLabel" Grid.Column="1" VerticalAlignment="Bottom"
-                                               Margin="0,0,0,8" Opacity="0.7" FontSize="13" MinWidth="36"/>
-                                </Grid>
-                                <NumberBox x:Name="S_MaxTokens" Header="Max response tokens" Tag="maxTokens"
-                                           Minimum="1" SpinButtonPlacementMode="Compact" SmallChange="1024"
-                                           ValueChanged="Setting_NumberChanged" HorizontalAlignment="Stretch"
-                                           ToolTipService.ToolTip="Upper limit on how long a single response can be. Raise it if answers get cut off mid-code; lower it for shorter, faster replies."/>
-                                <NumberBox x:Name="S_ContextLength" Header="Context window (tokens, 0 = Ollama default)"
-                                           Tag="contextLength" Minimum="0" SpinButtonPlacementMode="Compact" SmallChange="2048"
-                                           ValueChanged="Setting_NumberChanged" HorizontalAlignment="Stretch"
-                                           ToolTipService.ToolTip="How much conversation and file content the model can see at once. Larger windows track big files and long chats but use much more RAM/VRAM and respond slower. 0 keeps Ollama's default."/>
-                                <TextBlock Text="Sent with every request (num_ctx), so it applies from this agent's next message — no restart needed. Auto-sized to the model's hardware tier when you switch models; set it here to override."
-                                           Opacity="0.5" FontSize="11" TextWrapping="Wrap" Margin="0,-6,0,0"/>
-                                <ComboBox x:Name="S_Streaming" Header="Response streaming" SelectionChanged="Streaming_Changed"
-                                          HorizontalAlignment="Stretch"
-                                          ToolTipService.ToolTip="Which models use the streaming transport under the hood. Streamed chunks feed the stall watchdog, so long generations aren't mistaken for a stalled model. Text still appears per completed turn either way — 'all' is the most reliable choice.">
-                                    <x:String>all</x:String>
-                                    <x:String>cloud</x:String>
-                                    <x:String>off</x:String>
-                                </ComboBox>
-                            </StackPanel>
-
-                            <StackPanel x:Name="TabPanel_Behavior" Visibility="Collapsed" Spacing="14" MaxWidth="680"
-                                        HorizontalAlignment="Left" Padding="0,4,0,8">
-                                <TextBlock Text="Behavior" FontSize="13" FontWeight="SemiBold"
-                                           Foreground="{StaticResource MandoAccentBrush}"/>
-                                <!-- App-wide (naming happens in SessionManager before any agent exists), unlike
-                                     the rest of this tab — the header says so. Applies to agents opened after
-                                     the change; existing tabs keep their names. -->
-                                <ToggleSwitch x:Name="S_AgentCallsigns" Header="Callsign names for new agents — app-wide"
-                                              Toggled="AgentCallsigns_Toggled"
-                                              ToolTipService.ToolTip="On (default): each new agent draws a random callsign — Morphy, Kernel, Cloud — from a 500-name deck that doesn't repeat until it runs dry. Off: new agents are Agent 1, Agent 2, … Renaming a tab always works either way."/>
-                                <ToggleSwitch x:Name="S_TaskPlanning" Header="Task planning (propose_plan for multi-step requests)"
-                                              Tag="taskPlanning" Toggled="Setting_Toggled"
-                                              ToolTipService.ToolTip="For multi-step requests the model first proposes a numbered plan you approve before any work starts. More predictable on big tasks; an extra step on small ones."/>
-                                <ToggleSwitch x:Name="S_DiffApprovals" Header="Diff approvals (review writes, deletes, and commands)"
-                                              Tag="diffApprovals" Toggled="Setting_Toggled"
-                                              ToolTipService.ToolTip="The AI must show you a diff and get your approval before writing files, deleting, or running commands. Off = changes apply instantly with no review — only for full trust."/>
-                                <ToggleSwitch x:Name="S_AutoContinue" Header="Auto-continue past tool budget limits"
-                                              Tag="autoContinue" Toggled="Setting_Toggled"
-                                              ToolTipService.ToolTip="When a request exhausts its tool budget mid-task, MandoCode automatically tells the model to keep going instead of stopping to ask you."/>
-                                <NumberBox x:Name="S_MaxContinuations" Header="Max auto-continuations per request" Tag="maxContinuations"
-                                           Minimum="0" SpinButtonPlacementMode="Compact" SmallChange="1"
-                                           ValueChanged="Setting_NumberChanged" HorizontalAlignment="Stretch"
-                                           ToolTipService.ToolTip="Safety cap on auto-continue — stops a model that never finishes from looping forever."/>
-
-                                <Border Height="1" Background="{StaticResource MandoBorderBrush}" Margin="0,4"/>
-                                <TextBlock Text="Limits" FontSize="13" FontWeight="SemiBold"
-                                           Foreground="{StaticResource MandoAccentBrush}"/>
-                                <NumberBox x:Name="S_RequestTimeout" Header="Per-request timeout (minutes)" Tag="timeout"
-                                           Minimum="1" SpinButtonPlacementMode="Compact" SmallChange="1"
-                                           ValueChanged="Setting_NumberChanged" HorizontalAlignment="Stretch"
-                                           ToolTipService.ToolTip="Hard ceiling for one whole request — every model call and tool run combined. Raise it for big tasks on slow hardware; lower it to fail fast."/>
-                                <NumberBox x:Name="S_StallTimeout" Header="Stall watchdog per model call (seconds)" Tag="modelResponseTimeout"
-                                           Minimum="5" SpinButtonPlacementMode="Compact" SmallChange="30"
-                                           ValueChanged="Setting_NumberChanged" HorizontalAlignment="Stretch"
-                                           ToolTipService.ToolTip="How long a single model call may stay silent before MandoCode treats it as stalled and aborts. Raise it if large models on slow hardware get killed while still thinking."/>
-                                <NumberBox x:Name="S_ToolBudget" Header="Tool-result character budget per request" Tag="toolBudget"
-                                           Minimum="1000" SpinButtonPlacementMode="Compact" SmallChange="50000"
-                                           ValueChanged="Setting_NumberChanged" HorizontalAlignment="Stretch"
-                                           ToolTipService.ToolTip="Max characters of tool output (file reads, command results) fed back to the model in one request. Higher = the model sees more of your project, but responses slow down and can overflow small context windows."/>
-                                <NumberBox x:Name="S_RenderTimeout" Header="Markdown render timeout (seconds)" Tag="renderTimeout"
-                                           Minimum="1" SpinButtonPlacementMode="Compact" SmallChange="10"
-                                           ValueChanged="Setting_NumberChanged" HorizontalAlignment="Stretch"
-                                           ToolTipService.ToolTip="How long to spend turning a response into rich formatting before falling back to plain text. Purely cosmetic — never changes what the model says."/>
-                            </StackPanel>
-
-                            <StackPanel x:Name="TabPanel_Integrations" Visibility="Collapsed" Spacing="14" MaxWidth="680"
-                                        HorizontalAlignment="Left" Padding="0,4,0,8">
-                                <ToggleSwitch x:Name="S_WebSearch" Header="Web search" Tag="webSearch" Toggled="Setting_Toggled"
-                                              ToolTipService.ToolTip="Gives the model a web-search tool for current information. Off = it only knows its training data and your project files."/>
-                                <TextBlock Text="Tavily API key (optional — more reliable web search; free at app.tavily.com)"
-                                           FontSize="13" Opacity="0.8" TextWrapping="Wrap"/>
-                                <Grid ColumnSpacing="8">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <PasswordBox x:Name="S_TavilyKey" PlaceholderText="tvly-…" MinWidth="512"
-                                                 PasswordRevealMode="Hidden" PasswordChanged="TavilyKey_Changed"
-                                                 ToolTipService.ToolTip="With a key, web searches use Tavily's structured results instead of the built-in scraper — cleaner sources for the model, so better-grounded answers."/>
-                                    <Button Grid.Column="1" x:Name="TavilyViewButton" Content="View" IsEnabled="False"
-                                            Click="TavilyView_Click"
-                                            ToolTipService.ToolTip="Show or hide the key"/>
-                                    <Button Grid.Column="2" Content="Save key" Click="TavilySave_Click"
-                                            ToolTipService.ToolTip="Save this key to the shared MandoCode config (type 'clear' to remove the saved key)"/>
-                                </Grid>
-                                <TextBlock Text="MCP servers are managed on the MCP page (rail), where each agent also opts in to using their tools."
-                                           Opacity="0.5" FontSize="11" TextWrapping="Wrap"/>
-                            </StackPanel>
-                        </Grid>
-                    </ScrollViewer>
-
-                    <Grid Grid.Row="3" ColumnSpacing="14" Margin="0,4,0,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-
-                        <TextBlock x:Name="SettingsStatus" FontSize="12" Opacity="0.75" TextWrapping="Wrap"
-                                   VerticalAlignment="Center"
-                                   Foreground="{StaticResource MandoGoldBrush}"/>
-
-                        <Button Grid.Column="1" x:Name="ResetTabButton" Click="ResetTab_Click"
-                                ToolTipService.ToolTip="Reset this tab's settings to the app's factory defaults (this agent only). Leaves the connection endpoint/model and your Tavily key untouched.">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <FontIcon Glyph="&#xE7A7;" FontSize="13"/>
-                                <TextBlock x:Name="ResetTabButtonText" Text="Reset tab"/>
-                            </StackPanel>
-                        </Button>
-
-                        <Button Grid.Column="2" x:Name="MakeDefaultButton" Click="MakeDefault_Click"
-                                ToolTipService.ToolTip="Write this agent's settings to ~/.mandocode/config.json as the starting point for every new agent. Agents already open keep their own.">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <FontIcon Glyph="&#xE74E;" FontSize="13"/>
-                                <TextBlock Text="Make Default for New Agents"/>
-                            </StackPanel>
-                        </Button>
-                    </Grid>
+                    <!-- Full width on purpose. The readable-line cap lives on the form's CONTENT
+                         (FormContentWidth), not here: capping the control would pull its scrollbar
+                         in off the window edge and strand it mid-page. -->
+                    <controls:SettingsForm x:Name="DefaultsSettingsForm" Grid.Row="1"/>
                 </Grid>
+
 
                 <!-- ============ APPEARANCE PAGE ============
                      App-wide (a window property), so it lives on the rail rather than in the

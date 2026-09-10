@@ -78,6 +78,10 @@
     <!-- Pure logic extracted from session-coupled coordinators so it can be tested directly. -->
     <Compile Include="..\MandoCode.Desktop\Services\PaneLayout.cs" Link="src\PaneLayout.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\ConfigCloning.cs" Link="src\ConfigCloning.cs" />
+    <!-- Per-agent settings persistence. The store is the file half; what's pinned here is the
+         fingerprint — which decides whether an agent has been "configured" and must therefore stop
+         inheriting the defaults, and which must never carry the API key. -->
+    <Compile Include="..\MandoCode.Desktop\Services\AgentConfigStore.cs" Link="src\AgentConfigStore.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\AgentNaming.cs" Link="src\AgentNaming.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\AgentCallsigns.cs" Link="src\AgentCallsigns.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\ItemTagStore.cs" Link="src\ItemTagStore.cs" />

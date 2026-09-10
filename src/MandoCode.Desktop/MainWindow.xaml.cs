@@ -67,10 +67,13 @@ public sealed partial class MainWindow : Window
         // ONE window-level subscription to the static ThemeChanged event. Chat tabs must not
         // subscribe individually — the handler would outlive every closed tab and leak.
         ThemeManager.ThemeChanged += () => OnUi(ApplyThemeToAllTabs);
-        SettingsTabs.SelectedItem = Tab_Model;   // the setup that matters most opens first
         ThemeList.ItemsSource = UiTheme.All.Select(t => new ThemeVm { Theme = t }).ToList();
         ThemeHeaderValue.Text = ThemeManager.Current.Name;
-        ModelCombo.Loaded += (_, _) => ApplyModelComboTarget();
+        // Selecting the live theme here rather than from the Settings page's load, where it used to
+        // sit: the theme list belongs to Appearance, and Settings no longer knows anything about it.
+        // Before _appearanceReady, so this selection can't be mistaken for the user picking one.
+        for (int i = 0; i < UiTheme.All.Count; i++)
+            if (UiTheme.All[i] == ThemeManager.Current) ThemeList.SelectedIndex = i;
         S_WindowOpacity.Value = ThemeManager.WindowOpacity * 100;
         S_WindowOpacityLabel.Text = $"{(int)S_WindowOpacity.Value}%";
         ApplyWindowOpacity(ThemeManager.WindowOpacity);
@@ -89,6 +92,20 @@ public sealed partial class MainWindow : Window
         _archive = services.GetRequiredService<SessionArchiveStore>();
         _skillCoordinator = services.GetRequiredService<SkillCoordinator>();
         _configs = services.GetRequiredService<ConfigCoordinator>();
+
+        // The rail page edits the global defaults. Bound once, for the life of the window: unlike an
+        // agent's pane there is nothing to re-point it at.
+        DefaultsSettingsForm.Bind(new DefaultsSettingsScope(_configs));
+        // The Tavily key is app-wide and lives only here — mirror a change into every agent already
+        // open, the same way an MCP server edit is mirrored.
+        DefaultsSettingsForm.SecretsChanged += () => _configs.SyncSecretsToAgents();
+        // The wizard configures the APP but has to run somewhere visible, so it runs in the open
+        // agent's chat and ends by writing the defaults this page shows.
+        DefaultsSettingsForm.SetupWizardRequested += () =>
+        {
+            SwitchPage("chat");
+            _ = Task.Run(() => _controller.SubmitAsync("/setup"));
+        };
         _music = services.GetRequiredService<MandoCode.Services.MusicPlayerService>();
         // Changed can fire on a background thread (a capture during a model switch).
         _snapshotStore.Changed += () => OnUi(OnSnapshotsChanged);
@@ -144,6 +161,7 @@ public sealed partial class MainWindow : Window
         TranscriptJournal.Sweep(liveKeys);
         ConversationLog.Sweep(liveKeys);
         SessionHistoryStore.Sweep(liveKeys);
+        AgentConfigStore.Sweep(liveKeys);
 
         // Size the window; defer WebView2 + harness init until the tree is loaded.
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1180, 840));

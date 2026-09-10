@@ -231,6 +231,12 @@ public sealed partial class MainWindow
         }
         finally
         {
+            // Settings persistence opens here for the same reason workspace writes do: until the
+            // restore cascade has run, this tab is still on the seeded default, and a write in that
+            // window would save the default over the user's own settings. A throw above still arms
+            // it — the tab is done moving either way, and it must not be stuck read-only for the
+            // rest of the session.
+            entry.View.Session.ConfigPersistenceArmed = true;
             // Last one out writes the workspace, now that every tab reports its real model.
             if (Interlocked.Decrement(ref _restoringTabs) == 0) SaveWorkspace();
         }
@@ -299,6 +305,11 @@ public sealed partial class MainWindow
             tabs, active, panes,
             panes == null ? null : new List<double>(_colFractions),
             panes == null ? null : new List<double>(_rowFractions)));
+
+        // Safety net for per-agent settings. ChatController.ConfigChanged catches the deliberate
+        // edits; this catches anything that mutates a config without raising it (a healed endpoint,
+        // a wizard). Each call is a fingerprint compare and writes nothing when nothing moved.
+        foreach (var tab in _tabs) tab.View.Session.PersistConfigIfChanged();
     }
 
 }

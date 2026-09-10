@@ -101,7 +101,12 @@ public sealed class AgentSession
         var updateCheck = globals.GetRequiredService<UiUpdateCheckService>();
         Snapshots = globals.GetRequiredService<SnapshotStore>();
 
-        Config = configs.CreateClone();
+        // Boots on this agent's OWN saved settings if it has ever been configured, otherwise on a
+        // fresh clone of the defaults. Must be before AIService below, which bakes the system
+        // prompt (and reads the model) in its constructor.
+        Config = configs.CreateCloneFor(PersistKey);
+        _configs = configs;
+        _persistedConfigJson = AgentConfigStore.Fingerprint(Config);
         ProjectRoot = new ProjectRootAccessor(projectRoot);
         // Before AIService below: its constructor bakes the system prompt, and the agent's
         // spoken identity (Config.AgentName, stamped by the Title setter) must be in it.
@@ -196,6 +201,87 @@ public sealed class AgentSession
         // Tier-3 persistence: plain-text turns feed the ConversationLog so a restored
         // session can re-brief the model.
         Controller.ConversationLogger = (role, text) => ConversationLog.Append(PersistKey, role, text);
+
+        // Settings persistence: every deliberate config change offers itself here. The fingerprint
+        // compare inside makes a no-op change free, so the controller can raise this liberally.
+        Controller.ConfigChanged += PersistConfigIfChanged;
+    }
+
+    // ---- Per-agent settings persistence ----
+
+    /// <summary>The config as last written to disk (secrets stripped), or — for an agent that has
+    /// never been configured — as it looked at boot. Anything that differs from this is a real
+    /// change the user made, which is what turns an inheriting agent into an independent one.</summary>
+    private string _persistedConfigJson;
+
+    /// <summary>Held for the defaults comparison in <see cref="PersistConfigIfChanged"/>.</summary>
+    private readonly ConfigCoordinator _configs;
+
+    /// <summary>
+    /// False until the tab's restore cascade has finished. Restore itself moves the config (a saved
+    /// model is applied AFTER construction), and persisting inside that window is the same trap
+    /// SaveWorkspace guards against: a tab still sitting on the default would stamp the default
+    /// over the user's real choice. MainWindow arms this once the tab has settled.
+    /// </summary>
+    public bool ConfigPersistenceArmed { get; set; }
+
+    /// <summary>
+    /// Writes this agent's settings if they have actually moved. Cheap enough to call on any
+    /// checkpoint — it serializes ~4KB and compares, and does no I/O when nothing changed.
+    /// </summary>
+    public void PersistConfigIfChanged()
+    {
+        if (!ConfigPersistenceArmed) return;
+
+        try
+        {
+            // Serializing a config that another thread is mid-mutation on can throw (a collection
+            // modified during enumeration). ConfigChanged reaches here off the UI thread — from
+            // ApplyConnectionSettingsAsync and model switches — so this must never be the thing
+            // that takes the app down. Settings are best-effort persistence, like every sibling
+            // store; the next change writes them.
+            var current = AgentConfigStore.Fingerprint(Config);
+
+            // An agent whose settings are IDENTICAL to the defaults is an inheriting agent, however
+            // it got there — there is nothing to remember that re-reading the defaults wouldn't
+            // give back, and staying independent would only mean silently missing future changes.
+            //
+            // /setup is why this matters rather than being a nicety: the wizard ends with
+            // SaveDefaultsFrom (see ChatController.Wizards — "/setup configures the app, not one
+            // agent"), so the agent it ran in matches the defaults exactly. Without this, running
+            // the wizard would quietly drop that agent out of inheriting as a side effect.
+            if (current == AgentConfigStore.Fingerprint(_configs.Defaults))
+            {
+                if (AgentConfigStore.Exists(PersistKey)) AgentConfigStore.Delete(PersistKey);
+                _persistedConfigJson = current;
+                return;
+            }
+
+            if (current == _persistedConfigJson) return;
+
+            // Hold the new fingerprint even if the write itself failed: a disk that can't take the
+            // file won't be fixed by retrying on every keystroke, and the in-memory settings are
+            // still correct either way.
+            _persistedConfigJson = current;
+            AgentConfigStore.Save(PersistKey, Config);
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// "Match global defaults" — drops this agent's saved settings and puts it back on the current
+    /// defaults, inheriting future changes again. The live <see cref="Config"/> is mutated in place
+    /// so every collaborator holding a reference to it (AIService, SkillLoader, McpApprovalGate)
+    /// sees the new values; the caller still has to rebuild the agent for them to take effect —
+    /// see ChatController.RefreshFromConfigAsync.
+    /// </summary>
+    public void ResetConfigToDefaults(ConfigCoordinator configs)
+    {
+        AgentConfigStore.Delete(PersistKey);
+        configs.CopyDefaultsOnto(Config);
+        // Back to inheriting: the fingerprint is the defaults, so no file is written again until
+        // the user makes a fresh change.
+        _persistedConfigJson = AgentConfigStore.Fingerprint(Config);
     }
 
     /// <summary>Repoints this tab at a different project folder and rebuilds its AI session.</summary>

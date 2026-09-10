@@ -81,6 +81,24 @@ for every approved plan. Desktop's version follows the engine generation, so it 
   can still be sent straight through with One-shot it.
 - **Failed work can produce a revised remaining plan.** Completed steps stay settled, the proposed
   replacement is shown for review, and execution resumes only after approval.
+- **Settings are split into global defaults and per-agent settings.** The rail's Settings page is
+  now Default Settings: the starting point every new agent is seeded from, and reachable with no
+  agent open. A gear in an agent's header, between the snapshot and folder icons, opens that
+  agent's own settings in a docked pane beside its conversation. Both surfaces are the same form
+  bound to different targets, so the two can never drift apart.
+- **An agent keeps its own settings after it is closed and reopened.** Per-agent settings used to
+  live only in memory and were lost with the process. An agent now becomes independent the first
+  time its settings are saved, and is restored on those settings whether it comes back from a
+  relaunch or from the History panel. An agent that has never been configured keeps following the
+  defaults, so raising a default still reaches every agent you never touched. API keys are never
+  written to a per-agent file; they stay in the shared configuration and are supplied to each agent
+  in memory.
+- **Settings apply when saved, not as you type.** Every control edits a pending copy, a Save button
+  reports how many changes are waiting, and closing the page or pane discards anything unsaved.
+  Values are still checked as they are entered, so a rejected number is refused where it is typed
+  rather than at save time. Two further actions on an agent's pane move settings between the two
+  scopes: Apply Global Defaults replaces an agent's settings with the defaults and lets it follow
+  them again, and Save to Global Defaults makes an agent's settings the starting point for new ones.
 
 ### Changed
 - **Completed turns now keep routine activity out of the conversation flow.** File operations,
@@ -160,6 +178,12 @@ for every approved plan. Desktop's version follows the engine generation, so it 
   a sticky header, or the suggestion list a field opens when it is filled.
 
 ### Fixed
+- **The preview pane's open and attach buttons now work on web pages.** Both acted only on a
+  project file, so on a website they did nothing at all and gave no reason why. Open now hands the
+  page to the system's default browser and the attach button puts its address into the prompt,
+  while a preview of a project file still opens that file in its default application. A file
+  preview is served through an address that only resolves inside the app, so the two cases stay
+  deliberately distinct. Only ordinary web addresses are handed to the system.
 - **Per-tab model choices survive a restart.** Restoring a session initialized every tab at once,
   and a tab boots on the default model before moving onto its own saved one. Any workspace write
   during that window recorded the default over a tab's real model, so an agent you had switched
@@ -181,10 +205,12 @@ for every approved plan. Desktop's version follows the engine generation, so it 
   not conversation messages, so stale actions are not replayed into a restored session.
 
 ### Test coverage
-303 Desktop tests pass. New host-level coverage exercises deferred plan execution, instruction
+330 Desktop tests pass. New host-level coverage exercises deferred plan execution, instruction
 editing, dependent-step revision, checkpoint cards, Resume/Discard actions, semantic step outcomes,
 and truthful completion status. Browser coverage adds explicit tab targeting, frame identity, and
-plan-card review content. The same workflows were also exercised with real models, including
+plan-card review content. Settings coverage pins the rules a saved agent depends on: that a stored
+agent configuration never contains an API key, that it is unaffected by app-wide changes made
+elsewhere, and that an agent matching the defaults is treated as still following them. The same workflows were also exercised with real models, including
 closing the process between steps and resuming from the saved cursor.
 
 An opt-in smoke test drives a real WebView2 browser end to end: DOM reads, pointer and keyboard
