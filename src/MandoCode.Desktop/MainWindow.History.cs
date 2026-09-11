@@ -395,14 +395,25 @@ public sealed partial class MainWindow
         // A Grid (not a StackPanel) so the label flexes and ellipsizes when the tab is narrow,
         // while the badge and options button stay pinned at the right. LayoutTabStrip sets each
         // header's Width; this just governs how that width is divided.
-        var row = new Grid { ColumnSpacing = 7 };
+        // Wider than the old 7 so the neutral gutter beside the badge and the options button is a
+        // little more forgiving — the cursor should have turned back to an arrow before the pointer
+        // reaches something clickable.
+        var row = new Grid { ColumnSpacing = 10 };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        Grid.SetColumn(label, 0);
+
+        // Only the NAME carries the move cursor. The badge and the "..." button are things you
+        // click, and a move cursor over them would promise a drag that does not start there — the
+        // button swallows the press. ProtectedCursor applies to an element and its children, so the
+        // handle has to wrap just the label rather than the whole row.
+        var nameHandle = new Controls.DragHandleGrid();
+        nameHandle.Children.Add(label);
+
+        Grid.SetColumn(nameHandle, 0);
         Grid.SetColumn(badge, 1);
         Grid.SetColumn(options, 2);
-        row.Children.Add(label);
+        row.Children.Add(nameHandle);
         row.Children.Add(badge);
         row.Children.Add(options);
 
@@ -424,6 +435,12 @@ public sealed partial class MainWindow
         // The options Button consumes the pointer, so opening its menu doesn't also raise Tapped
         // on the header. Selecting first would be harmless anyway.
         entry.Header.Tapped += (_, _) => SelectTab(entry);
+
+        // A tab is a drag source for the split view: pick it up and drop it on a pane to put that
+        // agent there. Harmless outside a split — nothing accepts the drop, so it simply ends.
+        entry.Header.CanDrag = true;
+        entry.Header.DragStarting += (_, args) => BeginAgentDrag(args, entry);
+        entry.Header.DropCompleted += (_, _) => EndAgentDrag();
 
         var row = (Grid)entry.Header.Child;
         var options = (Button)row.Children[^1];

@@ -16,6 +16,15 @@ for every approved plan. Desktop's version follows the engine generation, so it 
 0.15.0.
 
 ### Added
+- **Split view tells you which agent is which, and you rearrange it by dragging.** Each pane now
+  carries its own header naming the agent shown beneath it, so you read the name where the agent is
+  instead of matching it up from a strip along the top. Agents already on screen drop out of the tab
+  strip, leaving it as a list of what is *not* currently visible. Drag a tab onto a pane to put that
+  agent there, or drag one pane's header onto another to swap the two — each target says what the
+  drop will do before you release. With a single agent open, dragging another onto the chat area
+  starts a split, and which half you hover decides which side the dragged agent takes. The per-pane
+  dropdowns are gone; the tab menu still offers "Add to split view" for anyone who would rather not
+  drag.
 - **Agents can talk to each other.** Typing `@` now offers the other open agents before project
   files, so you can address one by name from another's conversation. An agent can check what another
   is doing, read its conversation, ask it a question and get a real answer back, or hand it a whole
