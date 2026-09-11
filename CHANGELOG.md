@@ -41,6 +41,11 @@ for every approved plan. Desktop's version follows the engine generation, so it 
   panel's few shades, rendered as amber phosphor, or laid down as two-ink halftone. On by default,
   with a switch in Settings → Appearance to keep the picture in full colour. It affects only those
   themes, and only when a background is set.
+- **A new background in the box, and it is what a fresh install opens on.** Settings → Appearance
+  gains **Midnight Ramen** — a rain-slicked night shot outside a 24-hour ramen shop on the Hakone
+  road — and it now leads the gallery, so someone opening MandoCode for the first time lands on it
+  instead of Golden Gate. The three existing backgrounds are all still there, one place further
+  down the list.
 - **The MandoCode wordmark has its own typeface.** The name in the top-left is now set in Permanent
   Marker, bundled with the app rather than fetched from a font service, so it renders identically
   offline. It takes each theme's accent colour, so it re-inks itself as you switch themes.
@@ -143,6 +148,11 @@ for every approved plan. Desktop's version follows the engine generation, so it 
   them again, and Save to Global Defaults makes an agent's settings the starting point for new ones.
 
 ### Changed
+- **The bundled backgrounds are renumbered to put the new default first.** Golden Gate, Sequoia
+  Trail, and Pismo Beach are unchanged and still in the gallery, but each has moved down one
+  position. If you had picked one of them, your background keeps working exactly as before — the
+  image lives in your own data folder — but its tile may no longer show as the selected one in
+  Appearance. Re-picking it restores the highlight.
 - **Completed turns now keep routine activity out of the conversation flow.** File operations,
   tool calls, and routine connection progress remain visible while work is running,
   then fold into an expandable Activity section when it completes. Assistant replies, warnings,
