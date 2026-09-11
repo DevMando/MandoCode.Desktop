@@ -10,6 +10,8 @@ must be pinned at a **released** engine commit (one with a tag).
 - [ ] Bump `<Version>` in `src/MandoCode.Desktop/MandoCode.Desktop.csproj`.
 - [ ] Roll `CHANGELOG.md`: retitle `[Unreleased]` to `[X.Y.Z] — YYYY-MM-DD` with a short
       narrative opener. Entries are written in plain language with the "why" included.
+- [ ] Write `docs/release-notes-X.Y.Z.md` with a `# vX.Y.Z — <tagline>` first line and
+      an Install section. The pipeline uses this file for the release title and body.
 - [ ] PR the above, merge to `main`. (CI `build` check is required by the branch ruleset.)
 
 ## 2. Fresh-machine test (for anything beyond string changes)
@@ -35,7 +37,7 @@ tags are immutable (repo ruleset) — a bad release means a new patch version, n
 
 ## 4. Curate the release
 
-- Replace the auto-generated notes: title `vX.Y.Z — <tagline>`, body in plain language with
+- Review the published curated notes: title `vX.Y.Z — <tagline>`, body in plain language with
   an **Install** section (download zip → extract everything → run the exe; self-contained,
   WebView2 is the only system dependency). Mark as latest.
 - Verify `https://api.github.com/repos/DevMando/MandoCode.Desktop/releases/latest` serves the
