@@ -8,12 +8,38 @@ submodule.
 
 ## [Unreleased]
 
-A new engine underneath, and a planner users can actually steer. Desktop moves onto engine
-generation 0.15 and Microsoft's Agent Framework, then uses that foundation to make plans durable:
-review the work before it starts, edit a step, recover after a restart, and change course when a
-failure proves the remaining plan wrong. The workflow planner is now the standard execution path
-for every approved plan. Desktop's version follows the engine generation, so it moves 0.14.1 →
-0.15.0.
+## [0.15.0] — 2026-09-10
+
+**A new AI foundation, plans you can resume, and more ways to work alongside your agents.**
+This release moves MandoCode Desktop from Semantic Kernel to **Microsoft Agent Framework (MAF)**.
+MAF now coordinates the engine's conversations, tools, and plan execution. Desktop's notes
+assistant, snapshot summaries, and skill author also move off Semantic Kernel, using
+Microsoft.Extensions.AI. Your existing models, providers, skills, MCP servers, and approval
+controls continue to work with the new foundation.
+
+### Release highlights
+- **Review a plan, change it, and pick it up later.** Approved plans save their progress. Edit
+  steps before work starts, resume unfinished work after restarting, and approve a revised plan
+  when the original approach fails. Completed steps stay completed.
+- **A built-in browser—for you and your agents.** Open websites in browser tabs, enter URLs, and use
+  familiar navigation controls. “Explain this page” refers to the tab you were viewing when you
+  sent the message; agent actions target explicit tabs, including forms inside embedded frames.
+- **See the work as it happens.** A read-only terminal tab shows each agent's commands and live
+  output. Preview project files, edit text, open PDFs, and inspect local development sites without
+  leaving Desktop. The command view displays captured output; it is not a persistent agent shell.
+- **Coordinate multiple agents.** Mention another open agent with `@` to ask a question or hand
+  off work. Named split panes and drag-and-drop make it easier to arrange their conversations.
+- **Make each agent your own.** Save settings per agent, keep global defaults for new agents,
+  and pin frequently used models. Nine new themes, themed backgrounds, and readability fixes
+  expand the appearance options.
+- **Spend less time recovering your place.** Model choices survive restarts, changing folders
+  keeps the conversation, repeated restore notices are removed, and deleting notes, snapshots,
+  or history no longer makes the remaining list slide back into place.
+
+**Included engine:** [MandoCode CLI v0.15.0](https://github.com/DevMando/MandoCode/releases/tag/v0.15.0),
+pinned to release commit `e67578251c5716a6ede192a2e3e82e7dfda7c8f0`.
+Desktop advances from 0.14.1 to 0.15.0 to match the engine generation. The Windows download
+remains self-contained; users do not need to install .NET separately.
 
 ### Added
 - **Split view tells you which agent is which, and you rearrange it by dragging.** Each pane now
@@ -101,7 +127,7 @@ for every approved plan. Desktop's version follows the engine generation, so it 
   and can inspect, fill, select, scroll, wait, and read back fields using explicit tab and
   frame IDs. Navigated or removed frame targets fail without falling back to the parent.
   Inspection distinguishes uninspected frame content from missing form fields.
-- **Shared browser tabs.** The browser button beside Snapshot opens the existing pane
+- **A built-in browser with shared tabs.** The browser button beside Snapshot opens the existing pane
   with tabs, a new-tab button, an address bar, and back/forward/reload controls. User
   websites and agent previews coexist. Agent actions require explicit tab IDs; references
   to “this page” retain the tab viewed when the message was sent, even after switching tabs.
@@ -216,7 +242,7 @@ for every approved plan. Desktop's version follows the engine generation, so it 
   use the same Microsoft.Extensions.AI client the engine standardized on. Same prompts, same
   temperatures, same behavior — but Desktop no longer depends on a framework the engine has
   removed. Snapshot recaps and note replies are the surfaces to sanity-check.
-- **Engine safety pin: `d50bfb7`** (engine 0.15.0). This is the engine `main` that ships with this
+- **Released engine pin: `e675782`** (tag `v0.15.0`). This is the exact CLI release that ships with this
   release. It includes workflow planning as the default plan runner, manual conversation
   compaction, automatic planning based on task shape, the large-root context guard verified
   through Desktop against a real `@directory` request, image content counted toward the context
@@ -233,8 +259,8 @@ for every approved plan. Desktop's version follows the engine generation, so it 
   document icon whether the pane held a file or a live web page.
 - **Model status is now one line instead of several cards.** The active model, its image
   capability, and whether it runs in the cloud appear together as `model · active · text-only ·
-  cloud`, replacing the separate capability notice and status pill. The cloud subscription caveat
-  appears once per session rather than on every model switch.
+  cloud`, replacing the separate capability notice and status pill. Routine model switches no
+  longer show the cloud subscription caveat; subscription failures still receive an explanation.
 - **Screenshots stay honest when the window is not on screen.** Capture reads the window's
   rendered surface, so it depends on the app having one. A minimized window is now reported as
   needing to be restored, within a bounded wait, rather than consuming the whole operation
@@ -246,6 +272,11 @@ for every approved plan. Desktop's version follows the engine generation, so it 
   a sticky header, or the suggestion list a field opens when it is filled.
 
 ### Fixed
+- **Leaving split view restores the agent tabs.** Agents hidden from the tab strip while visible
+  in split panes return when you exit the split, so you can switch between them normally again.
+- **Restoring a conversation no longer repeats context-window notices.** Old sizing notices are
+  omitted from restored history, and initialization does not announce intermediate model settings.
+  The restored conversation and final active model remain visible.
 - **Switching to a cloud model no longer repeats the subscription notice.** Picking a cloud model
   announced that cloud models need an ollama.com subscription. It was meant to say so once, but the
   "already said it" memory belonged to a single agent rather than the app, so every agent you
@@ -321,7 +352,7 @@ for every approved plan. Desktop's version follows the engine generation, so it 
   folder changes from here on benefit — conversations already cleared cannot be recovered.
 
 ### Test coverage
-330 Desktop tests pass. New host-level coverage exercises deferred plan execution, instruction
+Host-level regression coverage exercises deferred plan execution, instruction
 editing, dependent-step revision, checkpoint cards, Resume/Discard actions, semantic step outcomes,
 and truthful completion status. Browser coverage adds explicit tab targeting, frame identity, and
 plan-card review content. Settings coverage pins the rules a saved agent depends on: that a stored
