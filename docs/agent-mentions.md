@@ -28,10 +28,13 @@ The second insight is that **most of what you want does not require waking the o
 | `agent_status` | no | **yes** | "are you done", "what are you on" |
 | `review_agent_work` | no | **yes** | "is the work any good" |
 | `read_agent_transcript` | no | **yes** | "what exactly was said" |
-| `ask_agent` | **yes** | no | judgment, explanation, intent |
+| `ask_agent` | **yes** (in the background) | no | judgment, explanation, intent |
 
 Three of four are pure observation. They carry no loop risk, no concurrency problem and no approval
 question, because nothing runs. All the hazard is concentrated in the fourth.
+
+`ask_agent` wakes the target but does not block the caller — it hands off and returns at once, the
+same as `delegate_to_agent`. See "Delegation, the inbox, and the rolling digest" below.
 
 ## Build order
 
@@ -109,7 +112,8 @@ Open problems, all of which belong to this tool alone:
   mid-turn, `ask_agent` returns its status plus a pointer to `read_agent_transcript`, so the busy
   case degrades to reading rather than dead-ending. This matters because busy is the COMMON case:
   "have you finished X?" is asked precisely when the answer might be no. Queueing was rejected — a
-  caller that waited would stall its own turn behind work of unknown length.
+  caller that waited would stall its own turn behind work of unknown length. (Since 2026-09-10 this
+  check runs BEFORE the hand-off rather than on the awaited result; see the delegation section.)
 - **Acting vs answering — settled: a delegated turn is a FULL turn.** The target answers with all
   of its own tools, exactly as it would answer the user, because the point of asking a colleague is
   that they can go and look. A read-only delegated turn would make the feature useless for what it
@@ -192,12 +196,37 @@ target's transcript; `ask_agent` produces a real turn there and must be attribut
 
 ## Delegation, the inbox, and the rolling digest
 
-`ask_agent` blocks. For a question that is right; for a job — "build a website" — it holds the
-asking agent's turn gate for minutes, and messages to that agent are dropped while it waits. Two
-separate problems: the asker is locked, and agents cannot wake up to report anything.
+**Superseded 2026-09-10 — `ask_agent` no longer blocks.** The original reasoning below is kept
+because it is why `delegate_to_agent` exists, and the distinction it draws turned out to be wrong
+in a way worth recording.
 
-**`delegate_to_agent`** returns immediately. The job runs in the background on the target, and the
-asking agent's turn ends at once, so the user keeps their agent.
+> `ask_agent` blocks. For a question that is right; for a job — "build a website" — it holds the
+> asking agent's turn gate for minutes, and messages to that agent are dropped while it waits. Two
+> separate problems: the asker is locked, and agents cannot wake up to report anything.
+
+The error was treating "question" and "job" as different in kind. They are not: both run one full
+turn on the target, through the same `AskAsync`. The only difference was whether the caller awaited
+it — and that made the model responsible for predicting, before asking, whether a question would
+turn out to be quick. That is the judgement it is worst at, and the cost of getting it wrong was
+the user locked out of their own agent with no way to convert or cancel.
+
+**Both now hand off and return at once.** `ask_agent` opens a `Delegation` exactly as
+`delegate_to_agent` does, marked `DelegationKind.Question`, and the kind changes only the WORDING of
+the result — "Ninja replied" rather than "Ninja finished", and a larger slice of the reply on the
+card, because for a question the reply is the deliverable rather than a note about work that lives
+in the files. The asking agent's turn ends immediately in both cases.
+
+Two consequences worth stating plainly:
+
+- **The busy check moved earlier.** While asking blocked, the target's atomic claim decided and the
+  tool only worded the refusal. With nobody waiting to hear that, a busy target must be caught
+  before the hand-off — otherwise the model is told its question is on its way and learns otherwise
+  from a failure card much later. The claim inside `AskAsync` is still the authority; a race between
+  the two now completes the question as unanswered rather than returning a refusal.
+- **The loop guard now crosses a thread boundary.** `AgentCallChain` is an `AsyncLocal`, and the
+  chain reaches the target's turn only because `Task.Run` captures `ExecutionContext`. If that ever
+  stopped holding, the guard would fail silently — so it is pinned by a test that asserts the chain
+  is visible on the far side of the hand-off, rather than left to inspection.
 
 **Each agent has an inbox** (`AgentInbox`). Anything that happens while an agent is idle waits
 there and is folded into the preamble of its next turn — the same ride-along `_armedContexts`

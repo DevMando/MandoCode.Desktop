@@ -7,10 +7,17 @@ namespace MandoCode.Desktop.Services;
 /// preview tools use. Host-owned rather than engine-owned because only the host knows what other
 /// agents exist; an agent's own tools stay bounded to its own project root.
 ///
-/// <para>Everything here is OBSERVATION. Nothing in this class runs a turn on another agent's model,
-/// which is why none of it can loop, none of it collides with another agent being busy, and none of
-/// it raises an approval question. Asking another agent a real question is a separate tool with a
-/// genuinely different risk profile — see docs/agent-mentions.md.</para>
+/// <para>Two kinds of tool live here, and the difference is the whole design. <see cref="ListAgents"/>,
+/// <see cref="GetAgentStatus"/>, <see cref="ReadAgentTranscript"/> and <see cref="CheckDelegations"/>
+/// are pure OBSERVATION: they read state the host already keeps, so they cost no turn, cannot loop,
+/// work while the other agent is busy, and raise no approval question. <see cref="AskAgent"/> and
+/// <see cref="DelegateToAgent"/> genuinely run a turn on another agent's model, so both are guarded
+/// by the loop check and both refuse a busy target.</para>
+///
+/// <para>NEITHER of those two blocks. Both hand the work off and return at once, so this agent stays
+/// free for the user while the other works; the result comes back through the inbox and is announced
+/// in this agent's transcript. They differ only in how that result is worded — see
+/// <see cref="DelegationKind"/> and docs/agent-mentions.md.</para>
 /// </summary>
 public sealed class AgentDirectoryTools
 {
@@ -73,13 +80,16 @@ public sealed class AgentDirectoryTools
         return AgentDirectory.Describe(agent);
     }
 
-    [Description("Asks another agent a question and returns its answer in its own words. The other " +
-                 "agent answers from what it has been working on and can use its own tools to check, " +
-                 "so prefer this over reading its transcript when you want a specific answer. Only " +
-                 "works when that agent is idle: if it is busy, this returns a note saying so, and you " +
-                 "should call get_agent_status and read_agent_transcript instead to work it out from " +
-                 "what it has already done.")]
-    public async Task<string> AskAgent(
+    [Description("Asks another agent a question and returns immediately, without waiting for the " +
+                 "answer. The other agent answers from what it has been working on and can use its " +
+                 "own tools to check, so prefer this over reading its transcript when you want a " +
+                 "specific answer. You stay free to keep talking to the user meanwhile: the reply " +
+                 "appears in the conversation as soon as it arrives, and you are given it on your " +
+                 "next turn — so do not promise to wait, and do not claim to know the answer yet. " +
+                 "Only works when that agent is idle: if it is busy, this says so, and you should " +
+                 "call get_agent_status and read_agent_transcript instead to work it out from what " +
+                 "it has already done.")]
+    public string AskAgent(
         [Description("The agent's name, as the user typed it after '@'.")] string name,
         [Description("The question, phrased as you would ask a colleague. Be specific — the other " +
                      "agent cannot see your conversation.")] string question)
@@ -92,20 +102,30 @@ public sealed class AgentDirectoryTools
         var peer = _directory.Peer(agent.Key);
         if (peer == null) return $"{agent.Name}'s tab has closed — it cannot be asked anything now.";
 
+        // Busy is now checked HERE, up front, which it was not while this call blocked. Back then
+        // the peer's atomic claim reported the refusal through the awaited result, and this layer
+        // only worded it. Handing off means nobody is waiting to hear that, so a busy target has to
+        // be caught before the hand-off or the model would be told its question was on its way and
+        // learn otherwise only from a failure card. The claim inside AskAsync is still the
+        // authority — this is the early, well-worded half, and a race between the two simply
+        // completes the question as unanswered.
+        if (peer.IsBusy)
+            return $"{agent.Name} is busy and cannot answer right now. " +
+                   AgentDirectory.Describe(agent) +
+                   $" Use read_agent_transcript(\"{agent.Name}\") to work out what it has been doing.";
+
         // The loop guard runs before the attempt, since a chain limit is a reason not to ask at all
         // rather than something the target should be woken to discover.
         if (AgentCallChain.Reject(agent.Key, agent.Name) is { } rejection) return rejection;
 
-        // No busy check here. The peer claims itself atomically and reports whether it could —
-        // checking first and asking second left a gap where the agent could take a turn in between,
-        // and produced a second, worse-worded refusal from the far side. One decision, one place;
-        // this layer only chooses how to say it, because only this layer knows the directory.
-        var result = await peer.AskAsync(_selfName, question);
-        if (result.Answered) return $"{agent.Name} replied:\n{result.Text}";
+        var delegation = _directory.Delegations.Open(
+            _selfKey, _selfName, agent.Key, agent.Name, question, DelegationKind.Question);
+        _start(delegation, peer);
 
-        return $"{agent.Name} could not answer ({result.Text}). " +
-               AgentDirectory.Describe(agent) +
-               $" Use read_agent_transcript(\"{agent.Name}\") to work out what it has been doing.";
+        return $"Asked {agent.Name}: {question}\n" +
+               "It is working out an answer now. The reply will appear in this conversation when it " +
+               "arrives, and you will have it on your next turn — so carry on with the user rather " +
+               "than waiting, and do not guess at the answer in the meantime.";
     }
 
     [Description("Reads the recent conversation from another agent's tab, so you can work out what " +

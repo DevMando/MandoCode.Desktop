@@ -161,6 +161,15 @@ for every approved plan. Desktop's version follows the engine generation, so it 
   states plainly that it wipes context completely, so the two are not mistaken for each other.
 
 ### Changed
+- **Asking another agent no longer locks up the one that asked.** Asking used to wait for the other
+  agent's whole reply, so a question that turned out to be several minutes of work held your agent
+  the entire time and you could not type into it. Asking now hands off and returns immediately, the
+  same way handing over a job already did: your agent stays available, the reply appears in the
+  conversation as soon as it arrives, and your agent has it on its next turn. Replies are worded as
+  replies rather than as finished jobs, and a reply gets far more room on the card than a job's
+  one-line outcome — for a question the answer is the thing you wanted, so it is shown rather than
+  summarised. An agent that is busy still says so up front and points you at reading its
+  conversation instead.
 - **The bundled backgrounds are renumbered to put the new default first.** Golden Gate, Sequoia
   Trail, and Pismo Beach are unchanged and still in the gallery, but each has moved down one
   position. If you had picked one of them, your background keeps working exactly as before — the

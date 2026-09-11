@@ -2,7 +2,15 @@
 
 public enum DelegationState { Running, Done, Failed }
 
-/// <summary>One job one agent handed to another.</summary>
+/// <summary>
+/// Why one agent handed work to another. Both travel the identical path — the target takes a real
+/// turn either way — so this changes only how the result is WORDED back to the asker. A question
+/// answered is not a job finished, and a card reading "finished" for a question asked in passing
+/// would suggest work had been done.
+/// </summary>
+public enum DelegationKind { Job, Question }
+
+/// <summary>One piece of work one agent handed to another.</summary>
 public sealed record Delegation(
     string Id,
     string FromKey,
@@ -13,7 +21,8 @@ public sealed record Delegation(
     DateTimeOffset StartedAt,
     DelegationState State = DelegationState.Running,
     string? Result = null,
-    DateTimeOffset? FinishedAt = null);
+    DateTimeOffset? FinishedAt = null,
+    DelegationKind Kind = DelegationKind.Job);
 
 /// <summary>
 /// Outstanding delegations, and the rolling digest each one contributes to its owner's inbox.
@@ -30,11 +39,13 @@ public sealed class DelegationRegistry
     private readonly Dictionary<string, Delegation> _byId = new(StringComparer.Ordinal);
     private int _next;
 
-    public Delegation Open(string fromKey, string fromName, string toKey, string toName, string task)
+    public Delegation Open(string fromKey, string fromName, string toKey, string toName, string task,
+                           DelegationKind kind = DelegationKind.Job)
     {
         lock (_lock)
         {
-            var d = new Delegation($"d{++_next}", fromKey, fromName, toKey, toName, task, DateTimeOffset.Now);
+            var d = new Delegation($"d{++_next}", fromKey, fromName, toKey, toName, task,
+                                   DateTimeOffset.Now, Kind: kind);
             _byId[d.Id] = d;
             return d;
         }
@@ -92,17 +103,28 @@ public sealed class DelegationRegistry
     public static InboxMessage Digest(Delegation d, AgentEntry? peer, IReadOnlyList<string> recentCommands)
     {
         var age = Age(DateTimeOffset.Now - d.StartedAt);
-        var lines = new List<string> { $"You asked {d.ToName} to: {d.Task}" };
+        var ask = d.Kind == DelegationKind.Question;
+        var lines = new List<string>
+        {
+            ask ? $"You asked {d.ToName}: {d.Task}" : $"You asked {d.ToName} to: {d.Task}"
+        };
 
         switch (d.State)
         {
             case DelegationState.Done:
-                lines.Add($"FINISHED after {Age(d.FinishedAt - d.StartedAt ?? TimeSpan.Zero)}.");
-                if (!string.IsNullOrWhiteSpace(d.Result)) lines.Add($"{d.ToName} reported: {d.Result}");
+                lines.Add(ask
+                    ? $"ANSWERED after {Age(d.FinishedAt - d.StartedAt ?? TimeSpan.Zero)}."
+                    : $"FINISHED after {Age(d.FinishedAt - d.StartedAt ?? TimeSpan.Zero)}.");
+                // The reply is carried whole. This is the copy the model reads on its next turn, so
+                // trimming it here would make the clipped version the only one it ever sees.
+                if (!string.IsNullOrWhiteSpace(d.Result))
+                    lines.Add(ask ? $"{d.ToName} replied: {d.Result}" : $"{d.ToName} reported: {d.Result}");
                 break;
 
             case DelegationState.Failed:
-                lines.Add($"DID NOT FINISH: {d.Result ?? "no reason given"}.");
+                lines.Add(ask
+                    ? $"DID NOT ANSWER: {d.Result ?? "no reason given"}."
+                    : $"DID NOT FINISH: {d.Result ?? "no reason given"}.");
                 break;
 
             default:
@@ -111,7 +133,9 @@ public sealed class DelegationRegistry
                     lines.Add($"STOPPED — {d.ToName}'s tab was closed before it finished.");
                     break;
                 }
-                lines.Add($"Still working ({age} so far).");
+                lines.Add(ask
+                    ? $"Still working out an answer ({age} so far)."
+                    : $"Still working ({age} so far).");
                 if (peer.PlanTotal > 0) lines.Add($"On step {peer.PlanStep} of {peer.PlanTotal}.");
                 if (peer.IsRunningCommand) lines.Add("A command is running right now.");
                 if (recentCommands.Count > 0)
@@ -136,13 +160,27 @@ public sealed class DelegationRegistry
     /// </summary>
     public static string CompletionLine(Delegation d)
     {
+        var ask = d.Kind == DelegationKind.Question;
         var label = Shorten(d.Task, 70);
-        if (d.State != DelegationState.Done)
-            return $"✗ {d.ToName} did not finish \"{label}\" — {Shorten(d.Result ?? "no reason given", 160)}";
 
-        var outcome = Shorten(FirstMeaningfulLine(d.Result), 200);
-        return string.IsNullOrEmpty(outcome)
-            ? $"✓ {d.ToName} finished \"{label}\""
+        if (d.State != DelegationState.Done)
+            return ask
+                ? $"✗ {d.ToName} could not answer \"{label}\" — {Shorten(d.Result ?? "no reason given", 160)}"
+                : $"✗ {d.ToName} did not finish \"{label}\" — {Shorten(d.Result ?? "no reason given", 160)}";
+
+        // An answer gets far more room than a job's outcome. For a job the interesting thing is
+        // THAT it finished — the work itself is in the files. For a question the reply IS the
+        // deliverable, and clipping it to a job's length would send the user to the other agent's
+        // tab to read two sentences.
+        var outcome = ask
+            ? Shorten(d.Result?.Trim() ?? "", 600)
+            : Shorten(FirstMeaningfulLine(d.Result), 200);
+
+        if (string.IsNullOrEmpty(outcome))
+            return ask ? $"↩ {d.ToName} replied to \"{label}\"" : $"✓ {d.ToName} finished \"{label}\"";
+
+        return ask
+            ? $"↩ {d.ToName} replied to \"{label}\" — {outcome}"
             : $"✓ {d.ToName} finished \"{label}\" — {outcome}";
     }
 
@@ -171,10 +209,13 @@ public sealed class DelegationRegistry
         return (space > max / 2 ? cut[..space] : cut).TrimEnd(',', '.', ';', ' ') + "…";
     }
 
-    private static string Headline(Delegation d) => d.State switch
+    private static string Headline(Delegation d) => (d.Kind, d.State) switch
     {
-        DelegationState.Done => "finished the job you delegated",
-        DelegationState.Failed => "could not finish the job you delegated",
+        (DelegationKind.Question, DelegationState.Done) => "answered your question",
+        (DelegationKind.Question, DelegationState.Failed) => "could not answer your question",
+        (DelegationKind.Question, _) => "working out an answer for you",
+        (_, DelegationState.Done) => "finished the job you delegated",
+        (_, DelegationState.Failed) => "could not finish the job you delegated",
         _ => "working on the job you delegated",
     };
 
