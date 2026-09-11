@@ -207,11 +207,14 @@ for every approved plan. Desktop's version follows the engine generation, so it 
   use the same Microsoft.Extensions.AI client the engine standardized on. Same prompts, same
   temperatures, same behavior — but Desktop no longer depends on a framework the engine has
   removed. Snapshot recaps and note replies are the surfaces to sanity-check.
-- **Engine safety pin: `5aea416`** (engine 0.15.0). This includes workflow planning as the default
-  plan runner, manual conversation compaction, automatic planning based on task shape, the
-  large-root context guard verified through Desktop against a real `@directory` request, image
-  content counted toward the context estimate, and browser tab and frame listings always being
-  read live rather than answered from the recent-call cache.
+- **Engine safety pin: `d50bfb7`** (engine 0.15.0). This is the engine `main` that ships with this
+  release. It includes workflow planning as the default plan runner, manual conversation
+  compaction, automatic planning based on task shape, the large-root context guard verified
+  through Desktop against a real `@directory` request, image content counted toward the context
+  estimate, browser tab and frame listings always read live rather than answered from the
+  recent-call cache, host-supplied agent tools, the command output sink behind the agent's
+  read-only terminal tab, and executor-owned step completion in place of per-step verification by
+  a second model.
 
 - **The Settings model picker no longer waits on the network to show your model.** The configured
   model appears selected immediately and the installed-model list fills in behind it. A failed or
