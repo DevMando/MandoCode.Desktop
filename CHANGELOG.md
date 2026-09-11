@@ -246,6 +246,15 @@ for every approved plan. Desktop's version follows the engine generation, so it 
   a sticky header, or the suggestion list a field opens when it is filled.
 
 ### Fixed
+- **Switching to a cloud model no longer repeats the subscription notice.** Picking a cloud model
+  announced that cloud models need an ollama.com subscription. It was meant to say so once, but the
+  "already said it" memory belonged to a single agent rather than the app, so every agent you
+  switched said it again — and a tab restored onto a cloud model marked the notice as shown without
+  displaying it, suppressing it for the rest of that session. The notice is gone entirely rather
+  than repaired: the model chip already marks a model as `cloud`, and if a cloud request actually
+  fails you now get the only message that was ever actionable — that the account is signed in but
+  has no active subscription. The setup wizard still explains cloud versus local while you are
+  choosing, and still offers to sign you in when you are not.
 - **Deleting a snapshot, past conversation, or note no longer resets the list.** These panels
   rebuilt themselves after every deletion, so the surviving cards slid back up and expanded project
   groups collapsed — losing your place in the middle of tidying up. The lists now update in place:
