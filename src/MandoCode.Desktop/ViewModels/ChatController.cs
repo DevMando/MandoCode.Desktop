@@ -199,7 +199,6 @@ public sealed partial class ChatController
     /// </summary>
     public bool DeferModelAnnouncement { get; set; }
 
-    private bool _cloudNoticeShown;
 
     /// <summary>The single status line for the live model: state, image capability, where it runs.</summary>
     public void AnnounceModelStatus()
@@ -1808,18 +1807,6 @@ public sealed partial class ChatController
         }
 
         _transcript.Append(_html.StatusChip(modelTag, ModelStatusDetail(modelTag), "ok"));
-
-        // Selection-time awareness, not just failure-time: cloud models require an active
-        // ollama.com cloud subscription — a signed-in account without one gets 403 Forbidden
-        // on its first message, which reads as the app breaking. Once per session is enough to
-        // establish that; the chip already marks every cloud model, and ResponseStreamer says
-        // the actionable version if a 403 actually arrives.
-        if (MandoCodeConfig.IsCloudModel(modelTag) && !_cloudNoticeShown)
-        {
-            _cloudNoticeShown = true;
-            if (!DeferModelAnnouncement)
-                _transcript.Append(_html.Dim("Cloud models run on ollama.com and need an active cloud subscription."));
-        }
 
         // Only mention the cleared context — and offer a snapshot — when there was actually a
         // conversation to clear. Switching an empty chat has nothing to salvage, so stay quiet.
