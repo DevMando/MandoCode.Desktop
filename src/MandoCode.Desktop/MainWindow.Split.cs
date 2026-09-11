@@ -231,6 +231,15 @@ public sealed partial class MainWindow
         // The bar keeps the add/exit controls and the layout hint, but the per-pane pickers are gone
         // — swapping is done by dragging a tab onto the pane it should occupy.
         SplitBar.Visibility = split ? Visibility.Visible : Visibility.Collapsed;
+
+        // The strip lists what is NOT on screen, so it is a function of the pane set and has to be
+        // recomputed whenever that set changes. Doing it HERE rather than at each call site is the
+        // point: this method is the one thing every pane-set change goes through, and leaving the
+        // two to be kept in step by hand is exactly how exiting a split left the paned agents with
+        // no tab at all — ExitSplit applied the layout but never refreshed the strip, so their
+        // headers stayed collapsed with nothing on screen naming them. Closing a pane looked fine
+        // only because RemovePane happens to route through SelectTab, which refreshes.
+        RefreshTabStrip();
     }
 
     /// <summary>
