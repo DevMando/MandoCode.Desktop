@@ -146,6 +146,10 @@ for every approved plan. Desktop's version follows the engine generation, so it 
   rather than at save time. Two further actions on an agent's pane move settings between the two
   scopes: Apply Global Defaults replaces an agent's settings with the defaults and lets it follow
   them again, and Save to Global Defaults makes an agent's settings the starting point for new ones.
+- **`/compact` condenses a long conversation on demand.** A session filling its context window can
+  be compacted deliberately instead of waiting to be forced into it, and the compacted context is
+  persisted, so it survives a restart rather than being rebuilt on the next launch. `/clear` now
+  states plainly that it wipes context completely, so the two are not mistaken for each other.
 
 ### Changed
 - **The bundled backgrounds are renumbered to put the new default first.** Golden Gate, Sequoia
@@ -230,6 +234,14 @@ for every approved plan. Desktop's version follows the engine generation, so it 
   a sticky header, or the suggestion list a field opens when it is filled.
 
 ### Fixed
+- **Deleting a snapshot, past conversation, or note no longer resets the list.** These panels
+  rebuilt themselves after every deletion, so the surviving cards slid back up and expanded project
+  groups collapsed — losing your place in the middle of tidying up. The lists now update in place:
+  the deleted card goes, everything else stays where it was, and group counts and "Delete all"
+  labels update immediately.
+- **Status, plan, approval, and recovery notices stay readable over a busy background.** These are
+  now drawn as high-contrast cards rather than plain text, so they survive a chat background set to
+  a high image opacity. Connection and status pills keep their existing coloured-dot treatment.
 - **The per-turn token count is readable in every theme.** It was faint text trailing at the right
   edge, which put the smallest, palest thing on screen in the exact corner where the themes that
   imitate a screen are darkest — measured at well under half the contrast it needed, and effectively
