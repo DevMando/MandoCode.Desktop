@@ -52,7 +52,7 @@ public sealed partial class ChatTabView
             // A full window also says so with a glyph, so the warning never rests on color alone.
             ContextMeterPercent.Foreground = fill;
             ContextMeterPercent.Text = reading.Level == ContextMeter.Level.Full ? $"⚠ {percent}%" : $"{percent}%";
-            ContextMeterText.Text = $"{used} of {size} tokens";
+            ContextMeterText.Text = $"of {size} tokens";   // the used count is in the tooltip
             AutomationProperties.SetName(ContextMeterPanel,
                 $"Context window {percent} percent full, {used} of {size} tokens");
         }
