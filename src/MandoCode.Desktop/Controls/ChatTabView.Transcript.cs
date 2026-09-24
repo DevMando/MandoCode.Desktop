@@ -188,6 +188,63 @@ public sealed partial class ChatTabView
         }
     }
 
+    // ============================================================
+    // Live reply draft (the streaming turn; see ResponseStreamer)
+    // ============================================================
+
+    // Provisional cards of the current live turn that went to the pending queue because the
+    // WebView wasn't ready (a background agent's tab). Queued in place so they keep their order
+    // ahead of the turn's final card; pulled back out if the turn settles against them.
+    private readonly List<string> _queuedLiveSeals = new();
+    private long _queuedLiveGen;
+
+    // Live repaints are never queued: a draft only matters while it is visible, and the settled
+    // cards replace it either way.
+    private void UpdateLiveDraft(long gen, string text)
+    {
+        var core = CanScript ? TranscriptView.CoreWebView2 : null;
+        if (core == null) return;
+        var label = Session.Config.AgentName ?? "MandoCode";
+        _ = RunTranscriptScriptAsync(core,
+            $"window.__live({gen}, {JsonSerializer.Serialize(label)}, {JsonSerializer.Serialize(text)})");
+    }
+
+    private void SealLiveDraft(long gen, string html)
+    {
+        var core = CanScript ? TranscriptView.CoreWebView2 : null;
+        if (core == null)
+        {
+            if (gen != _queuedLiveGen) { _queuedLiveSeals.Clear(); _queuedLiveGen = gen; }
+            _queuedLiveSeals.Add(html);
+            _pendingHtml.Enqueue(html);
+            return;
+        }
+        _ = RunTranscriptScriptAsync(core, $"window.__liveSeal({gen}, {JsonSerializer.Serialize(html)})");
+    }
+
+    private void EndLiveDraft(long gen, bool keep)
+    {
+        if (gen == _queuedLiveGen && _queuedLiveSeals.Count > 0)
+        {
+            if (!keep)
+            {
+                var rest = _pendingHtml.Where(b => !_queuedLiveSeals.Any(s => ReferenceEquals(s, b))).ToList();
+                _pendingHtml.Clear();
+                foreach (var block in rest) _pendingHtml.Enqueue(block);
+            }
+            _queuedLiveSeals.Clear();
+        }
+        var core = CanScript ? TranscriptView.CoreWebView2 : null;
+        if (core == null) return;
+        _ = RunTranscriptScriptAsync(core, $"window.__liveEnd({gen}, {(keep ? "true" : "false")})");
+    }
+
+    private static async Task RunTranscriptScriptAsync(Microsoft.Web.WebView2.Core.CoreWebView2 core, string script)
+    {
+        try { await core.ExecuteScriptAsync(script); }
+        catch { /* transient during navigation/teardown */ }
+    }
+
     /// <summary>Collapses the current group of routine tool/status output without touching visible
     /// messages that need attention. If a turn ends before WebView initialization, apply it after
     /// the queued blocks have reached the document.</summary>

@@ -1,3 +1,4 @@
+using System.Text;
 using MandoCode.Models;
 using MandoCode.Services;
 using MandoCode.Desktop.Services;
@@ -12,6 +13,13 @@ namespace MandoCode.Desktop.ViewModels;
 /// (the request-lifecycle bits — the CancellationTokenSource, StateChanged, operation-field resets —
 /// stay in ChatController). The 401 sign-in walkthrough is a UI wizard, so it arrives as the
 /// <see cref="On401"/> callback rather than being called directly.
+///
+/// <para>While a turn streams, its text shows in a live draft (<see cref="TranscriptWriter.UpdateLive"/>,
+/// throttled). When a tool call starts, <see cref="SealLiveText"/> turns the text so far into its own
+/// provisional card, so words written before a tool call don't merge into the answer written after
+/// it. Provisional cards are only kept if they are found, in order, in the turn's final text: a model
+/// that writes its tool calls as text has them parsed out after streaming, and that raw text must
+/// not stay on screen.</para>
 /// </summary>
 public sealed class ResponseStreamer
 {
@@ -38,6 +46,18 @@ public sealed class ResponseStreamer
         _config = config;
     }
 
+    /// <summary>How often the live draft repaints. Each repaint replaces one text node, but a
+    /// per-token repaint is the continuous-redraw trap, so chunks are coalesced.</summary>
+    public TimeSpan LiveFlushInterval { get; set; } = TimeSpan.FromMilliseconds(100);
+
+    private readonly object _liveLock = new();
+    private readonly StringBuilder _liveText = new();
+    private readonly List<string> _sealedText = new();
+    private readonly List<string> _sealedHtml = new();
+    private long _liveGen;
+    private bool _liveOpen;
+    private bool _flushPending;
+
     /// <summary>Logs conversational turns ("a" for each assistant turn). Set by ChatController so the
     /// same logger records both user and assistant turns.</summary>
     public Action<string, string>? ConversationLogger { get; set; }
@@ -54,6 +74,8 @@ public sealed class ResponseStreamer
     {
         try
         {
+            _ai.OnResponseTextDelta += OnTextDelta;
+            BeginLiveTurn();
             var stream = string.IsNullOrWhiteSpace(hostInstruction)
                 ? _ai.ChatStreamAsync(input, token)
                 : _ai.ChatStreamWithHostInstructionAsync(input, hostInstruction, token);
@@ -77,12 +99,18 @@ public sealed class ResponseStreamer
                 do
                 {
                     var segment = enumerator.Current.Trim();
+                    var (unshown, endLive) = SettleLiveTurn(segment);
                     if (segment.Length > 0)
                     {
                         segments.Add(segment);
-                        _transcript.Append(_html.AssistantCard(segment, _config.AgentName));
+                        if (unshown.Length > 0)
+                            _transcript.Append(_html.AssistantCard(unshown, _config.AgentName));
                         ConversationLogger?.Invoke("a", segment);
                     }
+                    // After the card, so the draft is replaced rather than blinking out first.
+                    endLive();
+                    // The next turn's chunks only start once MoveNextAsync resumes the harness.
+                    BeginLiveTurn();
                 } while (await enumerator.MoveNextAsync());
 
                 _busy.Stop();
@@ -132,15 +160,105 @@ public sealed class ResponseStreamer
         }
         catch (OperationCanceledException)
         {
+            DiscardLiveTurn();
             _transcript.Append(_html.Warn("Request cancelled."));
             return "";
         }
         catch (Exception ex)
         {
+            DiscardLiveTurn();
             _transcript.Append(_html.Error($"Error: {ex.Message}"));
             return "";
         }
+        finally
+        {
+            _ai.OnResponseTextDelta -= OnTextDelta;
+            DiscardLiveTurn();
+        }
     }
+
+    /// <summary>A tool call is starting: the text streamed so far becomes its own provisional card,
+    /// ahead of the tool pill the caller appends next. No-op when nothing is streaming.</summary>
+    public void SealLiveText()
+    {
+        lock (_liveLock)
+        {
+            if (!_liveOpen) return;
+            var text = _liveText.ToString().Trim();
+            _liveText.Clear();
+            if (text.Length == 0) return;
+            var html = _html.AssistantCard(text, _config.AgentName);
+            _sealedText.Add(text);
+            _sealedHtml.Add(html);
+            _transcript.SealLive(_liveGen, html);
+        }
+    }
+
+    private void OnTextDelta(string text)
+    {
+        lock (_liveLock)
+        {
+            if (!_liveOpen) return;
+            _liveText.Append(text);
+            if (_flushPending) return;
+            _flushPending = true;
+            _ = FlushLiveLaterAsync(_liveGen);
+        }
+    }
+
+    private async Task FlushLiveLaterAsync(long gen)
+    {
+        await Task.Delay(LiveFlushInterval).ConfigureAwait(false);
+        lock (_liveLock)
+        {
+            if (gen != _liveGen || !_liveOpen) return;   // the turn settled while we waited
+            _flushPending = false;
+            var text = _liveText.ToString();
+            if (text.Trim().Length > 0) _transcript.UpdateLive(gen, text);
+        }
+    }
+
+    private void BeginLiveTurn()
+    {
+        lock (_liveLock)
+        {
+            _liveGen++;
+            _liveOpen = true;
+            _flushPending = false;
+            _liveText.Clear();
+            _sealedText.Clear();
+            _sealedHtml.Clear();
+        }
+    }
+
+    /// <summary>Closes the live turn against its authoritative text. Returns the part of it that
+    /// still needs a card (all of it, unless provisional cards were kept) and the call that clears
+    /// the draft, which the caller makes once that card is appended.</summary>
+    private (string Unshown, Action EndLive) SettleLiveTurn(string finalText)
+    {
+        lock (_liveLock)
+        {
+            if (!_liveOpen) return (finalText, () => { });
+            _liveOpen = false;
+            string? rest = null;
+            var keep = _sealedText.Count > 0 && ReplyText.TryRemoveInOrder(finalText, _sealedText, out rest);
+            if (keep)
+                foreach (var html in _sealedHtml) _transcript.Journal(html);
+            var gen = _liveGen;
+            return (keep ? rest!.Trim() : finalText, () => _transcript.EndLive(gen, keep));
+        }
+    }
+
+    private void DiscardLiveTurn()
+    {
+        lock (_liveLock)
+        {
+            if (!_liveOpen) return;
+            _liveOpen = false;
+            _transcript.EndLive(_liveGen, false);
+        }
+    }
+
 
     private static bool Looks401(string responseText)
         => !string.IsNullOrEmpty(responseText)

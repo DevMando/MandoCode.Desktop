@@ -34,6 +34,14 @@ public sealed class AiServiceAdapter : IAiService
         remove => _ai.OnFunctionCompleted -= value;
     }
 
+    public event Action<string>? OnResponseTextDelta
+    {
+        add => _ai.OnResponseTextDelta += value;
+        remove => _ai.OnResponseTextDelta -= value;
+    }
+
+    public bool IsStreamingModelCall => _ai.IsStreamingModelCall;
+
     public Func<string, string?, string, Task<DiffApprovalResult>>? OnWriteApprovalRequested
     {
         get => _ai.OnWriteApprovalRequested;

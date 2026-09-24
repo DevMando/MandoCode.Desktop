@@ -114,6 +114,9 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         _transcript.BlockAdded += OnTranscriptBlock;
         _transcript.Cleared += OnTranscriptCleared;
         _transcript.ActivityCompleted += OnTranscriptActivityCompleted;
+        _transcript.LiveTextChanged += OnLiveText;
+        _transcript.LiveCardSealed += OnLiveSealed;
+        _transcript.LiveEnded += OnLiveEnded;
         Session.Busy.Changed += OnBusyChanged;
         Session.TitleChanged += OnAgentTitleChanged;
         Session.PreviewTools.ExecuteAsync = DispatchPreviewRequestAsync;
@@ -133,6 +136,9 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
     // Harness events arrive on background threads; each hop marshals to the UI thread.
     private void OnTranscriptBlock(string html) => OnUi(() => AppendHtml(html));
     private void OnTranscriptCleared() => OnUi(ClearTranscript);
+    private void OnLiveText(long gen, string text) => OnUi(() => UpdateLiveDraft(gen, text));
+    private void OnLiveSealed(long gen, string html) => OnUi(() => SealLiveDraft(gen, html));
+    private void OnLiveEnded(long gen, bool keep) => OnUi(() => EndLiveDraft(gen, keep));
     private void OnTranscriptActivityCompleted() => OnUi(() =>
     {
         CompleteTranscriptActivity();
@@ -357,6 +363,9 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         _transcript.BlockAdded -= OnTranscriptBlock;
         _transcript.Cleared -= OnTranscriptCleared;
         _transcript.ActivityCompleted -= OnTranscriptActivityCompleted;
+        _transcript.LiveTextChanged -= OnLiveText;
+        _transcript.LiveCardSealed -= OnLiveSealed;
+        _transcript.LiveEnded -= OnLiveEnded;
         Session.Busy.Changed -= OnBusyChanged;
         Session.TitleChanged -= OnAgentTitleChanged;
         Session.PreviewTools.ExecuteAsync = null;

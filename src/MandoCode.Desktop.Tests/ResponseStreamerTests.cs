@@ -32,6 +32,13 @@ public sealed class ResponseStreamerTests
         private readonly Exception? _throw;
         public string? LastHostInstruction { get; private set; }
 
+        /// <summary>Runs before segment <c>i</c> is yielded: where a test streams chunks and starts
+        /// tool calls, the way the harness does while a turn is in flight.</summary>
+        public Action<int>? BeforeSegment { get; set; }
+
+        public event Action<string>? OnResponseTextDelta;
+        public void Emit(string text) => OnResponseTextDelta?.Invoke(text);
+
         public FakeAiService(string[] segments, Exception? throwOnStream = null)
         {
             _segments = segments;
@@ -46,10 +53,11 @@ public sealed class ResponseStreamerTests
                 await Task.Yield();
                 throw _throw;
             }
-            foreach (var s in _segments)
+            for (int i = 0; i < _segments.Length; i++)
             {
                 await Task.Yield();
-                yield return s;
+                BeforeSegment?.Invoke(i);
+                yield return _segments[i];
             }
         }
 
@@ -105,6 +113,112 @@ public sealed class ResponseStreamerTests
         Assert.Contains("CARD:hello", blocks);
         Assert.Contains("CARD:world", blocks);
         Assert.Equal(new[] { "a:hello", "a:world" }, logged);
+    }
+
+    private sealed class LiveLog
+    {
+        public readonly List<string> Events = new();
+
+        public LiveLog(TranscriptWriter transcript)
+        {
+            transcript.BlockAdded += b => Add($"block:{b}");
+            transcript.BlockJournaled += b => Add($"journal:{b}");
+            transcript.LiveTextChanged += (_, t) => Add($"live:{t}");
+            transcript.LiveCardSealed += (_, h) => Add($"seal:{h}");
+            transcript.LiveEnded += (_, keep) => Add($"end:{keep}");
+        }
+
+        private void Add(string e) { lock (Events) Events.Add(e); }
+    }
+
+    private static (ResponseStreamer streamer, LiveLog log) MakeLive(FakeAiService ai)
+    {
+        var transcript = new TranscriptWriter();
+        var log = new LiveLog(transcript);
+        var config = new MandoCodeConfig { EnableTokenTracking = false };
+        var streamer = new ResponseStreamer(
+            ai, transcript, new TagHtml(), new BusyStateService(), new TokenTrackingService(), config);
+        return (streamer, log);
+    }
+
+    [Fact]
+    public async Task TextBeforeAToolCall_BecomesItsOwnCard_AheadOfTheAnswer()
+    {
+        var ai = new FakeAiService(new[] { "Let me check the docs.\nHere is the answer." });
+        var (s, log) = MakeLive(ai);
+        ai.BeforeSegment = _ =>
+        {
+            ai.Emit("Let me check ");
+            ai.Emit("the docs.");
+            s.SealLiveText();          // what ChatController.OnFunctionInvoked does
+            ai.Emit("Here is the answer.");
+        };
+
+        var result = await s.StreamAsync("hi", CancellationToken.None);
+
+        Assert.Equal("Let me check the docs.\nHere is the answer.", result);
+        var settled = log.Events.Where(e => !e.StartsWith("live:")).ToList();
+        Assert.Equal(new[]
+        {
+            "seal:CARD:Let me check the docs.",
+            "journal:CARD:Let me check the docs.",
+            "block:CARD:Here is the answer.",
+            "end:True",
+            "end:False",               // the next (never-started) turn is closed on the way out
+        }, settled);
+    }
+
+    [Fact]
+    public async Task RewrittenFinalText_DropsProvisionalCards_AndShowsTheFinalText()
+    {
+        // A model that writes its tool call as text: the fallback parser strips it after streaming,
+        // so the provisional card's raw text is not in the final reply and must not stay on screen.
+        var ai = new FakeAiService(new[] { "The file is updated." });
+        var (s, log) = MakeLive(ai);
+        ai.BeforeSegment = _ =>
+        {
+            ai.Emit("{\"name\":\"write_file\"}");
+            s.SealLiveText();
+        };
+
+        await s.StreamAsync("hi", CancellationToken.None);
+
+        Assert.DoesNotContain(log.Events, e => e.StartsWith("journal:"));
+        Assert.Contains("block:CARD:The file is updated.", log.Events);
+        Assert.Equal("end:False", log.Events.First(e => e.StartsWith("end:")));
+    }
+
+    [Fact]
+    public async Task StreamedChunks_RepaintTheDraft_WithTheWholeReplySoFar()
+    {
+        var ai = new FakeAiService(new[] { "Hello there" });
+        var (s, log) = MakeLive(ai);
+        s.LiveFlushInterval = TimeSpan.FromMilliseconds(5);
+        ai.BeforeSegment = _ =>
+        {
+            ai.Emit("Hello ");
+            ai.Emit("there");
+            Thread.Sleep(200);         // let the throttled repaint land before the turn settles
+        };
+
+        await s.StreamAsync("hi", CancellationToken.None);
+
+        Assert.Contains("live:Hello there", log.Events);
+        Assert.DoesNotContain(log.Events, e => e.StartsWith("seal:"));
+        Assert.Contains("block:CARD:Hello there", log.Events);
+    }
+
+    [Fact]
+    public async Task SealWithoutAStreamingTurn_IsANoOp()
+    {
+        var ai = new FakeAiService(new[] { "done" });
+        var (s, log) = MakeLive(ai);
+
+        s.SealLiveText();
+        await s.StreamAsync("hi", CancellationToken.None);
+        s.SealLiveText();
+
+        Assert.DoesNotContain(log.Events, e => e.StartsWith("seal:"));
     }
 
     [Fact]

@@ -204,6 +204,7 @@ public sealed class AgentSession
         // Journal every transcript block as it's written (tier-2 session persistence).
         // /clear also clears the on-disk history — cleared means cleared, both files.
         Transcript.BlockAdded += htmlBlock => TranscriptJournal.Append(PersistKey, htmlBlock);
+        Transcript.BlockJournaled += htmlBlock => TranscriptJournal.Append(PersistKey, htmlBlock);
         Transcript.Cleared += () =>
         {
             TranscriptJournal.Delete(PersistKey);
