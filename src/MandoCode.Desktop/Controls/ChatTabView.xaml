@@ -770,6 +770,8 @@
                  the only signal. Shown once the agent has made a request. -->
             <StackPanel x:Name="ContextMeterPanel" Orientation="Horizontal" Spacing="8"
                         HorizontalAlignment="Left" VerticalAlignment="Center" Visibility="Collapsed">
+                <!-- Names the bar: alone, it could read as any progress (a download, a task). -->
+                <TextBlock Text="Context" FontSize="12" Opacity="0.8" VerticalAlignment="Center"/>
                 <Grid x:Name="ContextMeterTrack" Width="120" Height="6" VerticalAlignment="Center"
                       CornerRadius="3">
                     <Border x:Name="ContextMeterFill" HorizontalAlignment="Left" CornerRadius="3" Width="0"/>
