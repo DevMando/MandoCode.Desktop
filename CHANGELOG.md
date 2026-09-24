@@ -8,6 +8,13 @@ submodule.
 
 ## [Unreleased]
 
+### Added
+- **Watch replies as they're written.** The agent's reply now appears in the transcript as it
+  streams, instead of all at once when it's finished. If the agent says something before using a
+  tool ("let me check the docs…"), that text becomes its own card above the tool call, and the
+  answer gets a second card. The conversation reads in the order it happened, instead of merging
+  everything into one card at the end.
+
 ## [0.15.0] — 2026-09-10
 
 **A new AI foundation, plans you can resume, and more ways to work alongside your agents.**
