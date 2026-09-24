@@ -41,6 +41,7 @@ public sealed partial class ChatTabView
         ModelButton.IsEnabled = !processing;   // no model switch mid-turn
 
         RefreshBranchChip();
+        UpdateContextMeter();
 
         HeaderChanged?.Invoke(this);
     }

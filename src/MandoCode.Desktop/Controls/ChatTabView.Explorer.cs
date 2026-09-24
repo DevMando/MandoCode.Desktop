@@ -47,7 +47,8 @@ public sealed partial class ChatTabView
         _wsTracker.CaptureBaselineIfPending(info);
         if (info == null)
         {
-            StatusStrip.Visibility = Visibility.Collapsed;
+            GitStatusPanel.Visibility = Visibility.Collapsed;
+            UpdateStatusStripVisibility();
             return;
         }
 
@@ -65,14 +66,15 @@ public sealed partial class ChatTabView
         var foreignRoot = info.RepoRoot.Length > 0 && !string.Equals(
             Path.TrimEndingDirectorySeparator(info.RepoRoot),
             Path.TrimEndingDirectorySeparator(root), StringComparison.OrdinalIgnoreCase);
-        ToolTipService.SetToolTip(StatusStrip,
+        ToolTipService.SetToolTip(GitStatusPanel,
             (info.Detached ? "Detached HEAD at commit " + info.Branch : "Git branch: " + info.Branch)
             + " — " + state
             + (info.Ahead > 0 || info.Behind > 0
                 ? $" ({info.Ahead} ahead, {info.Behind} behind upstream)" : "")
             // Git found the repo in an ANCESTOR folder — say so, or this reads as a ghost.
             + (foreignRoot ? $"\nRepository root: {info.RepoRoot} (this folder is inside that repository)" : ""));
-        StatusStrip.Visibility = Visibility.Visible;
+        GitStatusPanel.Visibility = Visibility.Visible;
+        UpdateStatusStripVisibility();
     }
 
     /// <summary>Rebuilds the Changes tab's rows from a fresh git snapshot (UI thread).</summary>
