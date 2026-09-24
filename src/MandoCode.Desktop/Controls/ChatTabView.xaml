@@ -774,6 +774,10 @@
                       CornerRadius="3">
                     <Border x:Name="ContextMeterFill" HorizontalAlignment="Left" CornerRadius="3" Width="0"/>
                 </Grid>
+                <!-- The percentage wears the bar's color (lifted to the text floor), so it stands
+                     out and needs no parentheses; the token counts stay quiet beside it. -->
+                <TextBlock x:Name="ContextMeterPercent" FontSize="12" FontWeight="SemiBold"
+                           VerticalAlignment="Center" FontFamily="Cascadia Code,Consolas"/>
                 <TextBlock x:Name="ContextMeterText" FontSize="12" Opacity="0.8" VerticalAlignment="Center"
                            FontFamily="Cascadia Code,Consolas"/>
             </StackPanel>

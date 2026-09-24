@@ -1,6 +1,7 @@
 using MandoCode.Desktop.Services;
 using MandoCode.Services;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 
@@ -34,17 +35,32 @@ public sealed partial class ChatTabView
         var theme = ThemeManager.Current;
 
         var hasBar = window > 0;
+        var used = TokenTrackingService.FormatTokenCount(lastOp.PromptTokens);
         ContextMeterTrack.Visibility = hasBar ? Visibility.Visible : Visibility.Collapsed;
+        ContextMeterPercent.Visibility = hasBar ? Visibility.Visible : Visibility.Collapsed;
         if (hasBar)
         {
-            ContextMeterTrack.Background = new SolidColorBrush(ThemeManager.C(ContextMeterColors.Track(theme)));
-            ContextMeterFill.Background = new SolidColorBrush(ThemeManager.C(ContextMeterColors.Fill(theme, reading.Level)));
+            var fill = new SolidColorBrush(ThemeManager.C(ContextMeterColors.Fill(theme, reading.Level)));
             var fraction = Math.Clamp((double)lastOp.PromptTokens / window, 0, 1);
-            ContextMeterFill.Width = ContextMeterTrack.Width * fraction;
-        }
+            var percent = (int)Math.Round(fraction * 100);
+            var size = TokenTrackingService.FormatTokenCount(window);
 
-        // A full window also says so in words, so the warning never rests on color alone.
-        ContextMeterText.Text = reading.Level == ContextMeter.Level.Full ? $"⚠ {reading.Label}" : reading.Label;
+            ContextMeterTrack.Background = new SolidColorBrush(ThemeManager.C(ContextMeterColors.Track(theme)));
+            ContextMeterFill.Background = fill;
+            ContextMeterFill.Width = ContextMeterTrack.Width * fraction;
+
+            // A full window also says so with a glyph, so the warning never rests on color alone.
+            ContextMeterPercent.Foreground = fill;
+            ContextMeterPercent.Text = reading.Level == ContextMeter.Level.Full ? $"⚠ {percent}%" : $"{percent}%";
+            ContextMeterText.Text = $"{used} / {size}";
+            AutomationProperties.SetName(ContextMeterPanel,
+                $"Context window {percent} percent full, {used} of {size} tokens");
+        }
+        else
+        {
+            ContextMeterText.Text = reading.Label;
+            AutomationProperties.SetName(ContextMeterPanel, $"Context: {reading.Label}");
+        }
         ToolTipService.SetToolTip(ContextMeterPanel, hasBar
             ? $"Context window: the last request used {reading.Label}. "
               + "Every request resends the conversation, so this is where the next one starts. "
