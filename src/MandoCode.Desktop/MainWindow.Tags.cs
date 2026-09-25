@@ -129,7 +129,6 @@ public sealed partial class MainWindow
         var input = new TextBox
         {
             PlaceholderText = "New tag (for example: database)",
-            MinWidth = 300,
         };
         var list = new ListView
         {
@@ -186,7 +185,14 @@ public sealed partial class MainWindow
             TextWrapping = TextWrapping.Wrap,
             Opacity = 0.7,
         });
-        var addRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        // The dialog caps its content near 500px, so the name box takes whatever the color picker
+        // and button leave. A horizontal StackPanel sized the box first and pushed the button off the edge.
+        var addRow = new Grid { ColumnSpacing = 8 };
+        addRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        addRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        addRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(color, 1);
+        Grid.SetColumn(add, 2);
         addRow.Children.Add(input);
         addRow.Children.Add(color);
         addRow.Children.Add(add);

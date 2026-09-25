@@ -21,6 +21,11 @@ submodule.
   shows ⚠ so the warning never depends on color alone, and screen readers announce it. Cloud models,
   which manage their own window, show their token count.
 
+### Fixed
+- **The "Add tag" button is fully visible again.** In the Manage tags dialog, the name box was a
+  fixed width, which pushed the button past the dialog's edge and cut it off. The name box now
+  shrinks to fit, so the color picker and the whole button always fit on the row.
+
 ## [0.15.0] — 2026-09-10
 
 **A new AI foundation, plans you can resume, and more ways to work alongside your agents.**
