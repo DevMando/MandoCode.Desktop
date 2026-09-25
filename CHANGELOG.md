@@ -8,20 +8,35 @@ submodule.
 
 ## [Unreleased]
 
+## [0.15.1] — 2026-09-24
+
+**See what your agent is doing while it does it.** In 0.15.0 you sent a message and then waited,
+with no way to tell whether the agent was writing you an essay or had wandered off. Now you
+watch the reply come in, and a small meter tells you how much of the agent's memory the
+conversation is using, so you can tidy up before it starts forgetting things. We also fixed a
+couple of small things 0.15.0 got wrong.
+
+**Included engine:** [MandoCode CLI v0.15.1](https://github.com/DevMando/MandoCode/releases/tag/v0.15.1).
+
 ### Added
 - **Watch replies as they're written.** The agent's reply now appears in the transcript as it
   streams, instead of all at once when it's finished. If the agent says something before using a
   tool ("let me check the docs…"), that text becomes its own card above the tool call, and the
   answer gets a second card. The conversation reads in the order it happened, instead of merging
   everything into one card at the end.
-- **A context meter in every tab.** The strip under the message box now shows how full the agent's
-  context window is, for example "Context ▰▰▰▱▱▱ 41% of 32k tokens", with a bar that turns
-  yellow and then red as it fills. It tells you when to `/compact` before the model starts losing the
-  earlier conversation. The colors are tuned to stay readable in every theme, a full window also
-  shows ⚠ so the warning never depends on color alone, and screen readers announce it. Cloud models,
-  which manage their own window, show their token count.
+- **A context meter in every tab.** A model can only keep so much of a conversation in mind at
+  once. That limit is its *context window*. Once a conversation outgrows it, the earliest messages
+  start slipping away. The strip under the message box now shows how full the window is, for
+  example "Context ▰▰▰▱▱▱ 41% of 32k tokens", with a bar that turns yellow and then red as it
+  fills. When it gets high, run `/compact`: it squeezes the conversation into a short recap so the
+  agent keeps the thread without the bulk. The colors are tuned to stay readable in every theme, a
+  full window also shows ⚠ so the warning never depends on color alone, and screen readers
+  announce it. Cloud models manage their own window, so for them the meter shows the token count
+  instead.
 
 ### Fixed
+- **Reply speed is back.** The summary after each reply had stopped showing how fast the model
+  was answering (tokens per second) once streaming became the default. It shows again.
 - **The "Add tag" button is fully visible again.** In the Manage tags dialog, the name box was a
   fixed width, which pushed the button past the dialog's edge and cut it off. The name box now
   shrinks to fit, so the color picker and the whole button always fit on the row.
