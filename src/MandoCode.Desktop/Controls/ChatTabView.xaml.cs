@@ -334,6 +334,7 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         if (_shutDown) return;
         var theme = ThemeManager.Current;
         TranscriptView.DefaultBackgroundColor = ThemeManager.C(theme.Background);
+        UpdateContextMeter();   // its fill is derived from the theme
 
         var core = CanScript ? TranscriptView.CoreWebView2 : null;   // captured: see AppendRawAsync
         if (core == null) return;

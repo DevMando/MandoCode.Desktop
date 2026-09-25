@@ -14,6 +14,12 @@ submodule.
   tool ("let me check the docs…"), that text becomes its own card above the tool call, and the
   answer gets a second card. The conversation reads in the order it happened, instead of merging
   everything into one card at the end.
+- **A context meter in every tab.** The strip under the message box now shows how full the agent's
+  context window is, for example "Context ▰▰▰▱▱▱ 41% of 32k tokens", with a bar that turns
+  yellow and then red as it fills. It tells you when to `/compact` before the model starts losing the
+  earlier conversation. The colors are tuned to stay readable in every theme, a full window also
+  shows ⚠ so the warning never depends on color alone, and screen readers announce it. Cloud models,
+  which manage their own window, show their token count.
 
 ## [0.15.0] — 2026-09-10
 

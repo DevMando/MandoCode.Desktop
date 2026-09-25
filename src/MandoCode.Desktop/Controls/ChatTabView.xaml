@@ -764,8 +764,27 @@
              the dot is the one status light: red = merge conflicts, gold = uncommitted
              changes, green = clean. Hidden entirely when the folder isn't a git repo. -->
         <Grid x:Name="StatusStrip" Grid.Row="6" Padding="16,0,16,6" Visibility="Collapsed">
-            <StackPanel Orientation="Horizontal" Spacing="7" HorizontalAlignment="Right"
-                        VerticalAlignment="Center"
+            <!-- Context meter: how full this agent's context window is, from the last request's
+                 prompt tokens. Colors come from ContextMeterColors (lifted per theme to clear 3:1
+                 against the page AND the empty track); the percentage is text, so color is never
+                 the only signal. Shown once the agent has made a request. -->
+            <StackPanel x:Name="ContextMeterPanel" Orientation="Horizontal" Spacing="8"
+                        HorizontalAlignment="Left" VerticalAlignment="Center" Visibility="Collapsed">
+                <!-- Names the bar: alone, it could read as any progress (a download, a task). -->
+                <TextBlock Text="Context" FontSize="12" Opacity="0.8" VerticalAlignment="Center"/>
+                <Grid x:Name="ContextMeterTrack" Width="120" Height="6" VerticalAlignment="Center"
+                      CornerRadius="3">
+                    <Border x:Name="ContextMeterFill" HorizontalAlignment="Left" CornerRadius="3" Width="0"/>
+                </Grid>
+                <!-- The percentage wears the bar's color (lifted to the text floor), so it stands
+                     out and needs no parentheses; the token counts stay quiet beside it. -->
+                <TextBlock x:Name="ContextMeterPercent" FontSize="12" FontWeight="SemiBold"
+                           VerticalAlignment="Center" FontFamily="Cascadia Code,Consolas"/>
+                <TextBlock x:Name="ContextMeterText" FontSize="12" Opacity="0.8" VerticalAlignment="Center"
+                           FontFamily="Cascadia Code,Consolas"/>
+            </StackPanel>
+            <StackPanel x:Name="GitStatusPanel" Orientation="Horizontal" Spacing="7" HorizontalAlignment="Right"
+                        VerticalAlignment="Center" Visibility="Collapsed"
                         ToolTipService.ToolTip="Local git status for this tab's project folder">
                 <Canvas Width="14" Height="14" VerticalAlignment="Center" Opacity="0.7">
                     <!-- classic branch shape: main line with two nodes, side node joined by a curve -->
