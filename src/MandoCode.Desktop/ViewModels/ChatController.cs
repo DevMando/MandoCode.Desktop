@@ -896,6 +896,9 @@ public sealed partial class ChatController
 
     private void OnFunctionInvoked(FunctionCall call)
     {
+        // Text streamed before this call becomes its own card, ahead of the call's pill. Only for a
+        // call made mid-stream: a text-written call's raw text is about to be stripped from the reply.
+        if (_ai.IsStreamingModelCall) _streamer.SealLiveText();
         _lastOperationType = call.FunctionName.Replace("FileSystem_", "").ToLowerInvariant();
 
         if (!call.FunctionName.StartsWith("FileSystem_", StringComparison.Ordinal))

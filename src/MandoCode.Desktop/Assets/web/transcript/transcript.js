@@ -507,6 +507,7 @@
     const wrap = document.createElement('div');
     wrap.innerHTML = html;
     while (wrap.firstChild) placeChild(wrap.firstChild);
+    keepDraftLast();
     highlightNew();
     linkifyPaths();
     addCopyChips();
@@ -522,6 +523,64 @@
     completeWorkRollups();
   };
   window.__clear = function () { log.innerHTML = ''; updatePill(); };
+
+  // --- live reply draft: the streaming turn's text, repainted in place (throttled by the host) ---
+  // Plain text in one text node, so each repaint is a single node swap with no markdown or
+  // highlighting pass. Each turn has a generation number and an ended one never repaints: the host
+  // can deliver a late throttled update after the turn's end, and it must not bring the draft back.
+  let liveEnded = 0;
+  function keepDraftLast() {
+    const draft = document.getElementById('live-draft');
+    if (draft && draft !== log.lastElementChild) log.appendChild(draft);
+  }
+  window.__live = function (gen, label, text) {
+    if (gen <= liveEnded) return;
+    const nearBottom = (window.innerHeight + window.scrollY) >= (document.body.scrollHeight - 60);
+    let draft = document.getElementById('live-draft');
+    if (!draft) {
+      draft = document.createElement('div');
+      draft.id = 'live-draft';
+      // data-copy/data-rx pre-set: copy chips and reactions belong on the real card, not the draft.
+      draft.className = 'assistant live-draft';
+      draft.setAttribute('data-copy', '1');
+      draft.setAttribute('data-rx', '1');
+      draft.title = new Date().toLocaleTimeString();
+      const name = document.createElement('div');
+      name.className = 'assistant-label';
+      name.textContent = label;
+      const body = document.createElement('div');
+      // .md so every theme's message padding and type apply; data-fl pre-set so path
+      // linkifying skips it (the next repaint would wipe the links anyway).
+      body.className = 'md live-text';
+      body.setAttribute('data-fl', '1');
+      draft.appendChild(name);
+      draft.appendChild(body);
+      log.appendChild(draft);
+    }
+    draft.querySelector('.live-text').textContent = text;
+    if (nearBottom) window.scrollTo(0, document.body.scrollHeight);
+    updatePill();
+  };
+  // The draft so far became a real card because a tool call started. It stays provisional (marked
+  // with its turn) until __liveEnd decides whether the turn's final text agreed with it.
+  window.__liveSeal = function (gen, html) {
+    if (gen <= liveEnded) return;
+    const draft = document.getElementById('live-draft');
+    if (draft) draft.remove();
+    const before = log.lastElementChild;
+    window.__append(html);
+    for (let n = before ? before.nextElementSibling : log.firstElementChild; n; n = n.nextElementSibling)
+      n.setAttribute('data-live-seg', String(gen));
+  };
+  window.__liveEnd = function (gen, keep) {
+    if (gen > liveEnded) liveEnded = gen;
+    const draft = document.getElementById('live-draft');
+    if (draft) draft.remove();
+    log.querySelectorAll('[data-live-seg="' + gen + '"]').forEach(function (n) {
+      if (keep) n.removeAttribute('data-live-seg'); else n.remove();
+    });
+    updatePill();
+  };
 
   document.addEventListener('click', function (e) {
     const link = e.target.closest('a[data-file]');

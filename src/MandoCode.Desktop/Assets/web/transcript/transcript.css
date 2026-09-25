@@ -541,6 +541,10 @@
   .assistant { margin-top: 4px; position: relative; }
   .assistant-label { color: var(--green); font-weight: 700; margin-bottom: 2px; }
   .md p { margin: 6px 0; }
+  /* Live reply draft: plain text until the turn settles into a rendered card. No e-ink filter —
+     the draft repaints while it streams, and a filter would re-rasterize it on every repaint. */
+  .live-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+  html[data-flat] .live-draft .md { filter: none; }
   .md pre {
     background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
     padding: 10px 12px; overflow-x: auto; position: relative;

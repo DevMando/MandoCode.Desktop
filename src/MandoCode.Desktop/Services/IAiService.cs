@@ -38,6 +38,14 @@ public interface IAiService
     event Action<FunctionCall>? OnFunctionInvoked;
     event Action<FunctionExecutionResult>? OnFunctionCompleted;
 
+    /// <summary>Reply text as a chat turn streams — a preview only; the turn's yielded string stays
+    /// authoritative. Default no-op so a fake that doesn't stream needn't implement it.</summary>
+    event Action<string>? OnResponseTextDelta { add { } remove { } }
+
+    /// <summary>True while a model call is streaming. A tool call starting now was made mid-reply,
+    /// so the text before it is final; a text-written call runs after the stream, when it's false.</summary>
+    bool IsStreamingModelCall => false;
+
     Func<string, string?, string, Task<DiffApprovalResult>>? OnWriteApprovalRequested { get; set; }
     Func<string, string?, Task<DiffApprovalResult>>? OnDeleteApprovalRequested { get; set; }
     Func<string, Task<DiffApprovalResult>>? OnCommandApprovalRequested { get; set; }
