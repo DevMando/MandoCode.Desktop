@@ -8,6 +8,12 @@ submodule.
 
 ## [Unreleased]
 
+### Changed
+- **Update the bundled engine to the RazorConsole 0.6 migration alpha (0.16.0-alpha), based on CLI v0.15.2.** The CLI gains a component-based terminal conversation, persistent prompt, completion popups, and model recovery. Desktop retains its WinUI conversation layout; full CLI migration notes are in `MandoCode/docs/CHANGELOG.md`.
+
+### Fixed
+- **Clear guidance when Ollama retires a model.** HTTP 410 Gone errors, including wrapped provider errors, identify the unavailable model and recommend choosing another with `/model` instead of restarting Ollama or pulling a retired cloud model. The shared engine does not retry these failures.
+
 ## [0.15.1] — 2026-09-24
 
 **See what your agent is doing while it does it.** In 0.15.0 you sent a message and then waited,
