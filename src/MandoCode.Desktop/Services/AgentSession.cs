@@ -130,6 +130,7 @@ public sealed class AgentSession
         Agents = globals.GetRequiredService<AgentDirectory>();
         CommandLog = new AgentCommandLog();
         Ai = new AIService(ProjectRoot, Config, Tokens, PlanHandoff, Skills, mcpManager, McpGate, spinner, CommandLog);
+        Ai.UseExplicitPlanningOnly();
         PreviewTools = new DesktopPreviewTools(ProjectRoot) { RequireTabId = true, ImageSink = new AgentImageSink(new AiServiceAdapter(Ai)) };
         // Cross-agent observation. Registered alongside the browser tools because both are host
         // knowledge the engine cannot have: the engine sees one project root, the host sees the
@@ -216,7 +217,7 @@ public sealed class AgentSession
         Shell = new ShellRunner(ProjectRoot, Transcript, html);
 
         Controller = new ChatController(
-            new AiServiceAdapter(Ai), Config, Tokens, PlanHandoff, Planner, PlanRunners,
+            new AiServiceAdapter(Ai), Config, Tokens, PlanHandoff, PlanRunners,
             mcpManager, McpGate, Skills, FileProvider, ProjectRoot,
             music, updateCheck, Approvals, Transcript, html, Busy, Shell, PromptGate,
             configs, mcp, Snapshots,
