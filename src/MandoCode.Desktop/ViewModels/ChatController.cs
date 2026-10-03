@@ -22,10 +22,7 @@ public sealed partial class ChatController
     private readonly TokenTrackingService _tokenTracker;
     private readonly PlanHandoff _planHandoff;
     private readonly DeferredPlanCompletion _deferredPlans;
-    private readonly TaskPlannerService _taskPlanner;
-    // Which engine runs a plan is re-read per plan, so `planner` can be flipped
-    // mid-session. _taskPlanner is still needed for RequiresPlanning, which is a
-    // planning-trigger heuristic rather than part of IPlanRunner.
+    // Which engine runs an explicitly requested plan is re-read per plan.
     private readonly PlanRunnerSelector _planRunners;
     private readonly McpClientManager _mcpManager;
     private readonly McpApprovalGate _mcpGate;
@@ -269,7 +266,6 @@ public sealed partial class ChatController
         MandoCodeConfig config,
         TokenTrackingService tokenTracker,
         PlanHandoff planHandoff,
-        TaskPlannerService taskPlanner,
         PlanRunnerSelector planRunners,
         McpClientManager mcpManager,
         McpApprovalGate mcpGate,
@@ -300,7 +296,6 @@ public sealed partial class ChatController
         _tokenTracker = tokenTracker;
         _planHandoff = planHandoff;
         _deferredPlans = new DeferredPlanCompletion(_planHandoff);
-        _taskPlanner = taskPlanner;
         _planRunners = planRunners;
         _mcpManager = mcpManager;
         _mcpGate = mcpGate;
@@ -640,8 +635,6 @@ public sealed partial class ChatController
 
             ConversationLogger?.Invoke("u", input);
 
-            // Plan heuristic BEFORE @file expansion so attachments don't inflate it.
-            var planning = _taskPlanner.GetPlanningDecision(input);
             var processedInput = ProcessFileReferences(input);
 
             // Fold the invisible ride-alongs (imported recaps, emoji reactions, external workspace
@@ -668,13 +661,7 @@ public sealed partial class ChatController
             _pendingReactions.Clear();
             _pendingWorkspaceNotes.Clear();
 
-            if (planning.Required)
-            {
-                _transcript.Append(_html.Dim($"Planning automatically: {planning.Reason}."));
-                await ForcePlanAsync(processedInput, input);
-            }
-            else
-                await ProcessDirectRequestAsync(processedInput, input);
+            await ProcessDirectRequestAsync(processedInput, input);
         }
         finally
         {
