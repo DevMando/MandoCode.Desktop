@@ -1,9 +1,13 @@
+using SnapshotEnhancer = MandoCode.Desktop.Services.SnapshotEnhancer;
+using SnapshotNaming = MandoCode.Desktop.Services.SnapshotNaming;
 ﻿using System.Text;
 using System.Text.RegularExpressions;
 using MandoCode.Models;
 using MandoCode.Services;
 using MandoCode.Desktop.Services;
 using ModelContextProtocol.Client;
+using SnapshotStore = MandoCode.Desktop.Services.SnapshotStore;
+using ContextSnapshot = MandoCode.Desktop.Services.ContextSnapshot;
 
 namespace MandoCode.Desktop.ViewModels;
 
