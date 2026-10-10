@@ -9,10 +9,8 @@ submodule.
 ## [Unreleased]
 
 ### Changed
-- **Use the shared engine maintenance update.** Pin the CLI engine to 24db4d7, with focused command/request/lifecycle code, clearer menu and shortcut ownership, shutdown/callback fixes, and improved regression testing. Desktop keeps its existing conversation interface.
+- **Update the bundled engine to the MandoCode 0.16 generation.** Pin the shared engine to `9e25af4`, including the RazorConsole 0.6 migration, maintenance improvements, and merged Windows/Linux CI fixes. The engine now separates commands, requests, lifecycle, model inspection, and history handling into focused code. Desktop keeps its existing WinUI conversation interface; terminal features are described in `MandoCode/docs/CHANGELOG.md`.
 - **Plan mode starts only through /plan.** Ordinary requests run directly, including multi-step tasks and prose outlines. Desktop no longer automatically proposes structured plans based on task complexity or model tool calls. Existing plan review, editing, execution, and recovery remain available. Settings now explain the explicit command instead of offering automatic planning.
-- **Update the bundled engine for explicit planning.** Pin the shared engine to 6915e36, including the CLI Git review feature and the opt-in host policy used by Desktop.
-- **Update the bundled engine to the RazorConsole 0.6 migration alpha (0.16.0-alpha), based on CLI v0.15.2.** The CLI gains a component-based terminal conversation, persistent prompt, completion popups, and model recovery. Desktop retains its WinUI conversation layout; full CLI migration notes are in `MandoCode/docs/CHANGELOG.md`.
 
 ### Fixed
 - **Resolve Desktop snapshot types explicitly.** Avoid ambiguous references when both the updated engine and Desktop expose snapshot helpers.
