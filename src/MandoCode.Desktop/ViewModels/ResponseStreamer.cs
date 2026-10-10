@@ -167,7 +167,9 @@ public sealed class ResponseStreamer
         catch (Exception ex)
         {
             DiscardLiveTurn();
-            _transcript.Append(_html.Error($"Error: {ex.Message}"));
+            _transcript.Append(_html.Error(OllamaModelAvailability.IsUnavailable(ex)
+                ? OllamaModelAvailability.Message(_config.GetEffectiveModelName())
+                : $"Error: {ex.Message}"));
             return "";
         }
         finally

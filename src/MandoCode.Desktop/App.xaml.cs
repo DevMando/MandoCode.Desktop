@@ -1,3 +1,4 @@
+using SnapshotStore = MandoCode.Desktop.Services.SnapshotStore;
 ﻿using MandoCode.Models;
 using MandoCode.Services;
 using MandoCode.Desktop.Services;

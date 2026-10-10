@@ -329,4 +329,14 @@ public sealed class ResponseStreamerTests
         Assert.Equal("", result);
         Assert.Contains(blocks, b => b.StartsWith("ERR:") && b.Contains("boom"));
     }
+    [Fact]
+    public async Task RetiredModelError_ShowsModelSwitchGuidance()
+    {
+        var error = new HttpRequestException("Response status code does not indicate success: 410 (Gone).", null, System.Net.HttpStatusCode.Gone);
+        var (streamer, blocks) = Make(new FakeAiService(Array.Empty<string>(), error));
+        var result = await streamer.StreamAsync("hi", CancellationToken.None);
+        Assert.Equal("", result);
+        Assert.Contains(blocks, b => b.StartsWith("ERR:") && b.Contains("no longer available on Ollama") && b.Contains("/model"));
+        Assert.DoesNotContain(blocks, b => b.Contains("ollama serve") || b.Contains("ollama pull"));
+    }
 }

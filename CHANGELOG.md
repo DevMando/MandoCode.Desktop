@@ -8,6 +8,14 @@ submodule.
 
 ## [Unreleased]
 
+### Changed
+- **Update the bundled engine to the MandoCode 0.16 generation.** Pin the shared engine to `9e25af4`, including the RazorConsole 0.6 migration, maintenance improvements, and merged Windows/Linux CI fixes. The engine now separates commands, requests, lifecycle, model inspection, and history handling into focused code. Desktop keeps its existing WinUI conversation interface; terminal features are described in `MandoCode/docs/CHANGELOG.md`.
+- **Plan mode starts only through /plan.** Ordinary requests run directly, including multi-step tasks and prose outlines. Desktop no longer automatically proposes structured plans based on task complexity or model tool calls. Existing plan review, editing, execution, and recovery remain available. Settings now explain the explicit command instead of offering automatic planning.
+
+### Fixed
+- **Resolve Desktop snapshot types explicitly.** Avoid ambiguous references when both the updated engine and Desktop expose snapshot helpers.
+- **Clear guidance when Ollama retires a model.** HTTP 410 Gone errors, including wrapped provider errors, identify the unavailable model and recommend choosing another with `/model` instead of restarting Ollama or pulling a retired cloud model. The shared engine does not retry these failures.
+
 ## [0.15.1] — 2026-09-24
 
 **See what your agent is doing while it does it.** In 0.15.0 you sent a message and then waited,

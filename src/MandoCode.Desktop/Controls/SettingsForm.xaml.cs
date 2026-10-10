@@ -152,7 +152,6 @@ public sealed partial class SettingsForm : UserControl
             S_MaxTokens.Value = cfg.MaxTokens;
             S_Streaming.SelectedItem = cfg.ResponseStreaming;
             S_AgentCallsigns.IsOn = _draftCallsigns;
-            S_TaskPlanning.IsOn = cfg.EnableTaskPlanning;
             S_DiffApprovals.IsOn = cfg.EnableDiffApprovals;
             S_AutoContinue.IsOn = cfg.EnableAutoContinuation;
             S_MaxContinuations.Value = cfg.MaxAutoContinuations;
@@ -447,7 +446,6 @@ public sealed partial class SettingsForm : UserControl
         if (s == Tab_Behavior)
         {
             tabName = "Behavior";
-            resets.Add(("taskPlanning", Bool(d.EnableTaskPlanning)));
             resets.Add(("diffApprovals", Bool(d.EnableDiffApprovals)));
             resets.Add(("autoContinue", Bool(d.EnableAutoContinuation)));
             resets.Add(("maxContinuations", Num(d.MaxAutoContinuations)));
