@@ -1,6 +1,6 @@
 ﻿namespace MandoCode.Desktop.Services;
 
-public enum DelegationState { Running, Done, Failed }
+public enum DelegationState { Running, Done, Failed, CancellationRequested, Cancelled }
 
 /// <summary>One job one agent handed to another.</summary>
 public sealed record Delegation(
@@ -13,7 +13,8 @@ public sealed record Delegation(
     DateTimeOffset StartedAt,
     DelegationState State = DelegationState.Running,
     string? Result = null,
-    DateTimeOffset? FinishedAt = null);
+    DateTimeOffset? FinishedAt = null,
+    string Kind = "job", bool ReadOnly = false, string? Update = null);
 
 /// <summary>
 /// Outstanding delegations, and the rolling digest each one contributes to its owner's inbox.
@@ -29,13 +30,15 @@ public sealed class DelegationRegistry
     private readonly object _lock = new();
     private readonly Dictionary<string, Delegation> _byId = new(StringComparer.Ordinal);
     private int _next;
+    private readonly Dictionary<string, CancellationTokenSource> _cancellations = new(StringComparer.Ordinal);
 
-    public Delegation Open(string fromKey, string fromName, string toKey, string toName, string task)
+    public Delegation Open(string fromKey, string fromName, string toKey, string toName, string task, string kind = "job", bool readOnly = false)
     {
         lock (_lock)
         {
-            var d = new Delegation($"d{++_next}", fromKey, fromName, toKey, toName, task, DateTimeOffset.Now);
+            var d = new Delegation($"job{++_next}", fromKey, fromName, toKey, toName, task, DateTimeOffset.Now, Kind: kind, ReadOnly: readOnly);
             _byId[d.Id] = d;
+            _cancellations[d.Id] = new CancellationTokenSource();
             return d;
         }
     }
@@ -60,10 +63,55 @@ public sealed class DelegationRegistry
         lock (_lock)
         {
             if (!_byId.TryGetValue(id, out var d)) return null;
+            if (d.State is DelegationState.Done or DelegationState.Failed or DelegationState.Cancelled) return d;
+            if (d.State == DelegationState.CancellationRequested) { state = DelegationState.Cancelled; result = "Cancelled by requester or agent closure. Changes already applied remain."; }
             var done = d with { State = state, Result = result, FinishedAt = DateTimeOffset.Now };
             _byId[id] = done;
             return done;
         }
+    }
+
+    public CancellationToken Token(string id)
+    {
+        lock (_lock) return _cancellations.TryGetValue(id, out var cts) ? cts.Token : CancellationToken.None;
+    }
+
+    public bool UpdateJob(string id, string caller, string message)
+    {
+        lock (_lock)
+        {
+            if (!_byId.TryGetValue(id, out var job) || job.State != DelegationState.Running
+                || (job.FromKey != caller && job.ToKey != caller)) return false;
+            _byId[id] = job with { Update = message };
+            return true;
+        }
+    }
+
+    public bool Cancel(string id, string caller)
+    {
+        CancellationTokenSource? cts;
+        lock (_lock)
+        {
+            if (!_byId.TryGetValue(id, out var job) || job.FromKey != caller || job.State != DelegationState.Running) return false;
+            _byId[id] = job with { State = DelegationState.CancellationRequested };
+            _cancellations.TryGetValue(id, out cts);
+        }
+        cts?.Cancel();
+        return true;
+    }
+
+    public void CloseAgent(string key)
+    {
+        List<CancellationTokenSource> cancellations = [];
+        lock (_lock)
+        {
+            foreach (var job in _byId.Values.Where(j => j.State == DelegationState.Running && (j.FromKey == key || j.ToKey == key)).ToArray())
+            {
+                _byId[job.Id] = job with { State = DelegationState.CancellationRequested };
+                if (_cancellations.TryGetValue(job.Id, out var cts)) cancellations.Add(cts);
+            }
+        }
+        foreach (var cts in cancellations) cts.Cancel();
     }
 
     /// <summary>Forgets finished delegations older than <paramref name="keepFor"/>, so the registry
@@ -75,7 +123,10 @@ public sealed class DelegationRegistry
         {
             foreach (var id in _byId.Where(kv => kv.Value.FinishedAt is { } f && f < cutoff)
                                     .Select(kv => kv.Key).ToList())
+            {
                 _byId.Remove(id);
+                if (_cancellations.Remove(id, out var cts)) cts.Dispose();
+            }
         }
     }
 
@@ -94,11 +145,21 @@ public sealed class DelegationRegistry
         var age = Age(DateTimeOffset.Now - d.StartedAt);
         var lines = new List<string> { $"You asked {d.ToName} to: {d.Task}" };
 
+        if (!string.IsNullOrWhiteSpace(d.Update)) lines.Add($"Latest update: {d.Update}");
+
         switch (d.State)
         {
             case DelegationState.Done:
                 lines.Add($"FINISHED after {Age(d.FinishedAt - d.StartedAt ?? TimeSpan.Zero)}.");
                 if (!string.IsNullOrWhiteSpace(d.Result)) lines.Add($"{d.ToName} reported: {d.Result}");
+                break;
+
+            case DelegationState.Cancelled:
+                lines.Add("CANCELLED. Changes already applied remain.");
+                break;
+
+            case DelegationState.CancellationRequested:
+                lines.Add("Cancellation requested — waiting for the running turn to stop.");
                 break;
 
             case DelegationState.Failed:
@@ -175,6 +236,8 @@ public sealed class DelegationRegistry
     {
         DelegationState.Done => "finished the job you delegated",
         DelegationState.Failed => "could not finish the job you delegated",
+        DelegationState.Cancelled => "job cancelled",
+        DelegationState.CancellationRequested => "cancellation requested",
         _ => "working on the job you delegated",
     };
 

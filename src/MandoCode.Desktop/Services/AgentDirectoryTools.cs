@@ -6,13 +6,9 @@ namespace MandoCode.Desktop.Services;
 /// Cross-agent tools, exposed to the model through <c>SetHostTools</c> — the same seam the browser
 /// preview tools use. Host-owned rather than engine-owned because only the host knows what other
 /// agents exist; an agent's own tools stay bounded to its own project root.
-///
-/// <para>Everything here is OBSERVATION. Nothing in this class runs a turn on another agent's model,
-/// which is why none of it can loop, none of it collides with another agent being busy, and none of
-/// it raises an approval question. Asking another agent a real question is a separate tool with a
-/// genuinely different risk profile — see docs/agent-mentions.md.</para>
+/// Observation, blocking questions, background work and queued messages use separate tools.
 /// </summary>
-public sealed class AgentDirectoryTools
+public sealed partial class AgentDirectoryTools
 {
     private readonly AgentDirectory _directory;
     private readonly string _selfKey;
@@ -47,7 +43,7 @@ public sealed class AgentDirectoryTools
 
 
         return "Other open agents:\n" + string.Join("\n",
-            others.Select(a => $"- {a.Name} — {a.FolderLabel}{(a.IsBusy ? " (working)" : " (idle)")}"));
+            others.Select(a => $"- {a.Name} — workspace {a.Workspace} · {a.FolderLabel}{(a.IsBusy ? " (working)" : " (idle)")}"));
     }
 
     [Description("Reports what another agent is doing right now: whether it is working or idle, how " +
@@ -73,7 +69,7 @@ public sealed class AgentDirectoryTools
         return AgentDirectory.Describe(agent);
     }
 
-    [Description("Asks another agent a question and returns its answer in its own words. The other " +
+    [Description("BLOCKS this turn until another agent answers. Prefer ask_agent_async for questions whose results can arrive later so the user can keep chatting. The other " +
                  "agent answers from what it has been working on and can use its own tools to check, " +
                  "so prefer this over reading its transcript when you want a specific answer. Only " +
                  "works when that agent is idle: if it is busy, this returns a note saying so, and you " +
@@ -82,7 +78,7 @@ public sealed class AgentDirectoryTools
     public async Task<string> AskAgent(
         [Description("The agent's name, as the user typed it after '@'.")] string name,
         [Description("The question, phrased as you would ask a colleague. Be specific — the other " +
-                     "agent cannot see your conversation.")] string question)
+                     "agent cannot see your conversation.")] string question, CancellationToken cancellationToken = default)
     {
         var agent = _directory.Resolve(name);
         if (agent == null) return NotFound(name);
@@ -100,7 +96,7 @@ public sealed class AgentDirectoryTools
         // checking first and asking second left a gap where the agent could take a turn in between,
         // and produced a second, worse-worded refusal from the far side. One decision, one place;
         // this layer only chooses how to say it, because only this layer knows the directory.
-        var result = await peer.AskAsync(_selfName, question);
+        var result = await peer.AskAsync(_selfName, question, cancellationToken);
         if (result.Answered) return $"{agent.Name} replied:\n{result.Text}";
 
         return $"{agent.Name} could not answer ({result.Text}). " +
@@ -132,7 +128,7 @@ public sealed class AgentDirectoryTools
 
     [Description("Hands a JOB to another agent and returns immediately, without waiting for it to " +
                  "finish. Use this instead of ask_agent whenever the work will take a while — building " +
-                 "something, running a long task — so you stay free to keep talking to the user. You " +
+                 "something, running a long task — so you stay free to keep talking to the user. For background questions use ask_agent_async; for a read-only review use request_agent_review. You " +
                  "will be told automatically when it finishes, and check_delegations tells you how far " +
                  "along it is at any point. Use ask_agent instead for a quick question you need " +
                  "answered right now.")]
@@ -160,8 +156,8 @@ public sealed class AgentDirectoryTools
         var delegation = _directory.Delegations.Open(_selfKey, _selfName, agent.Key, agent.Name, task);
         _start(delegation, peer);
 
-        return $"Handed to {agent.Name}: {task}\n" +
-               "It is working on this now. You will be told when it finishes — carry on with the user " +
+        return $"{delegation.Id}: Submitted to {agent.Name}: {task}\n" +
+               "The target will attempt to claim its turn. You will be told when it finishes — carry on with the user " +
                "in the meantime, and use check_delegations if they ask how it is going.";
     }
 
@@ -177,7 +173,7 @@ public sealed class AgentDirectoryTools
         {
             var peer = _directory.All.FirstOrDefault(a => a.Key == d.ToKey);
             var digest = DelegationRegistry.Digest(d, peer, _directory.RecentCommandsFor(d.ToKey));
-            return $"{digest.Subject}\n{digest.Body}";
+            return $"{d.Id} · {d.Kind} · {d.State} · {digest.Subject}\n{digest.Body}";
         }));
     }
 

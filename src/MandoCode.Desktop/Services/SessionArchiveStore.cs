@@ -247,15 +247,20 @@ public sealed class SessionArchiveStore
         AgentConfigStore.Delete(key);
     }
 
-    private void Persist()
+    private void Persist() => TryPersist();
+
+    public bool TryPersist()
     {
         try
         {
             List<SessionArchiveEntry> copy;
             lock (_lock) copy = _items.ToList();
             Directory.CreateDirectory(Path.GetDirectoryName(StorePath)!);
-            File.WriteAllText(StorePath, JsonSerializer.Serialize(copy));
+            var temporary = StorePath + ".tmp";
+            File.WriteAllText(temporary, JsonSerializer.Serialize(copy));
+            File.Move(temporary, StorePath, overwrite: true);
+            return true;
         }
-        catch { /* persistence is best-effort; the in-memory index is still correct */ }
+        catch { return false; }
     }
 }

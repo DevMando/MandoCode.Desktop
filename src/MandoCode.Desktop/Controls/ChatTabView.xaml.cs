@@ -47,7 +47,14 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
     private TaskCompletionSource<string>? _approvalTcs;
     private TaskCompletionSource<string>? _instructionTcs;
 
-    private readonly ObservableCollection<CommandSuggestion> _suggestions = new();
+    private IReadOnlyList<CommandSuggestion> _suggestions = Array.Empty<CommandSuggestion>();
+    private readonly PromptMentionPicker _mentionPicker = new();
+    private readonly PromptFileLookup _fileLookup;
+    private CancellationTokenSource? _fileSuggestionRequest;
+    private long _fileSuggestionVersion;
+    private int _queuedFileRefresh;
+    private bool _tabToggleHeld, _insertingSuggestion;
+    private string? _displayedFileQuery, _suggestionRoot;
 
     // Agent is its own mode rather than a flavour of File: AcceptSuggestion branches on the mode,
     // and a callsign substitutes differently from a path — no trailing-'/' drill-in, and the text
@@ -99,12 +106,15 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
 
         _owner = owner;
         Session = session;
+        _fileLookup = new(Session.FileProvider);
         _html = html;
         _dispatcher = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
 
         // This tab's approval service renders into this tab's overlay.
         Session.Approvals.Ui = this;
         SuggestionsList.ItemsSource = _suggestions;
+        _fileProvider.SuggestionsChanged += OnFileSuggestionsChanged;
+        if (Session.Agents is { } agents) agents.Changed += OnAgentSuggestionsChanged;
         EmojiGrid.ItemsSource = QuickEmojis;
         TranscriptView.DefaultBackgroundColor = ThemeManager.C(ThemeManager.Current.Background);
 
@@ -146,7 +156,12 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
     });
     private void OnBusyChanged(bool busy, string? activity) => OnUi(() => UpdateBusy(busy, activity));
     private void OnAgentTitleChanged(string _) => OnUi(UpdateHeader);
-    private void OnControllerStateChanged() => OnUi(UpdateHeader);
+    private void OnControllerStateChanged() => OnUi(() =>
+    {
+        UpdateHeader();
+        if (_mentionPicker.Fragment is not null && _suggestionRoot != Session.ProjectRoot.ProjectRoot)
+            UpdateSuggestions();
+    });
     private void OnPlanProgress(int done, int total, bool active) => OnUi(() => UpdatePlanProgress(done, total, active));
     /// <summary>
     /// /config, and first-run "not connected", want the settings of THIS agent — so they open this
@@ -357,6 +372,11 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         _shutDown = true;
         _webViewReady = false;
         StopExplorerWatcher();
+        _fileProvider.SuggestionsChanged -= OnFileSuggestionsChanged;
+        if (Session.Agents is { } agents) agents.Changed -= OnAgentSuggestionsChanged;
+        _fileSuggestionRequest?.Cancel();
+        _fileSuggestionRequest?.Dispose();
+        _fileProvider.Dispose();
 
         // Detach BEFORE cancelling. A cancelled turn unwinds through the harness and writes its
         // last blocks to the transcript; still-attached handlers would drive those into a

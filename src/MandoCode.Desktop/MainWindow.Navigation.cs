@@ -135,7 +135,7 @@ public sealed partial class MainWindow
 
         // An approval waiting in ANY agent while you're on Settings/MCP: the agents icon goes gold,
         // because from here you can't see which tab is badged.
-        var approvalPending = _currentPage != "chat" && _tabs.Any(t => t.View.IsApprovalOpen);
+        var approvalPending = _currentPage != "chat" && AllTabs.Any(t => t.View.IsApprovalOpen);
 
         NavChatIcon.Foreground = _currentPage == "chat" ? accent : (approvalPending ? gold : normal);
         NavSettingsIcon.Foreground = _currentPage == "settings" ? accent : normal;

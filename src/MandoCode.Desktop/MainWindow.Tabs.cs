@@ -47,8 +47,8 @@ public sealed partial class MainWindow
         public bool ModelRestorePending { get; set; }
     }
 
-    private readonly List<ChatTabEntry> _tabs = new();
-    private ChatTabEntry? _selected;
+    private List<ChatTabEntry> _tabs => _activeWorkspace.Tabs;
+    private ChatTabEntry? _selected { get => _activeWorkspace.Selected; set => _activeWorkspace.Selected = value; }
     private ChatTabEntry? _pendingApprovalTab;
     private bool _approvalToastDismissed;
 
@@ -77,7 +77,10 @@ public sealed partial class MainWindow
 
         // The agent opens its OWN settings pane (ChatTabView.OnSetupNeeded); all this has to do is
         // make sure the chat is the visible page, so the pane isn't opening behind a rail page.
-        view.SetupRequested += () => SwitchPage("chat");
+        view.SetupRequested += () =>
+        {
+            if (ReferenceEquals(ActiveChat, view)) SwitchPage("chat");
+        };
         view.McpEditorRequested += name =>
         {
             SwitchPage("mcp");
@@ -88,8 +91,9 @@ public sealed partial class MainWindow
         view.ApprovalStateChanged += _ => RefreshTabStrip();
         view.HeaderChanged += v =>
         {
-            var tab = _tabs.FirstOrDefault(t => ReferenceEquals(t.View, v));
+            var tab = AllTabs.FirstOrDefault(t => ReferenceEquals(t.View, v));
             if (tab != null) tab.Label.Text = v.Session.Title;
+            RefreshWorkspaceStrip();
             SaveWorkspace();   // renames, folder switches, and model switches all land here
         };
 
@@ -115,22 +119,36 @@ public sealed partial class MainWindow
         // A finished job is announced in the transcript of the agent that DELEGATED it, which is
         // where the user was last talking about it. This is the "let me know when it's done" half,
         // and it costs no model turn — the agent itself learns from its inbox on its next turn.
-        session.DelegationFinished += d => DispatcherQueue.TryEnqueue(() =>
+        session.DelegationFinished += d =>
         {
-            var owner = _tabs.FirstOrDefault(t => t.View.Session.PersistKey == d.FromKey);
-            if (owner == null) return;   // the delegating tab closed while the job ran
-
-            var text = DelegationRegistry.CompletionLine(d);
-            owner.View.Session.Transcript.Append(
-                d.State == DelegationState.Done ? _html.Success(text) : _html.Warn(text));
-            RefreshTabStrip();   // badges the tab so it is noticed from another one
-        });
+            var html = _html.AgentExchange($"{d.ToName} · {d.Kind} · {d.Id} · {d.State}",
+                $"Request: {d.Task}\n\n{d.Result ?? "No result returned."}");
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                var owner = AllTabs.FirstOrDefault(t => t.View.Session.PersistKey == d.FromKey);
+                if (owner == null) return;
+                owner.View.Session.Transcript.Append(html);
+                RefreshTabStrip();
+            });
+        };
 
         SelectTab(entry);
         if (SnapshotsPanelOpen) PopulateSnapshots();   // an agent exists now → re-enable Import
         if (NotesPanelOpen) PopulateNotes();           // a new note would now be filed under this folder
         if (SplitConfigured) RefreshSplitBar();          // offer the new agent in the pane pickers
         return entry;
+    }
+
+    private void OnAgentCommunication(AgentCommunication communication)
+    {
+        var title = $"{communication.FromName} → {communication.ToName} · {communication.Title}";
+        var html = _html.AgentExchange(title, communication.Body);
+        OnUi(() =>
+        {
+            foreach (var tab in AllTabs.Where(t => t.View.Session.PersistKey == communication.FromKey
+                                             || t.View.Session.PersistKey == communication.ToKey))
+                tab.View.Session.Transcript.Append(html);
+        });
     }
 
 }

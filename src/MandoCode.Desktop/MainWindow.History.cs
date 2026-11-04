@@ -298,7 +298,7 @@ public sealed partial class MainWindow
         if ((sender as FrameworkElement)?.Tag is not SessionArchiveEntry entry) return;
 
         // Defensive: an archived key should never also be open, but if it is, just go there.
-        var existing = _tabs.FirstOrDefault(t =>
+        var existing = AllTabs.FirstOrDefault(t =>
             string.Equals(t.View.Session.PersistKey, entry.Key, StringComparison.OrdinalIgnoreCase));
         if (existing != null)
         {
@@ -538,16 +538,22 @@ public sealed partial class MainWindow
     {
         // Selecting a tab NEVER changes the pane set — it only changes the active agent. If that
         // agent is in the pair, ApplyPaneLayout shows the split; otherwise it shows the agent single.
+        var workspace = _workspaces.FirstOrDefault(w => w.Tabs.Contains(entry));
+        if (workspace == null) return;
+        _activeWorkspace = workspace;
         _selected = entry;
         _sessions.Activate(entry.View.Session);
         RefreshTabStrip();
         SwitchPage("chat");
+
+        SaveWorkspace();
 
         // Reveal the selected tab. Try now (covers clicking an already-laid-out tab) and again when
         // the strip re-lays-out (covers a just-added agent, whose width/extent settle a frame later,
         // via TabStrip_SizeChanged). Pending stays set until the tab is actually laid out.
         _scrollToSelectedPending = true;
         DispatcherQueue.TryEnqueue(TryScrollToSelected);
+        DispatcherQueue.TryEnqueue(() => workspace.Button?.StartBringIntoView());
     }
 
     private bool _scrollToSelectedPending;
@@ -604,6 +610,7 @@ public sealed partial class MainWindow
         if (_tabs.Count == 0)
         {
             _selected = null;
+            _sessions.Activate(null);
             ValidateSplit();     // nothing left to compare → exits split
             EnterEmptyState();
             SaveWorkspace();

@@ -1,5 +1,38 @@
 # Agent mentions — design
 
+## Desktop collaboration tools
+
+The current Desktop host exposes the following interactions. The design history below describes the earlier observation/question/delegation stages.
+
+| Tool | Blocks the requesting turn? | Behavior |
+| --- | --- | --- |
+| `ask_agent_and_wait` | Yes | Return an idle agent's answer in the current turn. `ask_agent` remains a compatibility alias. |
+| `ask_agent_async` | No | Submit a background question; let the user continue chatting. |
+| `send_agent_message` | No | Queue information for the recipient's next turn without requesting a reply or starting a model turn. Works while busy. |
+| `delegate_to_agent` | No | Background work using the target's normal tools and approval gates. |
+| `request_agent_review` | No | Background review; the shared engine's tool middleware enforces read-only access for that turn. Writes, commands, plans, delegation and mutating browser/MCP tools are refused. |
+| `handoff_to_agent` | No | Transfer remaining work and context. The sending agent is instructed to stop duplicating it; tabs are not switched. |
+| `update_agent_job` | No | Requester or assigned agent posts progress or instructions. Instructions enter the recipient's next turn, rather than interrupting current work. |
+| `cancel_agent_job` | No | Requester-only cancellation scoped to that job; already-applied changes remain. |
+| `wait_for_agent_job` | Yes, bounded | Explicit wait, 30 seconds by default and at most 120. Timeout/cancel affects only the wait. |
+| `check_delegations` | No | Read job IDs, kind, state, latest update, live progress and results. |
+
+`list_agents`, `get_agent_status`, and `read_agent_transcript` remain available. All requests resolve the target by name, reject self-calls and preserve the existing call-chain loop/depth limits. Busy targets refuse new work rather than silently queuing jobs. The target claims its actual turn atomically; if it became busy after submission, the job reports failure instead of claiming completion.
+
+Background requests use readable IDs such as `job1`. Cancellation first reports `CancellationRequested`; it becomes `Cancelled` only when the running peer call exits. Terminal results cannot be overwritten by a late completion. Closing an agent requests cancellation of associated jobs. The target's Stop action also cancels peer turns, while a requester stopping its own unrelated turn leaves detached jobs running.
+
+Completions appear as collapsed transcript entries with the full Markdown result available on expansion. Direct messages and job updates have attributed, collapsed entries in both agents' transcripts. Inbox content is consumed on the next user or peer turn, exactly once. Completion notifications do not automatically start another model turn; the requesting model receives the result on its next turn. No Desktop navigation/layout changes are required for these tools.
+
+### Manual checks
+
+- Ask `@OtherAgent` a question in the background, then keep chatting. Expand the completion entry to inspect the full response; ask a follow-up to confirm inbox delivery.
+- Compare an explicit blocking question with an async question. Try a busy target and confirm a clear refusal/failure.
+- Request a read-only review that attempts a file write or command. Confirm refusal; ordinary delegated work retains normal approval dialogs.
+- Send information to a busy agent. It should get a transcript notice immediately and context on its next turn without a competing model turn.
+- Start separate jobs and cancel one. Confirm cancellation acknowledgement and that unrelated work continues. A timed-out wait must leave the job running.
+- Close an agent involved in a job and confirm the job stops. Verify Stop also works in the receiving tab during a peer turn.
+
+
 Status: **built**, except `review_agent_work`. See the build order below.
 
 ## What it is
@@ -122,36 +155,13 @@ Open problems, all of which belong to this tool alone:
 
 ## The `@` picker
 
-`ChatTabView.Input.cs` already implements `@` for project files: it walks back from the caret to the
-token start, and if the token opens with `@` it filters through `FileAutocompleteProvider` and calls
-`ShowSuggestions(SuggestMode.File, ...)`.
+Typing `@` opens **Files — Press [Tab] for Agents**. Press Tab to show **Agents — Press [Tab] for Files**, and press it again to switch back. Files and agents stay in separate lists. Typing continues in the input, arrows navigate, Enter accepts a file or agent, and Escape dismisses. Tab still accepts command and emoji suggestions. Shift+Enter retains the input's multiline behavior. The current agent is excluded; agent rows show the callsign and project folder without a busy/idle suffix.
 
-Agents join that same picker and **rank above files**. Rationale:
+File suggestions use the engine's background index rather than synchronous recursive enumeration. Root entries publish before descendant scanning finishes. One scan continues across typing, switching views, and closing/reopening the popup. Filtering is debounced by the shared provider, and UI result projection runs off the dispatcher. A virtualized, height-bounded ListView receives a single result array, without a match limit or thousands of individual collection notifications. Refreshes retain the selected path; stale/cancelled UI requests cannot reopen a dismissed picker or replace a newer query. Loading and indexing feedback stay outside the selectable rows.
 
-- Open agents are a small, closed, known set; project files are thousands. A short list on top costs
-  the file case almost nothing.
-- Callsigns are capitalised single words, so genuine collisions with real filenames are rare, and
-  the picker disambiguates the rare ones visually.
-- `@` already means "a participant" to anyone who has used Slack. A second sigil would be a thing to
-  learn for no benefit.
+After indexing, the provider applies queued create/delete/rename events incrementally when lookup resumes. Watcher overflow invalidates the cache for recovery. Project changes start the appropriate index and old results are discarded. Closing a tab unsubscribes the UI and disposes its provider/watcher. This is an in-memory cache for the agent's lifetime, not a persistent cross-process index; initial full indexing still takes work on huge trees.
 
-Implementation notes:
-
-- A new `SuggestMode.Agent`, because `AcceptSuggestion` branches on the mode and an agent mention
-  substitutes differently from a file path — no trailing `/` drill-in behaviour, and the accepted
-  text should be the callsign, not a path.
-- The agent's own tab must be excluded from its own picker.
-- Suggestion rows want a distinguishing glyph and a subtitle (folder name, or busy/idle), so an
-  agent row never reads as a file row.
-- **The host must also learn about mentions, not just the picker.** An earlier draft of this doc
-  claimed the picker was an affordance and no host-side parsing was needed. That was wrong, and
-  testing found it immediately: `ChatController.ProcessFileReferences` expands every `@token` at
-  send time and warns `Couldn't find the referenced file or folder: Ninja` when the lookup misses.
-  A mention never reached the model at all. Agent names must be resolved *before* the file lookup
-  and skipped by it.
-- Agents win over files on a name clash. A callsign is a deliberate act of addressing someone; a
-  same-named file is a coincidence, and that file stays reachable by any path carrying a separator
-  or an extension.
+Selecting a folder drills into its immediate children; an empty folder ends drill-down and leaves the selected directory in the input. Paths with spaces use quoted reference tokens. A file whose name resolves to an agent is inserted with `./` so it stays a file reference. The host parses the same token format when assembling file context and agent mentions.
 
 ## Who am I talking to
 

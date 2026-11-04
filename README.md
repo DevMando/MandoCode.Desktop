@@ -61,6 +61,8 @@ Two problems, one app:
 
 ## Features
 
+- **Workspace tabs** — group agents into named workspaces in the upper tab row. Each workspace remembers its selected agent and split layout; switching keeps background agents running. Use **+ Workspace** to create one. Close with the **×** on the selected tab, or hover/focus another workspace to reveal its close button. Right-click also offers Rename and Close. **Split** and **New agent** apply to the selected workspace. Workspaces restore on launch, and existing installations migrate their tabs into **Main**. Alt+Shift+N creates a workspace, Alt+Shift+Left/Right switches, and Alt+Shift+W closes an idle workspace.
+
 - **Agent tabs, and Split view for up to four at once** — each tab is its own independent
   conversation, project folder, and model. Split view puts two, three, or four side by side so you
   can watch several agents work in parallel instead of babysitting one at a time.

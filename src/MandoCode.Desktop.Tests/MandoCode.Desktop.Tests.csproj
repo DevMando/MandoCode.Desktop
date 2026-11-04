@@ -31,6 +31,9 @@
        Windows App SDK into the test host). If these files ever grow UI dependencies, that's
        a design regression this project exists to catch. -->
   <ItemGroup>
+    <Compile Include="..\MandoCode.Desktop\Services\PromptMentionPicker.cs" Link="src\PromptMentionPicker.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\CommandSuggestion.cs" Link="src\CommandSuggestion.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\PromptFileLookup.cs" Link="src\PromptFileLookup.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\GitQuickStatus.cs" Link="src\GitQuickStatus.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\DesktopPreviewTools.cs" Link="src\DesktopPreviewTools.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\BrowserRequestContext.cs" Link="src\BrowserRequestContext.cs" />
@@ -38,6 +41,7 @@
     <Compile Include="..\MandoCode.Desktop\Services\DesktopPreviewScripts.cs" Link="src\DesktopPreviewScripts.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\DesktopPreviewKeys.cs" Link="src\DesktopPreviewKeys.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\AgentImageSink.cs" Link="src\AgentImageSink.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\WorkspaceState.cs" Link="src\WorkspaceState.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\WorkspaceDeltaTracker.cs" Link="src\WorkspaceDeltaTracker.cs" />
 
     <!-- Session-archive/snapshot display derivations are pure logic (path parsing, placeholders);
@@ -62,6 +66,8 @@
     <Compile Include="..\MandoCode.Desktop\Services\AgentCommandLog.cs" Link="src\AgentCommandLog.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\ColorMath.cs" Link="src\ColorMath.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\AgentDirectory.cs" Link="src\AgentDirectory.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\AgentDirectoryTools.Interactions.cs" Link="src\AgentDirectoryTools.Interactions.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\AgentInteractionRunner.cs" Link="src\AgentInteractionRunner.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\AgentDirectoryTools.cs" Link="src\AgentDirectoryTools.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\AgentPeer.cs" Link="src\AgentPeer.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\PeerMessageEnvelope.cs" Link="src\PeerMessageEnvelope.cs" />

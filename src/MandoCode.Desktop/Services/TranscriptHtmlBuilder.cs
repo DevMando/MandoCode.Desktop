@@ -53,6 +53,10 @@ public sealed class TranscriptHtmlBuilder : ITranscriptHtml
     public string UserEcho(string text) =>
         $"<div class=\"user-echo\"><span class=\"ue-sigil\">&gt;</span> {E(text)}</div>";
 
+    /// <summary>Agent exchanges remain inspectable without repeating their full contents in chat.</summary>
+    public string AgentExchange(string title, string markdown) =>
+        $"<details class=\"panel agent-exchange\"><summary>{E(title)}</summary><div class=\"md\">{FromMarkdown(markdown)}</div></details>";
+
     /// <summary>Null speaker keeps the classic MandoCode label — used by surfaces with no
     /// agent (the appearance preview). Per-agent callers pass the tab's name so the card
     /// agrees with what the system prompt told the model it's called.</summary>

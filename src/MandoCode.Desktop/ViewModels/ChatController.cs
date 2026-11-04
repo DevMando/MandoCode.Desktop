@@ -554,6 +554,8 @@ public sealed partial class ChatController
         using var lease = TryBeginTurn();
         if (lease == null) return PeerAnswer.Busy();
 
+        using var request = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
         // Announced here, not by the caller: after the claim, so a question refused as busy leaves
         // no trace of an answer that never happened — and before the turn streams, so it reads in
         // the order it occurred rather than trailing the reply it prompted.
@@ -577,11 +579,13 @@ public sealed partial class ChatController
         // is structural rather than a matter of interpretation.
 
         var framing = PeerTurnPolicy.BuildFraming(askedBy);
+        if (_inbox != null) framing += "\n\n" + AgentInbox.Format(_inbox.Drain());
 
+        Volatile.Write(ref _requestCts, request);
         try
         {
             return PeerTurnPolicy.Classify(
-                await _streamer.StreamAsync(envelope, cancellationToken, framing));
+                await _streamer.StreamAsync(envelope, request.Token, framing));
         }
         catch (OperationCanceledException)
         {
@@ -590,6 +594,10 @@ public sealed partial class ChatController
         catch (Exception ex)
         {
             return PeerAnswer.Failed($"could not answer: {ex.Message}");
+        }
+        finally
+        {
+            Interlocked.CompareExchange(ref _requestCts, null, request);
         }
     }
 
@@ -679,7 +687,8 @@ public sealed partial class ChatController
     public void CancelActiveRequest()
     {
         var cts = _requestCts;
-        if (cts != null && !cts.IsCancellationRequested) cts.Cancel();
+        try { if (cts != null && !cts.IsCancellationRequested) cts.Cancel(); }
+        catch (ObjectDisposedException) { /* The turn finished between reading and cancelling. */ }
     }
 
     // ============================================================
@@ -778,32 +787,28 @@ public sealed partial class ChatController
         remaining = input;
         if (_agents == null) return found;
 
-        // Callsigns are single words, so only bare tokens are considered — anything carrying a
-        // path separator or a dot is a file reference and is left for the loop below.
-        remaining = Regex.Replace(input, @"@([A-Za-z][\w-]*)\b", m =>
+        // Use the same token grammar as the picker, including quoted names and file paths.
+        foreach (var token in FileReferenceToken.Paths(input))
         {
-            var agent = _agents.Resolve(m.Groups[1].Value);
-            if (agent == null || _selfKey == agent.Key) return m.Value;
-            if (seen.Add(agent.Key)) found.Add(agent);
-            return m.Value;   // the mention stays in the user's text; only the file lookup is skipped
-        });
+            if (token.Contains('/') || token.Contains('\\') || token.Contains('.')) continue;
+            var agent = _agents.Resolve(token);
+            if (agent is not null && agent.Key != _selfKey && seen.Add(agent.Key)) found.Add(agent);
+        }
         return found;
     }
 
     private string ProcessFileReferences(string input)
     {
-        var pattern = @"@([\w.\-/\\]+[\w.])";
-        var matches = Regex.Matches(input, pattern);
-        if (matches.Count == 0) return input;
+        var paths = FileReferenceToken.Paths(input).ToArray();
+        if (paths.Length == 0) return input;
 
         var contextBlocks = new StringBuilder();
         var referencedFiles = new HashSet<string>();
         int totalExpansionChars = 0;
         int skippedForBudget = 0;
 
-        foreach (Match match in matches)
+        foreach (var filePath in paths)
         {
-            var filePath = match.Groups[1].Value;
             if (!referencedFiles.Add(filePath)) continue;
 
             // An open agent's callsign is not a missing file. Skip it here; the mention is carried
