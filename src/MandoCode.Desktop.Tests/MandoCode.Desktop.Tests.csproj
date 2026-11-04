@@ -31,79 +31,79 @@
        Windows App SDK into the test host). If these files ever grow UI dependencies, that's
        a design regression this project exists to catch. -->
   <ItemGroup>
-    <Compile Include="..\MandoCode.Desktop\Services\PromptMentionPicker.cs" Link="src\PromptMentionPicker.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\CommandSuggestion.cs" Link="src\CommandSuggestion.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\PromptFileLookup.cs" Link="src\PromptFileLookup.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\GitQuickStatus.cs" Link="src\GitQuickStatus.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\DesktopPreviewTools.cs" Link="src\DesktopPreviewTools.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\BrowserRequestContext.cs" Link="src\BrowserRequestContext.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\ModelOrdering.cs" Link="src\ModelOrdering.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\DesktopPreviewScripts.cs" Link="src\DesktopPreviewScripts.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\DesktopPreviewKeys.cs" Link="src\DesktopPreviewKeys.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\AgentImageSink.cs" Link="src\AgentImageSink.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\WorkspaceState.cs" Link="src\WorkspaceState.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\WorkspaceDeltaTracker.cs" Link="src\WorkspaceDeltaTracker.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Input\PromptMentionPicker.cs" Link="src\PromptMentionPicker.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Input\CommandSuggestion.cs" Link="src\CommandSuggestion.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Input\PromptFileLookup.cs" Link="src\PromptFileLookup.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Project\GitQuickStatus.cs" Link="src\GitQuickStatus.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Browser\DesktopPreviewTools.cs" Link="src\DesktopPreviewTools.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Browser\BrowserRequestContext.cs" Link="src\BrowserRequestContext.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Ai\ModelOrdering.cs" Link="src\ModelOrdering.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Browser\DesktopPreviewScripts.cs" Link="src\DesktopPreviewScripts.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Browser\DesktopPreviewKeys.cs" Link="src\DesktopPreviewKeys.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Browser\AgentImageSink.cs" Link="src\AgentImageSink.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Workspaces\WorkspaceState.cs" Link="src\WorkspaceState.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Project\WorkspaceDeltaTracker.cs" Link="src\WorkspaceDeltaTracker.cs" />
 
     <!-- Session-archive/snapshot display derivations are pure logic (path parsing, placeholders);
          the store classes come along because the entry types live beside them, but no test
          instantiates a store (they hit fixed LocalAppData paths). ProjectDisplay backs the
          ProjectLabel/TimeLabel derivations shared by both entry types. -->
-    <Compile Include="..\MandoCode.Desktop\Services\ProjectDisplay.cs" Link="src\ProjectDisplay.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\ContextSnapshot.cs" Link="src\ContextSnapshot.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\SnapshotNaming.cs" Link="src\SnapshotNaming.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\SessionArchiveStore.cs" Link="src\SessionArchiveStore.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Project\ProjectDisplay.cs" Link="src\ProjectDisplay.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Snapshots\ContextSnapshot.cs" Link="src\ContextSnapshot.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Snapshots\SnapshotNaming.cs" Link="src\SnapshotNaming.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Sessions\SessionArchiveStore.cs" Link="src\SessionArchiveStore.cs" />
     <!-- The History card's quote-clipping rules: capping a user turn, and flattening the agent's
          markdown reply down to a couple of sentences. Pure string work, which is exactly why it
          lives in Services rather than in the panel's code-behind. -->
-    <Compile Include="..\MandoCode.Desktop\Services\CardPreview.cs" Link="src\CardPreview.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Sessions\CardPreview.cs" Link="src\CardPreview.cs" />
     <!-- The bundled-background gallery. Discovered from a folder rather than declared in code, so
          the file-naming convention is a real contract worth pinning; pure System.IO, no WinUI. -->
-    <Compile Include="..\MandoCode.Desktop\Services\BuiltInBackgrounds.cs" Link="src\BuiltInBackgrounds.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\TranscriptJournal.cs" Link="src\TranscriptJournal.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\ModelNoticeReplay.cs" Link="src\ModelNoticeReplay.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\StableCollection.cs" Link="src\StableCollection.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\AgentCommandFormat.cs" Link="src\AgentCommandFormat.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\AgentCommandLog.cs" Link="src\AgentCommandLog.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\ColorMath.cs" Link="src\ColorMath.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\AgentDirectory.cs" Link="src\AgentDirectory.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\AgentDirectoryTools.Interactions.cs" Link="src\AgentDirectoryTools.Interactions.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\AgentInteractionRunner.cs" Link="src\AgentInteractionRunner.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\AgentDirectoryTools.cs" Link="src\AgentDirectoryTools.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\AgentPeer.cs" Link="src\AgentPeer.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\PeerMessageEnvelope.cs" Link="src\PeerMessageEnvelope.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\PeerTurnPolicy.cs" Link="src\PeerTurnPolicy.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\AgentInbox.cs" Link="src\AgentInbox.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\Delegations.cs" Link="src\Delegations.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\UiTheme.cs" Link="src\UiTheme.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\ContextMeterColors.cs" Link="src\ContextMeterColors.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\ConversationLog.cs" Link="src\ConversationLog.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Appearance\BuiltInBackgrounds.cs" Link="src\BuiltInBackgrounds.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Sessions\TranscriptJournal.cs" Link="src\TranscriptJournal.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Rendering\ModelNoticeReplay.cs" Link="src\ModelNoticeReplay.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Rendering\StableCollection.cs" Link="src\StableCollection.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Terminal\AgentCommandFormat.cs" Link="src\AgentCommandFormat.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Terminal\AgentCommandLog.cs" Link="src\AgentCommandLog.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Appearance\ColorMath.cs" Link="src\ColorMath.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Agents\AgentDirectory.cs" Link="src\AgentDirectory.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Agents\AgentDirectoryTools.Interactions.cs" Link="src\AgentDirectoryTools.Interactions.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Agents\AgentInteractionRunner.cs" Link="src\AgentInteractionRunner.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Agents\AgentDirectoryTools.cs" Link="src\AgentDirectoryTools.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Agents\AgentPeer.cs" Link="src\AgentPeer.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Agents\PeerMessageEnvelope.cs" Link="src\PeerMessageEnvelope.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Agents\PeerTurnPolicy.cs" Link="src\PeerTurnPolicy.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Agents\AgentInbox.cs" Link="src\AgentInbox.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Agents\Delegations.cs" Link="src\Delegations.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Appearance\UiTheme.cs" Link="src\UiTheme.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Appearance\ContextMeterColors.cs" Link="src\ContextMeterColors.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Sessions\ConversationLog.cs" Link="src\ConversationLog.cs" />
     <!-- History's full-text matching + snippet extraction. Pure (text in, match out); the file reads
          and caching live in ConversationTextCache, which is NOT compiled here because it touches
          LocalAppData. -->
-    <Compile Include="..\MandoCode.Desktop\Services\ConversationSearch.cs" Link="src\ConversationSearch.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\SessionHistoryStore.cs" Link="src\SessionHistoryStore.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Sessions\ConversationSearch.cs" Link="src\ConversationSearch.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Sessions\SessionHistoryStore.cs" Link="src\SessionHistoryStore.cs" />
 
     <!-- The jot pad: the file-backed store and the card derivations. Notes are the one feature whose
          store IS the filesystem (no JSON index), and the store takes its root as a constructor
          argument rather than hard-coding ~/.mandocode/notes — so the tests drive the real thing
          against temp folders. -->
-    <Compile Include="..\MandoCode.Desktop\Services\NoteEntry.cs" Link="src\NoteEntry.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\NoteStore.cs" Link="src\NoteStore.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Notes\NoteEntry.cs" Link="src\NoteEntry.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Notes\NoteStore.cs" Link="src\NoteStore.cs" />
     <!-- Newline handling between a note file and the WinUI TextBox that edits it — pulled out of the
          editor control precisely so it can be pinned down here. -->
-    <Compile Include="..\MandoCode.Desktop\Services\NoteText.cs" Link="src\NoteText.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Notes\NoteText.cs" Link="src\NoteText.cs" />
 
     <!-- Pure logic extracted from session-coupled coordinators so it can be tested directly. -->
-    <Compile Include="..\MandoCode.Desktop\Services\PaneLayout.cs" Link="src\PaneLayout.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\ConfigCloning.cs" Link="src\ConfigCloning.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Workspaces\PaneLayout.cs" Link="src\PaneLayout.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Configuration\ConfigCloning.cs" Link="src\ConfigCloning.cs" />
     <!-- Per-agent settings persistence. The store is the file half; what's pinned here is the
          fingerprint — which decides whether an agent has been "configured" and must therefore stop
          inheriting the defaults, and which must never carry the API key. -->
-    <Compile Include="..\MandoCode.Desktop\Services\AgentConfigStore.cs" Link="src\AgentConfigStore.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\AgentNaming.cs" Link="src\AgentNaming.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\AgentCallsigns.cs" Link="src\AgentCallsigns.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\ItemTagStore.cs" Link="src\ItemTagStore.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\HistorySummarizer.cs" Link="src\HistorySummarizer.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Configuration\AgentConfigStore.cs" Link="src\AgentConfigStore.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Agents\AgentNaming.cs" Link="src\AgentNaming.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Agents\AgentCallsigns.cs" Link="src\AgentCallsigns.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Configuration\ItemTagStore.cs" Link="src\ItemTagStore.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Sessions\HistorySummarizer.cs" Link="src\HistorySummarizer.cs" />
     <Compile Include="..\MandoCode.Desktop\ViewModels\RequestPreambleComposer.cs" Link="src\RequestPreambleComposer.cs" />
     <Compile Include="..\MandoCode.Desktop\ViewModels\DeferredPlanCompletion.cs" Link="src\DeferredPlanCompletion.cs" />
     <Compile Include="..\MandoCode.Desktop\ViewModels\PlanInstructionEditor.cs" Link="src\PlanInstructionEditor.cs" />
@@ -112,11 +112,11 @@
     <!-- The streamed-response loop and the small WinUI-free collaborators it needs, so it can be
          driven by a fake IAiService. TranscriptWriter/BusyStateService are pure event emitters;
          ITranscriptHtml keeps the WinUI-coupled TranscriptHtmlBuilder out of the test host. -->
-    <Compile Include="..\MandoCode.Desktop\Services\IAiService.cs" Link="src\IAiService.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\ITranscriptHtml.cs" Link="src\ITranscriptHtml.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\PlanCardHtml.cs" Link="src\PlanCardHtml.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\TranscriptWriter.cs" Link="src\TranscriptWriter.cs" />
-    <Compile Include="..\MandoCode.Desktop\Services\BusyStateService.cs" Link="src\BusyStateService.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Ai\IAiService.cs" Link="src\IAiService.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Rendering\ITranscriptHtml.cs" Link="src\ITranscriptHtml.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Rendering\PlanCardHtml.cs" Link="src\PlanCardHtml.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Rendering\TranscriptWriter.cs" Link="src\TranscriptWriter.cs" />
+    <Compile Include="..\MandoCode.Desktop\Services\Rendering\BusyStateService.cs" Link="src\BusyStateService.cs" />
     <Compile Include="..\MandoCode.Desktop\ViewModels\ResponseStreamer.cs" Link="src\ResponseStreamer.cs" />
   </ItemGroup>
 

@@ -4,7 +4,7 @@ Images in this folder ship with the release and appear as tiles in **Settings �
 background**, above "Choose image…". Users can still pick any file of their own; these are just the
 ones that come in the box.
 
-Nothing here is registered in code. `Services/BuiltInBackgrounds.cs` reads the folder at startup, so
+Nothing here is registered in code. `Services/Appearance/BuiltInBackgrounds.cs` reads the folder at startup, so
 **adding an image is a file drop** — copy it in, and it's in the gallery on the next run. Removing one
 is a delete; anyone already using it keeps their copy (see "How selection works" below).
 

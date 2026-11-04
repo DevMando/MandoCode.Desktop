@@ -31,19 +31,27 @@ compile independently of the CLI's originals):
 | Desktop port | CLI original |
 |---|---|
 | `ViewModels/ChatController.cs` | `Components/App.razor` interactive loop |
-| `Services/WinUiApprovalService.cs` | `Services/Approval/DiffApprovalHandler.cs` |
-| `Services/TranscriptHtmlBuilder.cs` | `MarkdownHtmlRenderer` / `OperationDisplayRenderer` |
+| `Services/Approval/WinUiApprovalService.cs` | `Services/Approval/DiffApprovalHandler.cs` |
+| `Services/Rendering/TranscriptHtmlBuilder.cs` | `MarkdownHtmlRenderer` / `OperationDisplayRenderer` |
 
 The harness is safe to instantiate once per agent — its statics are pure functions and readonly
 `Regex`, and `AIService` takes every collaborator by constructor. Rolling the pin forward, watch
 for that changing.
+
+## Source organization
+
+The window XAML and its code-behind live under `MainWindow/`. Partial files are grouped into Agents, Navigation, Panels, Settings, and Shared; see the [window guide](../src/MandoCode.Desktop/MainWindow/README.md). They retain the same namespaces and still form the same window.
+
+Desktop controls are grouped by feature under `Controls/`; keep each control's XAML, code-behind, and partial files together. See the [control guide](../src/MandoCode.Desktop/Controls/README.md).
+
+Services follow the same feature-folder convention; see the [service guide](../src/MandoCode.Desktop/Services/README.md). Source folders do not change the existing namespaces or XAML class names. The unit-test and browser smoke-test projects link selected service source files directly, so file moves must update those compile paths.
 
 ## Layer map
 
 | Layer | CLI (MandoCode) | Desktop (this app) |
 |---|---|---|
 | Orchestrator | `Components/App.razor` interactive loop | `ViewModels/ChatController.cs` (faithful port), one per agent |
-| Approvals | `DiffApprovalHandler` (Spectre panels) | `Services/WinUiApprovalService.cs` + each agent's own XAML overlay (same labels, bypass state, `DiffApprovalResult` contract) |
+| Approvals | `DiffApprovalHandler` (Spectre panels) | `Services/Approval/WinUiApprovalService.cs` + each agent's own XAML overlay (same labels, bypass state, `DiffApprovalResult` contract) |
 | Transcript | ANSI scrollback + Spectre renderables | WebView2 + `TranscriptHtmlBuilder` (Markdig HTML, themed) |
 | Busy/spinner | `SpinnerService` (ANSI) | `BusyStateService` → ProgressRing |
 | Onboarding | `OnboardingFlow` terminal prompts | In-chat guided wizard (auto on first launch, `/setup` after) + Settings page |
@@ -56,7 +64,7 @@ progress events, `DiffService` diff models.
 
 ## Agents
 
-Each tab is an independent agent. `Services/AgentSession.cs` hand-constructs one agent's object
+Each tab is an independent agent. `Services/Sessions/AgentSession.cs` hand-constructs one agent's object
 graph; `SessionManager` owns the set of them. The split matters:
 
 | Per agent | App-wide |
@@ -102,7 +110,7 @@ Panes are ordinary agent views moved between grid cells with `Grid.SetColumn`/`G
 whole reason the tab surface is built the way it is (see below). The row and column tracks are
 rebuilt in code per pane count, interleaving a divider track between adjacent panes; track
 definitions and dividers are the only things that change, so no agent view ever leaves the tree.
-The geometry and divider math live in `Services/PaneLayout.cs`, kept free of WinUI types so they're
+The geometry and divider math live in `Services/Workspaces/PaneLayout.cs`, kept free of WinUI types so they're
 unit tested directly.
 
 The split bar uses chips with `MenuFlyout` pickers rather than `ComboBox`es on purpose: rebuilding
@@ -205,7 +213,7 @@ about the pad: every note's title and first line, plus the full text of whatever
 currently matching, and the bar states what it was given (`12 notes listed · 3 read in full`) because
 a capped read that looks total is the one thing an "ask about all my notes" box must not do.
 
-`Services/NoteAssistant.cs` builds a bare Ollama kernel with **no plugins, filters, or tools** — the
+`Services/Notes/NoteAssistant.cs` builds a bare Ollama kernel with **no plugins, filters, or tools** — the
 same shape as `SnapshotEnhancer`. That's the design, not an optimization: with no file tools, "nothing
 writes your note but you" is true by construction rather than by policy, and no approval machinery is
 needed because the only route from a reply into a note is a button you pressed. It also isn't an
@@ -218,7 +226,7 @@ The editor is not the only thing that writes these files, and doesn't assume it 
 `FileSystemWatcher` compares the file against what the editor last wrote: identical means the write
 was ours; changed-while-clean is adopted silently; changed-while-you-were-typing raises a conflict you
 resolve — *use the version on disk* or *keep what I typed*. A note deleted from under unsaved edits
-offers to save it back. `Services/NoteText.cs` handles the newline round trip, because a WinUI
+offers to save it back. `Services/Notes/NoteText.cs` handles the newline round trip, because a WinUI
 `TextBox` normalizes every newline to a bare CR — write that straight back out and a Notepad-authored
 CRLF note becomes one endless line. Both of those are why `NoteStore`, `NoteEntry`, and `NoteText` are
 WinUI-free with an injectable pad root: the tests drive them against real temp folders.

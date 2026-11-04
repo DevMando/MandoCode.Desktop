@@ -14,6 +14,7 @@ submodule.
 - **More ways for agents to collaborate.** Agents can ask for an immediate answer or a background reply, send information, request a read-only review, hand off work, and update or cancel individual jobs. Messages and results appear in expandable transcript entries that identify the agents involved. Background jobs use readable IDs such as `job1`, support bounded waits, and cancel when an associated agent closes. The existing `ask_agent` tool remains available alongside `ask_agent_and_wait`.
 
 ### Changed
+- **Organize Desktop source by feature.** Group Controls and Services into feature folders and MainWindow partial files by responsibility. Keep XAML and code-behind together, update test-project source links, and add folder guides. Existing namespaces, control identities, and application behavior remain unchanged.
 - **Two levels of tabs with matching scroll spacing.** Workspace tabs sit above agent tabs. Split and New agent stay beside the agents they control in the selected workspace. Both rows reserve space beneath their tabs for horizontal scrollbars, and agent mentions show the workspace name alongside the project folder.
 - **Separate Files and Agents mentions.** Typing `@` opens Files first; press Tab to switch to Agents and back. Gold headers explain the switch. Agent rows show name and project folder, files retain explicit paths when names collide, and quoted paths/names support spaces.
 - **Responsive file tagging on large projects.** Reuse the CLI's asynchronous file index, early root listing, shared scan/cache, query debounce, and filesystem watcher. Closing the picker keeps indexing in progress. Build result rows off the UI thread, replace the list in one batch, preserve selection across updates, ignore stale lookups, and show loading/indexing feedback. End drill-down when a selected folder is empty, and dispose file watchers when the tab closes.
@@ -634,7 +635,7 @@ are visible until you actually open a second tab.
   typing never waits on file IO and 60 logs aren't re-read per keystroke. Each scan carries a
   generation stamp so a slower earlier scan can't overwrite a later keystroke's results, and queries
   under two characters don't trigger one at all. Matching and snippet extraction live in
-  `Services/ConversationSearch.cs`, kept pure and unit tested (+24 tests).
+  `Services/Sessions/ConversationSearch.cs`, kept pure and unit tested (+24 tests).
 - **Snapshots panel — grouping, search, and a cleaner import.** Snapshot cards now group by the
   project they were taken in (freshest project first), a search box filters by title/recap/model/
   project, and Import closes the panel and focuses the chat so the "context armed" confirmation is
@@ -667,7 +668,7 @@ are visible until you actually open a second tab.
   of them. Panes are ordinary agent views moved between grid cells via `Grid.SetColumn`/`Grid.SetRow`
   — never re-parented — so every WebView and its live transcript survives the switch; the row and
   column tracks are rebuilt in code per pane count, and track definitions plus dividers are the only
-  things that change. Geometry and divider math live in `Services/PaneLayout.cs`, free of WinUI types
+  things that change. Geometry and divider math live in `Services/Workspaces/PaneLayout.cs`, free of WinUI types
   and unit tested. The split bar uses chips with `MenuFlyout` pickers rather than `ComboBox`es,
   which sidesteps the `COMException 0x80070490` that rebuilding ComboBox item containers triggers.
   Named *split view* rather than *compare* because comparing two models on one prompt is only one of
