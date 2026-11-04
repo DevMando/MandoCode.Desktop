@@ -88,10 +88,10 @@ public sealed partial class MainWindow
         // Lets a delegation digest name what the working agent has actually been running. Set here
         // rather than at construction because it needs the tab list, which is this class's business.
         _agentDirectory.CommandsProvider ??= key =>
-            _tabs.FirstOrDefault(t => t.View.Session.PersistKey == key)?.View.Session
+            AllTabs.FirstOrDefault(t => t.View.Session.PersistKey == key)?.View.Session
                  .CommandLog.RecentCommands(4) ?? Array.Empty<string>();
 
-        _agentDirectory.Replace(_tabs.Select(t =>
+        _agentDirectory.Replace(AllTabs.Select(t =>
         {
             var s = t.View.Session;
             return new AgentEntry(
@@ -105,7 +105,8 @@ public sealed partial class MainWindow
                 IsBusy: s.Controller.IsProcessing,
                 IsRunningCommand: s.CommandLog.IsRunning,
                 PlanStep: s.Controller.PlanStep,
-                PlanTotal: s.Controller.PlanTotal);
+                PlanTotal: s.Controller.PlanTotal,
+                Workspace: _workspaces.First(w => w.Tabs.Contains(t)).Name);
         }));
     }
 
@@ -130,7 +131,7 @@ public sealed partial class MainWindow
 
     /// <summary>True while ANY open agent has a shell command in flight — the rail is one badge for
     /// every agent, so it pulses if any of them is working.</summary>
-    private bool AnyAgentCommandRunning => _tabs.Any(t => t.View.Session.CommandLog.IsRunning);
+    private bool AnyAgentCommandRunning => AllTabs.Any(t => t.View.Session.CommandLog.IsRunning);
 
     /// <summary>
     /// Lights the rail's terminal badge whenever an agent runs a command the user isn't watching.
@@ -163,11 +164,11 @@ public sealed partial class MainWindow
     private static string AgentOutputKey(AgentSession session) => session.PersistKey;
 
     private AgentSession? FindSessionByKey(string key) =>
-        _tabs.FirstOrDefault(t => AgentOutputKey(t.View.Session) == key)?.View.Session;
+        AllTabs.FirstOrDefault(t => AgentOutputKey(t.View.Session) == key)?.View.Session;
 
     private void AttachAllAgentOutputs()
     {
-        foreach (var tab in _tabs) AttachAgentOutput(tab.View.Session);
+        foreach (var tab in AllTabs) AttachAgentOutput(tab.View.Session);
     }
 
     /// <summary>
@@ -361,8 +362,8 @@ public sealed partial class MainWindow
         // Every tab boots on the DEFAULT model and only moves to its own saved model once
         // InitTabAsync gets that far. Workspace writes are suppressed until the last tab settles
         // — see SaveWorkspace for why a write inside that window loses a tab's model.
-        Volatile.Write(ref _restoringTabs, _tabs.Count);
-        foreach (var entry in _tabs) _ = InitTabAsync(entry);
+        Volatile.Write(ref _restoringTabs, AllTabs.Count());
+        foreach (var entry in AllTabs.ToArray()) _ = InitTabAsync(entry);
         InitBgPreview();
 
         // Both stores load from disk at construction; reflect their counts on the rail at launch,
@@ -444,27 +445,14 @@ public sealed partial class MainWindow
         // model, and that tab comes back on the default next launch — the switch is simply lost.
         if (Volatile.Read(ref _restoringTabs) > 0) return;
 
-        var tabs = _tabs.Select(t => new WorkspaceTabState(
-            t.View.Session.Title,
-            t.View.Session.ProjectRoot.ProjectRoot,
-            PersistedModelFor(t),
-            t.View.Session.PersistKey)).ToList();
-        var active = _selected == null ? 0 : Math.Max(0, _tabs.IndexOf(_selected));
-
-        // The split layout rides along: paned agents (by persist-key) plus the divider positions.
-        // Null when no split is configured, which restores as plain single view.
-        var panes = SplitConfigured
-            ? _splitPanes.Select(p => p.View.Session.PersistKey).ToList()
-            : null;
-        WorkspaceState.Save(new WorkspaceShape(
-            tabs, active, panes,
-            panes == null ? null : new List<double>(_colFractions),
-            panes == null ? null : new List<double>(_rowFractions)));
+        if (_loadingWorkspaces || _closingWorkspace) return;
+        WorkspaceState.SaveAll(new DesktopWorkspaceState(1, _activeWorkspace.Id,
+            _workspaces.Select(w => new NamedWorkspaceState(w.Id, w.Name, ShapeFor(w))).ToList()));
 
         // Safety net for per-agent settings. ChatController.ConfigChanged catches the deliberate
         // edits; this catches anything that mutates a config without raising it (a healed endpoint,
         // a wizard). Each call is a fingerprint compare and writes nothing when nothing moved.
-        foreach (var tab in _tabs) tab.View.Session.PersistConfigIfChanged();
+        foreach (var tab in AllTabs) tab.View.Session.PersistConfigIfChanged();
     }
 
 }

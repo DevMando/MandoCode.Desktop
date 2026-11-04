@@ -12,7 +12,10 @@ public sealed record AgentEntry(
     bool IsBusy,
     bool IsRunningCommand,
     int PlanStep,
-    int PlanTotal);
+    int PlanTotal,
+    string Workspace = "Main");
+
+public sealed record AgentCommunication(string FromKey, string ToKey, string FromName, string ToName, string Title, string Body);
 
 /// <summary>
 /// The host's register of open agents, so one agent can be addressed by another. Populated by
@@ -54,6 +57,11 @@ public sealed class AgentDirectory
     /// <summary>Raised after the register changes, so the UI can re-offer suggestions.</summary>
     public event Action? Changed;
 
+    /// <summary>Host-authored transcript evidence for queued messages and updates. No model turn.</summary>
+    public event Action<AgentCommunication>? CommunicationPosted;
+
+    public void AnnounceCommunication(AgentCommunication communication) => CommunicationPosted?.Invoke(communication);
+
     public IReadOnlyList<AgentEntry> All
     {
         get { lock (_lock) { return _agents.ToList(); } }
@@ -80,6 +88,7 @@ public sealed class AgentDirectory
     public void RemovePeer(string key)
     {
         lock (_lock) { _peers.Remove(key); }
+        Delegations.CloseAgent(key);
     }
 
     /// <summary>The live agent for a key, or null if its tab has since closed.</summary>
@@ -146,7 +155,7 @@ public sealed class AgentDirectory
     /// </summary>
     public static string Describe(AgentEntry a)
     {
-        var parts = new List<string> { $"Agent \"{a.Name}\"", $"working in {a.FolderLabel} ({a.ProjectRoot})", $"model {a.Model}" };
+        var parts = new List<string> { $"Agent \"{a.Name}\"", $"workspace {a.Workspace}", $"working in {a.FolderLabel} ({a.ProjectRoot})", $"model {a.Model}" };
         if (a.PlanTotal > 0) parts.Add($"executing a plan, step {a.PlanStep} of {a.PlanTotal}");
         parts.Add(a.IsBusy ? "currently WORKING on a turn" : "IDLE — not currently working");
         if (a.IsRunningCommand) parts.Add("a shell command is running right now");

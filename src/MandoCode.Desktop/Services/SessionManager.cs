@@ -68,10 +68,10 @@ public sealed class SessionManager
         ? AgentCallsigns.Next(_sessions.Select(s => s.Title))
         : AgentNaming.NextFreeName(_sessions.Select(s => s.Title));
 
-    public void Activate(AgentSession session)
+    public void Activate(AgentSession? session)
     {
         if (ReferenceEquals(Active, session)) return;
-        if (!_sessions.Contains(session)) return;
+        if (session != null && !_sessions.Contains(session)) return;
 
         Active = session;
     }

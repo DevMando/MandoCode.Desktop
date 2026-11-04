@@ -700,8 +700,15 @@
             <Border x:Name="SuggestionsPanel" Grid.Row="0" Grid.ColumnSpan="3" Visibility="Collapsed"
                     Background="{StaticResource MandoPanelBrush}"
                     BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="1"
-                    CornerRadius="8" Margin="0,0,0,8" MaxHeight="220">
-                <ListView x:Name="SuggestionsList" SelectionMode="Single"
+                    CornerRadius="8" Margin="0,0,0,8" MaxHeight="260">
+                <Grid RowSpacing="4">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                    <TextBlock x:Name="SuggestionsTitle" Grid.Row="0" Margin="10,6,10,0" Foreground="{StaticResource MandoGoldBrush}" FontWeight="SemiBold"/>
+                    <StackPanel x:Name="SuggestionsStatus" Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="10,0,10,0" Visibility="Collapsed">
+                        <ProgressRing x:Name="SuggestionsLoading" Width="16" Height="16" IsActive="False"/>
+                        <TextBlock x:Name="SuggestionsStatusText" FontSize="12" Opacity="0.7"/>
+                    </StackPanel>
+                <ListView x:Name="SuggestionsList" Grid.Row="2" MaxHeight="200" SelectionMode="Single"
                           IsItemClickEnabled="True" ItemClick="SuggestionsList_ItemClick">
                     <ListView.ItemTemplate>
                         <DataTemplate x:DataType="local:CommandSuggestion">
@@ -714,13 +721,14 @@
                         </DataTemplate>
                     </ListView.ItemTemplate>
                 </ListView>
+                </Grid>
             </Border>
 
             <TextBox x:Name="InputBox" Grid.Row="1" Grid.Column="0"
-                     PlaceholderText="Message Agent…   /commands · @file · !shell"
+                     PlaceholderText="Message Agent…   /commands · @files and agents · !shell"
                      AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="140"
                      AllowDrop="True" DragOver="InputBox_DragOver" Drop="InputBox_Drop"
-                     PreviewKeyDown="InputBox_PreviewKeyDown" TextChanged="InputBox_TextChanged"/>
+                     PreviewKeyDown="InputBox_PreviewKeyDown" PreviewKeyUp="InputBox_PreviewKeyUp" TextChanged="InputBox_TextChanged" SelectionChanged="InputBox_SelectionChanged"/>
 
             <Button x:Name="EmojiButton" Grid.Row="1" Grid.Column="1"
                     VerticalAlignment="Stretch" Padding="10,0"

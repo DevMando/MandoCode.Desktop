@@ -93,6 +93,17 @@ public sealed partial class MainWindow
 
     private void Root_KeyDown(object sender, KeyRoutedEventArgs e)
     {
+        if (IsDown(VirtualKey.Menu) && IsDown(VirtualKey.Shift))
+        {
+            if (e.Key == VirtualKey.N) { AddWorkspace_Click(sender, e); e.Handled = true; return; }
+            if (e.Key == VirtualKey.Left || e.Key == VirtualKey.Right)
+            {
+                var index = _workspaces.IndexOf(_activeWorkspace);
+                SwitchWorkspace(_workspaces[(index + (e.Key == VirtualKey.Right ? 1 : -1) + _workspaces.Count) % _workspaces.Count]);
+                e.Handled = true; return;
+            }
+            if (e.Key == VirtualKey.W) { _ = CloseWorkspaceAsync(_activeWorkspace); e.Handled = true; return; }
+        }
         if (e.Key == VirtualKey.Escape) { ActiveChat?.HandleEscape(); return; }
 
         // Ctrl+`  toggles the terminal;  Ctrl+Shift+`  opens a new shell tab (VS Code parity).
@@ -112,7 +123,8 @@ public sealed partial class MainWindow
 
     private void ApplyThemeToAllTabs()
     {
-        foreach (var tab in _tabs) tab.View.ApplyTheme();
+        foreach (var tab in AllTabs) tab.View.ApplyTheme();
+        RefreshWorkspaceStrip();
         // The appearance preview is a transcript too — it re-themes with everyone else.
         if (_previewWebReady && BgPreviewWeb.CoreWebView2 != null)
             _ = BgPreviewWeb.CoreWebView2.ExecuteScriptAsync(

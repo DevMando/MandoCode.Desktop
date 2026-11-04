@@ -32,27 +32,47 @@ public static class WorkspaceState
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "MandoCode.Desktop", "workspace.json");
 
-    public static WorkspaceShape? TryLoad()
+
+    public static DesktopWorkspaceState LoadAll()
     {
-        try
-        {
-            if (!File.Exists(StorePath)) return null;
-            var shape = JsonSerializer.Deserialize<WorkspaceShape>(File.ReadAllText(StorePath));
-            return shape is { Tabs.Count: > 0 } ? shape : null;
-        }
-        catch
-        {
-            return null;
-        }
+        try { return Parse(File.ReadAllText(StorePath)); }
+        catch { return DefaultState(); }
     }
 
-    public static void Save(WorkspaceShape shape)
+    // Pure parser shared with migration tests. Old single-workspace files become Main.
+    public static DesktopWorkspaceState Parse(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        if (document.RootElement.TryGetProperty("Workspaces", out _))
+        {
+            var state = JsonSerializer.Deserialize<DesktopWorkspaceState>(json);
+            if (state is { Version: 1, Workspaces.Count: > 0 }
+                && state.Workspaces.All(w => !string.IsNullOrWhiteSpace(w.Id)
+                    && !string.IsNullOrWhiteSpace(w.Name) && w.Shape?.Tabs != null)
+                && state.Workspaces.Select(w => w.Id).Distinct().Count() == state.Workspaces.Count)
+                return state;
+            throw new InvalidDataException("Invalid workspace state.");
+        }
+        var legacy = JsonSerializer.Deserialize<WorkspaceShape>(json);
+        if (legacy?.Tabs == null) throw new InvalidDataException("Invalid legacy workspace.");
+        return new(1, "main", new() { new("main", "Main", legacy) });
+    }
+
+    private static DesktopWorkspaceState DefaultState() => new(1, "main",
+        new() { new("main", "Main", new(new(), 0)) });
+
+    public static void SaveAll(DesktopWorkspaceState state)
     {
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(StorePath)!);
-            File.WriteAllText(StorePath, JsonSerializer.Serialize(shape));
+            var temporary = StorePath + ".tmp";
+            File.WriteAllText(temporary, JsonSerializer.Serialize(state));
+            File.Move(temporary, StorePath, overwrite: true);
         }
-        catch { /* best-effort */ }
+        catch { /* best-effort; atomic replacement keeps the previous valid state */ }
     }
 }
+
+public sealed record NamedWorkspaceState(string Id, string Name, WorkspaceShape Shape);
+public sealed record DesktopWorkspaceState(int Version, string ActiveWorkspaceId, List<NamedWorkspaceState> Workspaces);

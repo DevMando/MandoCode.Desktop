@@ -61,6 +61,18 @@ public sealed partial class ChatTabView
     // suppresses the newline and Enter-to-accept behaves exactly like a mouse click.
     private void InputBox_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
     {
+        if (e.Key == VirtualKey.Tab
+            && SuggestionsPanel.Visibility == Visibility.Visible && _mentionPicker.Fragment is not null)
+        {
+            e.Handled = true;
+            if (!_tabToggleHeld)
+            {
+                _tabToggleHeld = true;
+                _mentionPicker.Toggle();
+                UpdateSuggestions();
+            }
+            return;
+        }
         if (e.Key == VirtualKey.Enter)
         {
             var shift = Microsoft.UI.Input.InputKeyboardSource
@@ -80,12 +92,14 @@ public sealed partial class ChatTabView
                         AcceptSuggestion(pick);
                         return;
                     }
+                    return; // Loading/empty mention panels never submit a partial token.
                 }
                 SubmitCurrentInput();
             }
         }
         else if (e.Key == VirtualKey.Tab && SuggestionsPanel.Visibility == Visibility.Visible)
         {
+            e.Handled = true;
             var pick = (SuggestionsList.SelectedItem ?? _suggestions.FirstOrDefault()) as CommandSuggestion;
             if (pick != null)
             {
@@ -113,11 +127,18 @@ public sealed partial class ChatTabView
     }
 
     private void InputBox_TextChanged(object sender, TextChangedEventArgs e) => UpdateSuggestions();
+    private void InputBox_SelectionChanged(object sender, RoutedEventArgs e) => UpdateSuggestions();
+    private void InputBox_PreviewKeyUp(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == VirtualKey.Tab) _tabToggleHeld = false;
+    }
 
     private void UpdateSuggestions()
     {
+        if (_shutDown || _insertingSuggestion) return;
         var text = InputBox.Text;
-        var caret = InputBox.SelectionStart;
+        var caret = Math.Clamp(InputBox.SelectionStart, 0, text.Length);
+        var hasMention = _mentionPicker.Update(text, caret);
 
         // Slash commands: input starts with '/' and is still a single token.
         if (text.StartsWith('/') && !text.Contains(' '))
@@ -128,43 +149,32 @@ public sealed partial class ChatTabView
                 return;
         }
 
-        // @file references: find the token containing the caret; if it starts with '@',
-        // filter project files/directories through the same provider the CLI uses
-        // (directories come back with a trailing '/' — selecting one drills into it).
         var tokenStart = caret;
-        while (tokenStart > 0 && !char.IsWhiteSpace(text[tokenStart - 1]))
-            tokenStart--;
-
-        if (tokenStart < caret && tokenStart < text.Length && text[tokenStart] == '@')
+        while (tokenStart > 0 && !char.IsWhiteSpace(text[tokenStart - 1])) tokenStart--;
+        if (hasMention && _mentionPicker.Fragment is { } mention)
         {
-            var fragment = text[(tokenStart + 1)..caret];
-
-            // Open agents rank ABOVE files. They are a small closed set against thousands of paths,
-            // callsigns are single capitalised words so genuine clashes are rare, and '@' already
-            // means "a participant" to anyone who has used Slack. A same-named file is still
-            // reachable — it has an extension or a separator, and neither matches a callsign.
-            var agents = Session.Agents?.Match(fragment, Session.PersistKey) ?? Array.Empty<AgentEntry>();
-            if (agents.Count > 0 && ShowSuggestions(SuggestMode.Agent, tokenStart, caret,
-                    agents.Select(a => new CommandSuggestion
-                    {
-                        Command = a.Name,
-                        Description = a.IsBusy
-                            ? $"agent — {a.FolderLabel} · working"
-                            : $"agent — {a.FolderLabel} · idle"
-                    })))
+            _tokenStart = mention.Start; _tokenEnd = mention.End;
+            if (_mentionPicker.Target == MentionPickerTarget.Agents)
+            {
+                CancelFileSuggestionRequest();
+                var agents = Session.Agents?.Match(mention.Query, Session.PersistKey) ?? Array.Empty<AgentEntry>();
+                ShowSuggestions(SuggestMode.Agent, mention.Start, caret,
+                    agents.Select(a => new CommandSuggestion { Command = a.Name, Description = $"{a.Workspace} · {a.FolderLabel}" }), keepOpen: true);
+                SetSuggestionStatus(agents.Count == 0 ? "No matching open agents" : "", false);
                 return;
+            }
 
-            List<string> matches;
-            try { matches = _fileProvider.FilterFiles(fragment); }
-            catch { matches = new List<string>(); }
-
-            if (ShowSuggestions(SuggestMode.File, tokenStart, caret,
-                    matches.Select(m => new CommandSuggestion
-                    {
-                        Command = m,
-                        Description = m.EndsWith('/') ? "folder — select to drill in" : "file"
-                    })))
-                return;
+            // The provider owns one background scan; closing this popup only drops the UI request.
+            // Project/row projection and filtering never enumerate files on the WinUI dispatcher.
+            var sameQuery = _suggestMode == SuggestMode.File && _displayedFileQuery == mention.Query
+                && _suggestionRoot == Session.ProjectRoot.ProjectRoot;
+            if (!sameQuery)
+                ShowSuggestions(SuggestMode.File, mention.Start, caret, Array.Empty<CommandSuggestion>(), keepOpen: true);
+            _displayedFileQuery = mention.Query;
+            _suggestionRoot = Session.ProjectRoot.ProjectRoot;
+            SuggestionsTitle.Text = _mentionPicker.Title;
+            _ = RefreshFileSuggestionsAsync(mention, _mentionPicker.Revision, _suggestionRoot);
+            return;
         }
 
         // :emoji: shortcodes (Slack-style). Two behaviors on the token containing the caret:
@@ -206,20 +216,98 @@ public sealed partial class ChatTabView
         HideSuggestions();
     }
 
-    private bool ShowSuggestions(SuggestMode mode, int tokenStart, int tokenEnd, IEnumerable<CommandSuggestion> items)
+    private bool ShowSuggestions(SuggestMode mode, int tokenStart, int tokenEnd, IEnumerable<CommandSuggestion> items, bool keepOpen = false)
     {
-        _suggestions.Clear();
-        foreach (var item in items) _suggestions.Add(item);
-        if (_suggestions.Count == 0) return false;
-
-        _suggestMode = mode;
-        _tokenStart = tokenStart;
-        _tokenEnd = tokenEnd;
+        var selected = _suggestMode == mode ? (SuggestionsList.SelectedItem as CommandSuggestion)?.Command : null;
+        var selectedIndex = _suggestMode == mode ? SuggestionsList.SelectedIndex : 0;
+        var rows = items as IReadOnlyList<CommandSuggestion> ?? items.ToArray();
+        if (rows.Count == 0 && !keepOpen) return false;
+        _suggestions = rows;
+        _suggestMode = mode; _tokenStart = tokenStart; _tokenEnd = tokenEnd;
+        SuggestionsTitle.Text = mode is SuggestMode.File or SuggestMode.Agent ? _mentionPicker.Title
+            : mode == SuggestMode.Emoji ? "Emojis" : "Commands";
+        SetSuggestionStatus("", false);
+        SuggestionsList.ItemsSource = rows;
         SuggestionsPanel.Visibility = Visibility.Visible;
-        SuggestionsList.SelectedIndex = 0;
-        SuggestionsList.ScrollIntoView(SuggestionsList.SelectedItem);
+        var retained = -1;
+        if (selected is not null)
+            for (var i = 0; i < rows.Count; i++) if (rows[i].Command == selected) { retained = i; break; }
+        SuggestionsList.SelectedIndex = rows.Count == 0 ? -1 : retained >= 0 ? retained : Math.Clamp(selectedIndex, 0, rows.Count - 1);
+        if (SuggestionsList.SelectedItem is { } item) SuggestionsList.ScrollIntoView(item);
         return true;
     }
+
+    private void SetSuggestionStatus(string text, bool loading)
+    {
+        SuggestionsStatusText.Text = text;
+        SuggestionsLoading.IsActive = loading;
+        SuggestionsLoading.Visibility = loading ? Visibility.Visible : Visibility.Collapsed;
+        SuggestionsStatus.Visibility = text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void CancelFileSuggestionRequest()
+    {
+        _fileSuggestionVersion++;
+        _fileSuggestionRequest?.Cancel(); _fileSuggestionRequest?.Dispose();
+        _fileSuggestionRequest = null;
+    }
+
+    private async Task RefreshFileSuggestionsAsync(MentionFragment mention, long revision, string root)
+    {
+        CancelFileSuggestionRequest();
+        var version = _fileSuggestionVersion;
+        _fileSuggestionRequest = new();
+        var cancellation = _fileSuggestionRequest.Token;
+        if (_suggestions.Count == 0) SetSuggestionStatus("Loading files and folders…", true);
+        try
+        {
+            var result = await _fileLookup.GetAsync(mention.Query, cancellation);
+            if (_shutDown || cancellation.IsCancellationRequested || version != _fileSuggestionVersion
+                || revision != _mentionPicker.Revision || _mentionPicker.Target != MentionPickerTarget.Files
+                || _mentionPicker.Fragment != mention || Session.ProjectRoot.ProjectRoot != root) return;
+            if (result.Items.Length == 0 && !result.Loading && mention.Query.EndsWith('/'))
+            {
+                // A quoted folder prefix stays open while drilling. Finalize it when
+                // there is nothing left to select, so sending it still references a folder.
+                var reference = MandoCode.Services.FileReferenceToken.Format(mention.Query);
+                _insertingSuggestion = true;
+                try
+                {
+                    InputBox.Text = InputBox.Text[..mention.Start] + reference + InputBox.Text[mention.End..];
+                    InputBox.SelectionStart = mention.Start + reference.Length;
+                }
+                finally { _insertingSuggestion = false; }
+                HideSuggestions(); // The selected folder remains in the prompt; drill-down ends here.
+                return;
+            }
+            if (!ReferenceEquals(_suggestions, result.Items))
+                ShowSuggestions(SuggestMode.File, mention.Start, mention.End, result.Items, keepOpen: true);
+            SetSuggestionStatus(result.Loading ? result.Items.Length == 0 ? "Loading files and folders…"
+                : result.Indexing ? "Indexing subfolders…" : "Filtering files…"
+                : result.Items.Length == 0 ? "No matching files or folders" : "", result.Loading);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            if (!_shutDown && version == _fileSuggestionVersion) SetSuggestionStatus("Files could not be loaded", false);
+        }
+    }
+
+    private void OnFileSuggestionsChanged()
+    {
+        if (Interlocked.Exchange(ref _queuedFileRefresh, 1) != 0) return;
+        if (!_dispatcher.TryEnqueue(() =>
+        {
+            Interlocked.Exchange(ref _queuedFileRefresh, 0);
+            if (!_shutDown && _mentionPicker.Fragment is not null && _mentionPicker.Target == MentionPickerTarget.Files)
+                UpdateSuggestions();
+        })) Interlocked.Exchange(ref _queuedFileRefresh, 0);
+    }
+    private void OnAgentSuggestionsChanged() => OnUi(() =>
+    {
+        if (!_shutDown && _mentionPicker.Fragment is not null && _mentionPicker.Target == MentionPickerTarget.Agents)
+            UpdateSuggestions();
+    });
 
     private void SuggestionsList_ItemClick(object sender, ItemClickEventArgs e)
     {
@@ -228,55 +316,64 @@ public sealed partial class ChatTabView
 
     private void AcceptSuggestion(CommandSuggestion s)
     {
-        if (_suggestMode == SuggestMode.Agent)
+        _insertingSuggestion = true;
+        try
         {
-            var text = InputBox.Text;
-            var start = Math.Min(_tokenStart, text.Length);
-            var end = Math.Min(_tokenEnd, text.Length);
+            if (_suggestMode == SuggestMode.Agent)
+            {
+                var text = InputBox.Text;
+                var start = Math.Min(_tokenStart, text.Length);
+                var end = Math.Min(_tokenEnd, text.Length);
 
-            // Always closes with a space: a callsign is a whole token, so there is nothing to drill
-            // into the way a folder has.
-            var replacement = "@" + s.Command + " ";
-            InputBox.Text = text[..start] + replacement + text[end..];
-            InputBox.SelectionStart = start + replacement.Length;
-            HideSuggestions();
-        }
-        else if (_suggestMode == SuggestMode.File)
-        {
-            var text = InputBox.Text;
-            var start = Math.Min(_tokenStart, text.Length);
-            var end = Math.Min(_tokenEnd, text.Length);
+                // Always closes with a space: a callsign is a whole token, so there is nothing to drill
+                // into the way a folder has.
+                if (Session.Agents?.Resolve(s.Command) is not { } agent || agent.Key == Session.PersistKey)
+                    return;
+                var replacement = MandoCode.Services.FileReferenceToken.Format(s.Command) + " ";
+                InputBox.Text = text[..start] + replacement + text[end..];
+                InputBox.SelectionStart = start + replacement.Length;
+                HideSuggestions();
+            }
+            else if (_suggestMode == SuggestMode.File)
+            {
+                var text = InputBox.Text;
+                var start = Math.Min(_tokenStart, text.Length);
+                var end = Math.Min(_tokenEnd, text.Length);
 
-            // Replace the @token with the picked path. Directories keep the caret hot
-            // (no trailing space) so the reopened popup shows their contents; files
-            // close the token with a space.
-            var isFolder = s.Command.EndsWith('/');
-            var replacement = "@" + s.Command + (isFolder ? "" : " ");
-            InputBox.Text = text[..start] + replacement + text[end..];
-            InputBox.SelectionStart = start + replacement.Length;
+                // Replace the @token with the picked path. Directories keep the caret hot
+                // (no trailing space) so the reopened popup shows their contents; files
+                // close the token with a space.
+                var isFolder = s.Command.EndsWith('/');
+                var replacement = PromptMentionPicker.FileReference(s.Command, Session.Agents?.Resolve(s.Command) is not null)
+                    + (isFolder ? "" : " ");
+                if (isFolder && replacement.StartsWith("@\"")) replacement = replacement[..^1];
+                InputBox.Text = text[..start] + replacement + text[end..];
+                InputBox.SelectionStart = start + replacement.Length;
 
-            // Setting .Text resets the caret to 0 BEFORE the line above restores it, and
-            // TextChanged runs in that window — it sees no token at caret 0 and hides the
-            // popup. Recompute now that the caret is where the user expects it:
-            // folder → drilled listing reopens; file → token ended with a space, stays hidden.
-            UpdateSuggestions();
+                // Setting .Text resets the caret to 0 BEFORE the line above restores it, and
+                // TextChanged runs in that window — it sees no token at caret 0 and hides the
+                // popup. Recompute now that the caret is where the user expects it:
+                // folder → drilled listing reopens; file → token ended with a space, stays hidden.
+            }
+            else if (_suggestMode == SuggestMode.Emoji)
+            {
+                var text = InputBox.Text;
+                var start = Math.Min(_tokenStart, text.Length);
+                var end = Math.Min(_tokenEnd, text.Length);
+                var emoji = s.InsertText ?? s.Command;
+                InputBox.Text = text[..start] + emoji + text[end..];
+                InputBox.SelectionStart = start + emoji.Length;
+                HideSuggestions();
+            }
+            else
+            {
+                InputBox.Text = s.Command + " ";
+                InputBox.SelectionStart = InputBox.Text.Length;
+                HideSuggestions();
+            }
         }
-        else if (_suggestMode == SuggestMode.Emoji)
-        {
-            var text = InputBox.Text;
-            var start = Math.Min(_tokenStart, text.Length);
-            var end = Math.Min(_tokenEnd, text.Length);
-            var emoji = s.InsertText ?? s.Command;
-            InputBox.Text = text[..start] + emoji + text[end..];
-            InputBox.SelectionStart = start + emoji.Length;
-            HideSuggestions();
-        }
-        else
-        {
-            InputBox.Text = s.Command + " ";
-            InputBox.SelectionStart = InputBox.Text.Length;
-            HideSuggestions();
-        }
+        finally { _insertingSuggestion = false; }
+        UpdateSuggestions();
         InputBox.Focus(FocusState.Programmatic);
     }
 
@@ -327,8 +424,13 @@ public sealed partial class ChatTabView
 
     private void HideSuggestions()
     {
+        CancelFileSuggestionRequest();
+        _mentionPicker.Dismiss();
         _suggestMode = SuggestMode.None;
+        _displayedFileQuery = null;
         SuggestionsPanel.Visibility = Visibility.Collapsed;
-        _suggestions.Clear();
+        _suggestions = Array.Empty<CommandSuggestion>();
+        SuggestionsList.ItemsSource = _suggestions;
+        SetSuggestionStatus("", false);
     }
 }

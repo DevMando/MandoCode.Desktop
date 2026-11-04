@@ -95,6 +95,7 @@ public sealed partial class MainWindow : Window
         _skillCoordinator = services.GetRequiredService<SkillCoordinator>();
         _configs = services.GetRequiredService<ConfigCoordinator>();
         _agentDirectory = services.GetRequiredService<AgentDirectory>();
+        _agentDirectory.CommunicationPosted += OnAgentCommunication;
 
         // The rail page edits the global defaults. Bound once, for the life of the window: unlike an
         // agent's pane there is nothing to re-point it at.
@@ -141,26 +142,12 @@ public sealed partial class MainWindow : Window
         // Reopen the previous workspace shape (tabs, roots, models, active tab). Folders
         // that no longer exist are skipped; no saved shape (or nothing usable) means the
         // classic single default tab.
-        var shape = WorkspaceState.TryLoad();
-        if (shape != null)
-        {
-            foreach (var t in shape.Tabs.Where(t => Directory.Exists(t.ProjectRoot)))
-                CreateChatTab(t.ProjectRoot, t.Title, t.Model, t.Key);
-            if (_tabs.Count == 0) CreateChatTab();
-            else SelectTab(_tabs[Math.Clamp(shape.ActiveIndex, 0, _tabs.Count - 1)]);
-            // After the tabs exist and one is selected — the pane set is matched by persist-key
-            // and only shows if the restored active agent is one of its panes.
-            RestoreSplitLayout(shape);
-        }
-        else
-        {
-            CreateChatTab();
-        }
+        RestoreWorkspaces();
 
         // Journals whose sessions no longer exist (tabs closed during a crash, pruned
         // folders) have nothing to replay into — clean them up. Archived (closed-but-recoverable)
         // sessions are kept: their files back the History panel, so their keys join the keep-set.
-        var liveKeys = _tabs.Select(t => t.View.Session.PersistKey).Concat(_archive.Keys).ToList();
+        var liveKeys = AllTabs.Select(t => t.View.Session.PersistKey).Concat(_archive.Keys).ToList();
         TranscriptJournal.Sweep(liveKeys);
         ConversationLog.Sweep(liveKeys);
         SessionHistoryStore.Sweep(liveKeys);
@@ -188,11 +175,12 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void MainWindow_Closed(object sender, WindowEventArgs args)
     {
+        _agentDirectory.CommunicationPosted -= OnAgentCommunication;
         SaveWorkspace();   // capture the shape BEFORE teardown starts mutating state
         // A note being typed when the window closes must land on disk — autosave runs on a debounce,
         // so the last few seconds of typing are still only in the TextBox at this point.
         NoteEditor.Shutdown();
-        foreach (var tab in _tabs) tab.View.Shutdown();
+        foreach (var tab in AllTabs) tab.View.Shutdown();
         _terminal?.ShutDown();   // kill any ConPTY shells so no processes leak
 
         _musicPollTimer?.Stop();   // or its ticks keep touching a disposed service and closed XAML

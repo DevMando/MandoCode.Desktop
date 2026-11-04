@@ -142,6 +142,14 @@ public sealed class AgentSession
             Microsoft.Extensions.AI.AIFunctionFactory.Create(agentTools.AskAgent, new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "ask_agent" }),
             Microsoft.Extensions.AI.AIFunctionFactory.Create(agentTools.ReadAgentTranscript, new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "read_agent_transcript" }),
             Microsoft.Extensions.AI.AIFunctionFactory.Create(agentTools.DelegateToAgent, new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "delegate_to_agent" }),
+            Microsoft.Extensions.AI.AIFunctionFactory.Create(agentTools.AskAgentAndWait, new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "ask_agent_and_wait" }),
+            Microsoft.Extensions.AI.AIFunctionFactory.Create(agentTools.AskAgentAsync, new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "ask_agent_async" }),
+            Microsoft.Extensions.AI.AIFunctionFactory.Create(agentTools.SendAgentMessage, new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "send_agent_message" }),
+            Microsoft.Extensions.AI.AIFunctionFactory.Create(agentTools.RequestAgentReview, new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "request_agent_review" }),
+            Microsoft.Extensions.AI.AIFunctionFactory.Create(agentTools.HandoffToAgent, new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "handoff_to_agent" }),
+            Microsoft.Extensions.AI.AIFunctionFactory.Create(agentTools.UpdateAgentJob, new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "update_agent_job" }),
+            Microsoft.Extensions.AI.AIFunctionFactory.Create(agentTools.CancelAgentJob, new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "cancel_agent_job" }),
+            Microsoft.Extensions.AI.AIFunctionFactory.Create(agentTools.WaitForAgentJob, new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "wait_for_agent_job" }),
             Microsoft.Extensions.AI.AIFunctionFactory.Create(agentTools.CheckDelegations, new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "check_delegations" }),
             Microsoft.Extensions.AI.AIFunctionFactory.Create(PreviewTools.ListBrowserFrames, new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "list_browser_frames" }),
             Microsoft.Extensions.AI.AIFunctionFactory.Create(PreviewTools.ListBrowserTabs, new Microsoft.Extensions.AI.AIFunctionFactoryOptions { Name = "list_browser_tabs" }),
@@ -333,21 +341,9 @@ public sealed class AgentSession
 
         _ = Task.Run(async () =>
         {
-            DelegationState state;
-            string? result;
-            try
-            {
-                var answer = await target.AskAsync(delegation.FromName, delegation.Task);
-                state = answer.Answered ? DelegationState.Done : DelegationState.Failed;
-                result = answer.Text;
-            }
-            catch (Exception ex)
-            {
-                state = DelegationState.Failed;
-                result = ex.Message;
-            }
-
-            var finished = Agents.Delegations.Complete(delegation.Id, state, result) ?? delegation;
+            var finished = ReferenceEquals(Agents.Peer(delegation.ToKey), target)
+                ? await AgentInteractionRunner.Run(Agents.Delegations, delegation, target)
+                : Agents.Delegations.Complete(delegation.Id, DelegationState.Failed, "The target agent closed before starting.") ?? delegation;
             inbox.Post(DelegationRegistry.Digest(finished, entry(), Agents.RecentCommandsFor(finished.ToKey)));
             DelegationFinished?.Invoke(finished);
         });

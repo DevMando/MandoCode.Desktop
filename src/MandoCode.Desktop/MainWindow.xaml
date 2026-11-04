@@ -791,7 +791,29 @@
         <!-- Extra top padding balances the reserved scrollbar lane at the bottom of the tab
              content, so the tabs sit visually centered in the strip. -->
         <StackPanel Grid.Row="0">
-        <Border Background="{StaticResource MandoPanelBrush}" Padding="10,13,10,6"
+        <Border Background="{StaticResource MandoPanelBrush}" Padding="10,6,10,0" BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="0,0,0,1">
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <TextBlock Text="MandoCode" FontSize="24" VerticalAlignment="Center" Margin="0,0,0,14"
+                    FontFamily="ms-appx:///Assets/fonts/PermanentMarker-Regular.ttf#Permanent Marker, Segoe UI"
+                    Foreground="{StaticResource MandoAccentBrush}"/>
+                <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" VerticalScrollMode="Disabled">
+                    <!-- Match the agent strip's reserved lane so the overlay scrollbar clears the tabs. -->
+                    <StackPanel x:Name="WorkspaceStrip" Orientation="Horizontal" Spacing="4"
+                                VerticalAlignment="Top" Margin="0,0,0,18"/>
+                </ScrollViewer>
+                <Button Grid.Column="2" Click="AddWorkspace_Click" Padding="10,6"
+                    VerticalAlignment="Center" Margin="0,0,0,18"
+                    Background="Transparent" BorderThickness="0" AutomationProperties.Name="New workspace"
+                    ToolTipService.ToolTip="New workspace (Alt+Shift+N)">
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                        <FontIcon Glyph="&#xE710;" FontSize="12"/>
+                        <TextBlock Text="Workspace" FontSize="13"/>
+                    </StackPanel>
+                </Button>
+            </Grid>
+        </Border>
+        <Border Background="{StaticResource MandoPanelBrush}" Padding="10,6,10,0"
                 BorderBrush="{StaticResource MandoBorderBrush}" BorderThickness="0,0,0,1">
             <Grid ColumnSpacing="12">
                 <Grid.ColumnDefinitions>
@@ -821,9 +843,7 @@
                      other fix and the wrong one: #007ACC IS the Visual Studio blue, and correcting
                      it would break the exact thing that theme exists to reproduce. The bottom
                      margin comes down with the size to hold the baseline against the tab strip. -->
-                <TextBlock Text="MandoCode" FontSize="24" VerticalAlignment="Center"
-                           FontFamily="ms-appx:///Assets/fonts/PermanentMarker-Regular.ttf#Permanent Marker, Segoe UI"
-                           Margin="0,0,0,14" Foreground="{StaticResource MandoAccentBrush}"/>
+                <TextBlock Text="Agents" FontSize="13" VerticalAlignment="Center" Margin="0,0,0,14" Foreground="{StaticResource MandoDimBrush}"/>
 
                 <!-- Vertical divider between the brand and the agent tabs. Insets align it with the
                      tab band (bottom inset matches the tabs' scrollbar lane). -->

@@ -20,17 +20,6 @@ using Windows.System;
 
 namespace MandoCode.Desktop;
 
-/// <summary>Row model for the slash-command suggestions list.</summary>
-public sealed class CommandSuggestion
-{
-    public string Command { get; init; } = "";
-    public string Description { get; init; } = "";
-
-    /// <summary>What accepting the row inserts, when that differs from <see cref="Command"/>
-    /// (e.g. the ":fire:" row inserts 🔥). Null means insert the command itself.</summary>
-    public string? InsertText { get; init; }
-}
-
 /// <summary>Row model for the snapshot summarizer dropdown — a model name plus whether it's a cloud
 /// model (which may spend tokens) or a local one (free).</summary>
 public sealed record ModelChoice(string Name, bool IsCloud)

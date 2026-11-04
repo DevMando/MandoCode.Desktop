@@ -35,7 +35,7 @@ public sealed partial class MainWindow
     // visual-tree side — building tracks, creating dividers, moving views between cells.
     private const int MaxSplitPanes = PaneLayout.MaxPanes;
 
-    private readonly List<ChatTabEntry> _splitPanes = new();
+    private List<ChatTabEntry> _splitPanes => _activeWorkspace.SplitPanes;
 
     /// <summary>
     /// One header per pane, naming the agent shown beneath it. Rebuilt with the tracks, the same way
@@ -59,8 +59,8 @@ public sealed partial class MainWindow
 
     // Divider positions as star fractions — one entry per pane COLUMN and per pane ROW. Reset to
     // equal when the layout shape changes; otherwise preserved across page visits and restarts.
-    private List<double> _colFractions = new();
-    private List<double> _rowFractions = new();
+    private List<double> _colFractions { get => _activeWorkspace.Columns; set => _activeWorkspace.Columns = value; }
+    private List<double> _rowFractions { get => _activeWorkspace.Rows; set => _activeWorkspace.Rows = value; }
 
     // Dividers are rebuilt with the tracks; held so the next rebuild can remove the old ones.
     private readonly List<Controls.ResizeGrip> _paneGrips = new();
@@ -211,10 +211,10 @@ public sealed partial class MainWindow
 
         BuildPaneTracks(rows, cols);
 
-        foreach (var tab in _tabs)
+        foreach (var tab in AllTabs)
         {
             int pane = split ? _splitPanes.FindIndex(p => ReferenceEquals(p, tab)) : -1;
-            var visible = showingChat && (split ? pane >= 0 : ReferenceEquals(tab, _selected));
+            var visible = _tabs.Contains(tab) && showingChat && (split ? pane >= 0 : ReferenceEquals(tab, _selected));
             tab.View.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
 
             // Tracks interleave a divider between panes, so pane (r,c) lives at row 2r / column 2c.
@@ -959,13 +959,13 @@ public sealed partial class MainWindow
 
         ChatTabEntry? pending = null;
 
-        foreach (var tab in _tabs)
+        foreach (var tab in AllTabs)
         {
             // An agent already on screen does not also need a tab. Its name is on the pane header
             // now, so the strip goes back to being a list of what is NOT currently visible — which
             // is also what makes it obvious that dragging one in is the way to show it.
             var paned = SplitActive && _splitPanes.Any(p => ReferenceEquals(p, tab));
-            tab.Header.Visibility = paned ? Visibility.Collapsed : Visibility.Visible;
+            tab.Header.Visibility = !_tabs.Contains(tab) || paned ? Visibility.Collapsed : Visibility.Visible;
 
             var isSelected = ReferenceEquals(tab, _selected);
             tab.Header.Background = isSelected ? background : transparent;
@@ -989,7 +989,7 @@ public sealed partial class MainWindow
         if (pending != null && !_approvalToastDismissed)
         {
             ApprovalToastText.Text = pending.View.ApprovalHeadline;
-            ApprovalToastTarget.Text = $"Click to review in \"{pending.View.Session.Title}\"";
+            ApprovalToastTarget.Text = $"Click to review in {_workspaces.First(w => w.Tabs.Contains(pending)).Name} · {pending.View.Session.Title}";
             ApprovalToast.Visibility = Visibility.Visible;
         }
         else
@@ -1003,6 +1003,7 @@ public sealed partial class MainWindow
         // Chips outline the active pane and carry agent titles, so they follow selection and renames.
         if (SplitConfigured) RefreshSplitBar();
         LayoutTabStrip();
+        RefreshWorkspaceStrip();
     }
 
     // Tabs stay a comfortable width when there's room, and only shrink once enough agents are open
