@@ -265,6 +265,7 @@ public sealed partial class ChatController
     /// <summary>The UI should open the MCP server editor modal (null = add new,
     /// otherwise the name of the server to edit).</summary>
     public event Action<string?>? McpEditorRequested;
+    public event Action? ModelBrowserRequested;
 
     public ChatController(
         IAiService ai,
@@ -1482,6 +1483,10 @@ public sealed partial class ChatController
                 await HandleConfigCommandAsync(rawArgs);
                 return;
 
+            case "ollama-pull":
+                ModelBrowserRequested?.Invoke();
+                return;
+
             case "model":
                 await HandleModelCommandAsync(rawArgs);
                 return;
@@ -1570,6 +1575,7 @@ public sealed partial class ChatController
         {
             ("/help", "Show this help message"),
             ("/setup", "Reconnect to Ollama or pick a different model (guided wizard)"),
+            ("/ollama-pull", "Browse the Ollama library and pull models to this agent’s server"),
             ("/model", "Quick switch — pick a different model (/model <tag> skips the picker)"),
             ("/config", "Adjust settings — guided wizard (/config set <key> <value> inline)"),
             ("/retry", "Retry Ollama connection"),
@@ -1738,6 +1744,14 @@ public sealed partial class ChatController
         if (string.IsNullOrWhiteSpace(modelTag)) return;
         if (string.Equals(modelTag, _config.ModelName, StringComparison.OrdinalIgnoreCase)) return;
         await ApplyModelSwitchAsync(modelTag);
+    }
+
+    public async Task<bool> UseBrowserModelAsync(string modelTag, string endpoint)
+    {
+        using var lease = TryBeginTurn();
+        if (lease == null || !string.Equals(_config.OllamaEndpoint.TrimEnd('/'), endpoint.TrimEnd('/'), StringComparison.OrdinalIgnoreCase)) return false;
+        await SelectModelAsync(modelTag);
+        return true;
     }
 
     private async Task HandleModelCommandAsync(string rawArgs)

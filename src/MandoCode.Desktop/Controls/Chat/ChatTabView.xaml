@@ -57,6 +57,7 @@
                                 </Style>
                             </Flyout.FlyoutPresenterStyle>
                             <Grid MinWidth="260">
+                                <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                 <!-- Loading state: shown immediately while models are fetched. -->
                                 <StackPanel x:Name="ModelLoadingPanel" Orientation="Horizontal" Spacing="10"
                                             Padding="16,16" VerticalAlignment="Center">
@@ -67,7 +68,7 @@
                                 <TextBlock x:Name="ModelErrorText" Visibility="Collapsed" TextWrapping="Wrap"
                                            Padding="16,14" Opacity="0.85" MaxWidth="340"/>
                                 <!-- Loaded list — cloud first, badge per row; click to switch. -->
-                                <ListView x:Name="ModelList" Visibility="Collapsed"
+                                <ListView x:Name="ModelList" Visibility="Collapsed" MaxHeight="300"
                                           SelectionMode="Single" IsItemClickEnabled="True"
                                           ItemClick="ModelList_ItemClick" Padding="4,6">
                                     <ListView.ItemContainerStyle>
@@ -95,6 +96,8 @@
                                         </DataTemplate>
                                     </ListView.ItemTemplate>
                                 </ListView>
+                                <Button Grid.Row="1" Content="Browse models…" Click="BrowseModels_Click" HorizontalAlignment="Stretch" Margin="8"/>
+
                             </Grid>
                         </Flyout>
                     </Button.Flyout>

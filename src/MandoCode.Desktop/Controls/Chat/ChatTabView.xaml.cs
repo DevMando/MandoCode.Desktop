@@ -135,6 +135,7 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         _controller.PlanProgressChanged += OnPlanProgress;
         _controller.SetupNeeded += OnSetupNeeded;
         _controller.McpEditorRequested += OnMcpEditorRequested;
+        _controller.ModelBrowserRequested += OnModelBrowserRequested;
         _controller.ClipboardCopyRequested += OnClipboardCopy;
         _controller.ExitRequested += OnExitRequested;
         _controller.SnapshotOfferChanged += OnSnapshotOfferChanged;
@@ -172,6 +173,23 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         SetupRequested?.Invoke();   // brings the chat page forward if a rail page is showing
         ToggleAgentSettings(true);
     });
+    private OllamaModelBrowserWindow? _modelBrowser;
+    private void OnModelBrowserRequested() => OnUi(OpenModelBrowser);
+    private void BrowseModels_Click(object sender, RoutedEventArgs e) { ModelFlyout.Hide(); OpenModelBrowser(); }
+    private void OpenModelBrowser()
+    {
+        if (_shutDown) return;
+        if (_modelBrowser == null)
+        {
+            try {
+                _modelBrowser = new OllamaModelBrowserWindow(_controller, () => !_shutDown, Session.Title);
+                _modelBrowser.Closed += (_, _) => _modelBrowser = null;
+            }
+            catch (ArgumentException) { OnSetupNeeded(); return; }
+        }
+        _modelBrowser.Activate();
+    }
+
     private void OnMcpEditorRequested(string? name) => OnUi(() => McpEditorRequested?.Invoke(name));
     private void OnClipboardCopy(string text) => OnUi(() => ClipboardCopyRequested?.Invoke(text));
     private void OnExitRequested() => OnUi(() => ExitRequested?.Invoke());
@@ -399,6 +417,8 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
         _controller.PlanProgressChanged -= OnPlanProgress;
         _controller.SetupNeeded -= OnSetupNeeded;
         _controller.McpEditorRequested -= OnMcpEditorRequested;
+        _controller.ModelBrowserRequested -= OnModelBrowserRequested;
+        _modelBrowser?.Close();
         _controller.ClipboardCopyRequested -= OnClipboardCopy;
         _controller.ExitRequested -= OnExitRequested;
         _controller.SnapshotOfferChanged -= OnSnapshotOfferChanged;
