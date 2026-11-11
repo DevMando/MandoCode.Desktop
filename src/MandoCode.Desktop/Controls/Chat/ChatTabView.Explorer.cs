@@ -1278,7 +1278,11 @@ public sealed partial class ChatTabView
             {
                 // Shell drop (Windows Explorer): real files/folders with paths.
                 var items = await e.DataView.GetStorageItemsAsync();
-                InsertFileTokens(items.Select(i => i.Path).Where(p => !string.IsNullOrEmpty(p)));
+                var files = items.OfType<Windows.Storage.StorageFile>().ToArray();
+                if (files.Length > 0 && files.Length == items.Count && files.All(file => MandoCode.Services.ImageFileReference.IsImage(file.Name)))
+                    await AttachImageFilesAsync(files);
+                else
+                    InsertFileTokens(items.Select(i => i.Path).Where(p => !string.IsNullOrEmpty(p)));
             }
             else if (e.DataView.Contains(StandardDataFormats.Text))
             {
@@ -1286,7 +1290,13 @@ public sealed partial class ChatTabView
                 // line is an existing path, tokenize; otherwise it's ordinary dragged text.
                 var text = await e.DataView.GetTextAsync();
                 var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                if (lines.Length > 0 && lines.All(l => File.Exists(l) || Directory.Exists(l)))
+                if (lines.Length > 0 && lines.All(path => File.Exists(path) && MandoCode.Services.ImageFileReference.IsImage(path)))
+                {
+                    var images = new List<Windows.Storage.StorageFile>();
+                    foreach (var path in lines) images.Add(await Windows.Storage.StorageFile.GetFileFromPathAsync(path));
+                    await AttachImageFilesAsync(images);
+                }
+                else if (lines.Length > 0 && lines.All(l => File.Exists(l) || Directory.Exists(l)))
                     InsertFileTokens(lines);
                 else
                     InsertAtCaret(text);

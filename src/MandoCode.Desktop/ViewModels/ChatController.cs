@@ -228,6 +228,7 @@ public sealed partial class ChatController
         if (MandoCodeConfig.IsCloudModel(modelTag)) parts.Add("cloud");
         return string.Join(" · ", parts);
     }
+    public ModelVisionSupport VisionSupport => _ai.VisionSupport;
     public string ProjectRootPath => _projectRoot.ProjectRoot;
     public MandoCodeConfig Config => _config;
 
@@ -322,7 +323,13 @@ public sealed partial class ChatController
         // sign-in walkthrough is a UI wizard, so it rides in as a callback rather than a direct call.
         _streamer = new ResponseStreamer(_ai, _transcript, _html, _busy, _tokenTracker, _config)
         {
-            On401 = OfferCloudSigninAsync
+            On401 = OfferCloudSigninAsync,
+            OnModelRejected = message =>
+            {
+                ModelError = true;
+                ModelWarning = message;
+                StateChanged?.Invoke();
+            }
         };
 
         // ---- Same wiring as App.razor OnInitialized ----
@@ -601,8 +608,10 @@ public sealed partial class ChatController
         }
     }
 
-    public async Task SubmitAsync(string input, string? browserContext = null)
+    public async Task SubmitAsync(string input, string? browserContext = null, IReadOnlyList<PromptImageAttachment>? images = null, Action? onAccepted = null)
     {
+        images = images?.ToArray() ?? Array.Empty<PromptImageAttachment>();
+        if (images.Count > 0) input = PromptImageAttachment.MessageText(input, images.Count);
         if (string.IsNullOrWhiteSpace(input)) return;
 
         // Claim, don't check: between a check and a set, a question from another agent could take
@@ -613,6 +622,13 @@ public sealed partial class ChatController
         _requestBrowserContext = browserContext;
         try
         {
+            if (images.Count > 0)
+            {
+                var error = PromptImageAttachment.SubmissionError(input, _ai.VisionSupport, IsConnected, ModelError, images.Count);
+                if (error != null) { _transcript.Append(_html.Warn(error)); return; }
+            }
+            else onAccepted?.Invoke();
+
             _transcript.Append(_html.UserEcho(input));
 
             // Shell escape: !<cmd>. The card renders only in the transcript, which the model
@@ -641,11 +657,9 @@ public sealed partial class ChatController
 
             if (ModelError)
             {
-                _transcript.Append(_html.Warn("No model loaded. Use /model to select one, or pull one with: ollama pull <model-name>"));
+                _transcript.Append(_html.Warn(ModelWarning ?? "No model loaded. Use /model to select one, or pull one with: ollama pull <model-name>"));
                 return;
             }
-
-            ConversationLogger?.Invoke("u", input);
 
             var processedInput = ProcessFileReferences(input);
 
@@ -663,6 +677,24 @@ public sealed partial class ChatController
                 _pendingReactions.Select(r => (r.Emoji, r.Snippet)).ToList(),
                 _pendingWorkspaceNotes,
                 inbox);
+
+            if (images.Count > 0)
+            {
+                // The user-turn lease excludes peer requests and model switches. This fresh
+                // queue accepts at most four caption/data pairs before any tool can run.
+                foreach (var image in images)
+                {
+                    if (!_ai.TryAttachImage(image.Bytes, image.MediaType, $"User attached image: {image.Name}", out var error))
+                    {
+                        _transcript.Append(_html.Warn(error));
+                        return;
+                    }
+                }
+                onAccepted?.Invoke();
+                foreach (var image in images) _transcript.Append(_html.Dim($"Attached image: {image.Name}"));
+            }
+            ConversationLogger?.Invoke("u", input + string.Concat(images.Select(image => $"\n[Attached image: {image.Name}]")));
+
 
             // Ride-alongs are one-shot — clear what we just folded in so it isn't sent twice.
             if (_armedContexts.Count > 0)

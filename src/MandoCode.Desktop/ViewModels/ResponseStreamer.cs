@@ -66,6 +66,8 @@ public sealed class ResponseStreamer
     /// walkthrough here. Null in tests.</summary>
     public Func<Task>? On401 { get; set; }
 
+    public Action<string>? OnModelRejected { get; set; }
+
     /// <summary>Streams a request to completion and writes it to the transcript. Returns the joined
     /// response text (empty when the model returned nothing, was cancelled, or errored) so the caller
     /// can remember the last response. Never throws — cancellation and errors surface as transcript
@@ -99,6 +101,11 @@ public sealed class ResponseStreamer
                 do
                 {
                     var segment = enumerator.Current.Trim();
+                    if (OllamaChatCompatibility.IsDecisionModelResponse(segment))
+                    {
+                        ReportDecisionModel();
+                        return "";
+                    }
                     var (unshown, endLive) = SettleLiveTurn(segment);
                     if (segment.Length > 0)
                     {
@@ -167,6 +174,11 @@ public sealed class ResponseStreamer
         catch (Exception ex)
         {
             DiscardLiveTurn();
+            if (OllamaChatCompatibility.IsDecisionModelError(ex))
+            {
+                ReportDecisionModel();
+                return "";
+            }
             _transcript.Append(_html.Error(OllamaModelAvailability.IsUnavailable(ex)
                 ? OllamaModelAvailability.Message(_config.GetEffectiveModelName())
                 : $"Error: {ex.Message}"));
@@ -177,6 +189,14 @@ public sealed class ResponseStreamer
             _ai.OnResponseTextDelta -= OnTextDelta;
             DiscardLiveTurn();
         }
+    }
+
+    private void ReportDecisionModel()
+    {
+        DiscardLiveTurn();
+        var message = OllamaChatCompatibility.Message(_config.GetEffectiveModelName());
+        _transcript.Append(_html.Error(message));
+        OnModelRejected?.Invoke(message);
     }
 
     /// <summary>A tool call is starting: the text streamed so far becomes its own provisional card,
