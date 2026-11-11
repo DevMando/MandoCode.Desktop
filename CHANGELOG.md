@@ -23,6 +23,7 @@ submodule.
 - **Plan mode starts only through /plan.** Ordinary requests run directly, including multi-step tasks and prose outlines. Desktop no longer automatically proposes structured plans based on task complexity or model tool calls. Existing plan review, editing, execution, and recovery remain available. Settings now explain the explicit command instead of offering automatic planning.
 
 ### Fixed
+- **Explain decision-model chat rejections.** When Ollama reports that a model requires its decision endpoint, show guidance to select a compatible chat model instead of suggesting a restart or download. Mark the selected model unavailable for chat until it is changed or revalidated, and keep provider errors out of successful assistant replies.
 - **Stop peer turns from their receiving tab.** Link incoming peer turns to the target agent's normal cancellation action while keeping each background job's cancellation separate. Inbox messages are consumed on peer turns as well as user turns.
 - **Resolve Desktop snapshot types explicitly.** Avoid ambiguous references when both the updated engine and Desktop expose snapshot helpers.
 - **Clear guidance when Ollama retires a model.** HTTP 410 Gone errors, including wrapped provider errors, identify the unavailable model and recommend choosing another with `/model` instead of restarting Ollama or pulling a retired cloud model. The shared engine does not retry these failures.

@@ -323,7 +323,13 @@ public sealed partial class ChatController
         // sign-in walkthrough is a UI wizard, so it rides in as a callback rather than a direct call.
         _streamer = new ResponseStreamer(_ai, _transcript, _html, _busy, _tokenTracker, _config)
         {
-            On401 = OfferCloudSigninAsync
+            On401 = OfferCloudSigninAsync,
+            OnModelRejected = message =>
+            {
+                ModelError = true;
+                ModelWarning = message;
+                StateChanged?.Invoke();
+            }
         };
 
         // ---- Same wiring as App.razor OnInitialized ----
@@ -651,7 +657,7 @@ public sealed partial class ChatController
 
             if (ModelError)
             {
-                _transcript.Append(_html.Warn("No model loaded. Use /model to select one, or pull one with: ollama pull <model-name>"));
+                _transcript.Append(_html.Warn(ModelWarning ?? "No model loaded. Use /model to select one, or pull one with: ollama pull <model-name>"));
                 return;
             }
 

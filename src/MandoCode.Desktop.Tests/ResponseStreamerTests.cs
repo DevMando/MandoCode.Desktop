@@ -339,4 +339,43 @@ public sealed class ResponseStreamerTests
         Assert.Contains(blocks, b => b.StartsWith("ERR:") && b.Contains("no longer available on Ollama") && b.Contains("/model"));
         Assert.DoesNotContain(blocks, b => b.Contains("ollama serve") || b.Contains("ollama pull"));
     }
+    [Fact]
+    public async Task DecisionModelException_IsCaughtWithModelSelectionGuidance()
+    {
+        var error = new InvalidOperationException("Provider failed",
+            new Exception("clef is a decision model and only supports /v1/systemone (ref: test)"));
+        var (streamer, blocks) = Make(new FakeAiService(Array.Empty<string>(), error));
+        string? rejected = null;
+        streamer.OnModelRejected = message => rejected = message;
+        Assert.Equal("", await streamer.StreamAsync("look", CancellationToken.None));
+        Assert.NotNull(rejected);
+        Assert.Contains(blocks, b => b.StartsWith("ERR:") && b.Contains("decision model") && b.Contains("/model"));
+        Assert.DoesNotContain(blocks, b => b.Contains("ollama serve") || b.Contains("ollama pull"));
+    }
+
+    [Fact]
+    public async Task EngineFormattedDecisionError_IsNotAnAssistantReply()
+    {
+        var (streamer, blocks) = Make(new FakeAiService(new[] {
+            "Error communicating with AI: clef is a decision model and only supports /v1/systemone\nRun: ollama pull clef" }));
+        var logged = new List<string>();
+        streamer.ConversationLogger = (_, text) => logged.Add(text);
+        var rejected = false;
+        streamer.OnModelRejected = _ => rejected = true;
+        Assert.Equal("", await streamer.StreamAsync("look", CancellationToken.None));
+        Assert.True(rejected);
+        Assert.Empty(logged);
+        Assert.DoesNotContain(blocks, b => b.StartsWith("CARD:"));
+        Assert.Contains(blocks, b => b.StartsWith("ERR:") && b.Contains("/model"));
+    }
+
+    [Fact]
+    public async Task DiscussionOfDecisionModels_RemainsANormalReply()
+    {
+        const string reply = "Clef is a decision model and only supports /v1/systemone.";
+        var (streamer, blocks) = Make(new FakeAiService(new[] { reply }));
+        Assert.Equal(reply, await streamer.StreamAsync("explain", CancellationToken.None));
+        Assert.Contains("CARD:" + reply, blocks);
+    }
+
 }

@@ -79,7 +79,7 @@ public sealed partial class ChatTabView
             ImageNotice("Up to four images per message. Remove an image before attaching another.");
             return false;
         }
-        if (_controller.VisionSupport != ModelVisionSupport.Supported)
+        if (_controller.ModelError || _controller.VisionSupport != ModelVisionSupport.Supported)
         {
             ImageNotice("Choose a confirmed vision model before attaching an image.");
             return false;

@@ -113,6 +113,7 @@
     <!-- The streamed-response loop and the small WinUI-free collaborators it needs, so it can be
          driven by a fake IAiService. TranscriptWriter/BusyStateService are pure event emitters;
          ITranscriptHtml keeps the WinUI-coupled TranscriptHtmlBuilder out of the test host. -->
+    <Compile Include="..\MandoCode.Desktop\Services\Ai\OllamaChatCompatibility.cs" Link="src\OllamaChatCompatibility.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\Ai\IAiService.cs" Link="src\IAiService.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\Rendering\ITranscriptHtml.cs" Link="src\ITranscriptHtml.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\Rendering\PlanCardHtml.cs" Link="src\PlanCardHtml.cs" />
