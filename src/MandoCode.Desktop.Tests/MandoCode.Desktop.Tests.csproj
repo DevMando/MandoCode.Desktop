@@ -31,6 +31,7 @@
        Windows App SDK into the test host). If these files ever grow UI dependencies, that's
        a design regression this project exists to catch. -->
   <ItemGroup>
+    <Compile Include="..\MandoCode.Desktop\Services\Input\PromptImageAttachment.cs" Link="src\PromptImageAttachment.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\Input\PromptMentionPicker.cs" Link="src\PromptMentionPicker.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\Input\CommandSuggestion.cs" Link="src\CommandSuggestion.cs" />
     <Compile Include="..\MandoCode.Desktop\Services\Input\PromptFileLookup.cs" Link="src\PromptFileLookup.cs" />

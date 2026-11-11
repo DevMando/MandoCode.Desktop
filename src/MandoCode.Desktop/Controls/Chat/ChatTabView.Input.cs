@@ -30,28 +30,58 @@ public sealed partial class ChatTabView
         SubmitCurrentInput();
     }
 
-    private void SubmitCurrentInput()
+    private async void SubmitCurrentInput()
     {
+        if (_shutDown || _submittingInput || _imageLoading || _readingImageFiles || _controller.IsProcessing) return;
         var text = InputBox.Text;
-        if (string.IsNullOrWhiteSpace(text) || _controller.IsProcessing) return;
-
-        EmitWorkspaceDelta();   // queue outside-the-conversation changes before this send
-        InputBox.Text = "";
-        HideSuggestions();
-        UpdateHeader();
-
-        var browserContext = CaptureBrowserRequestContext();
-        _ = Task.Run(async () =>
+        var images = _draftImages.ToArray();
+        if (string.IsNullOrWhiteSpace(text) && images.Length == 0) return;
+        if (images.Length > 0)
         {
-            try
+            var error = PromptImageAttachment.SubmissionError(text, _controller.VisionSupport, _controller.IsConnected, _controller.ModelError, images.Length);
+            if (error != null) { ImageNotice(error); return; }
+        }
+
+        EmitWorkspaceDelta();
+        var browserContext = CaptureBrowserRequestContext();
+        _submittingInput = true;
+        InputBox.IsReadOnly = true;
+        RefreshImageAttachment();
+        var accepted = false;
+        try
+        {
+            await Task.Run(() => _shutDown ? Task.CompletedTask : _controller.SubmitAsync(text, browserContext, images, () =>
             {
-                await _controller.SubmitAsync(text, browserContext);
-            }
-            catch (Exception ex)
+                accepted = true;
+                OnUi(() =>
+                {
+                    if (_shutDown) return;
+                    InputBox.Text = "";
+                    foreach (var image in images) { _draftImages.Remove(image); _imagePreviews.Remove(image); }
+                    InputBox.IsReadOnly = false;
+                    _submittingInput = false;
+                    HideSuggestions();
+                    ImageNotice("");
+                    RefreshImageAttachment();
+                    UpdateHeader();
+                });
+            }));
+            if (!accepted && !_shutDown)
+                ImageNotice("The message was not sent. Your draft is still here; wait until the agent is ready and try again.");
+        }
+        catch (Exception ex)
+        {
+            if (!_shutDown) ImageNotice($"Could not send: {ex.Message}");
+        }
+        finally
+        {
+            if (!_shutDown)
             {
-                _transcript.Append(_html.Error($"Unexpected error: {ex.Message}"));
+                _submittingInput = false;
+                InputBox.IsReadOnly = false;
+                RefreshImageAttachment();
             }
-        });
+        }
     }
 
     // PreviewKeyDown, NOT KeyDown: the TextBox's own class handler runs before instance

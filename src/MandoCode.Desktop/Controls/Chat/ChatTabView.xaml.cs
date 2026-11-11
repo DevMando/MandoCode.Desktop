@@ -370,6 +370,10 @@ public sealed partial class ChatTabView : UserControl, IApprovalUi
     {
         if (_shutDown) return;
         _shutDown = true;
+        _imageReadVersion++;
+        _draftImages.Clear();
+        _imagePreviews.Clear();
+        PromptImageCards.Children.Clear();
         _webViewReady = false;
         StopExplorerWatcher();
         _fileProvider.SuggestionsChanged -= OnFileSuggestionsChanged;
