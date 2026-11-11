@@ -8,6 +8,12 @@ submodule.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-11
+
+**Keep your projects organized and bring more into each conversation.** Group agents into workspaces, attach images to vision-enabled prompts, and browse and pull Ollama models directly in Desktop.
+
+**Included engine:** [MandoCode CLI v0.16.2](https://github.com/DevMando/MandoCode/releases/tag/v0.16.2).
+
 ### Added
 - **Browse and pull Ollama models in Desktop.** Open the native model browser with `/ollama-pull` or Browse models in the model dropdown. Search the shared CLI catalog, sort models, filter cloud entries, inspect tags and sizes, and see which exact variants are already pulled on your agent’s server. Selecting a family chooses its default tag automatically; cloud-only browsing shows only cloud variants and counts only their installed tags. Sorting or changing the cloud filter clears stale details. Pull with streaming progress and cancellation, enter a tag manually when the catalog is unavailable, and explicitly choose Use in this agent after availability is confirmed. The separate window follows the app theme and uses its MandoCode icon.
 - **Attach images to Desktop prompts.** Paste a screenshot or copied image file, use Attach image, or drop image files into the chat. Select multiple files, preview the batch, and remove images individually before sending. Supports up to four PNG, JPEG, GIF, or WebP images per message, each limited to 4 MiB and 16 million pixels. Check vision support again at send time, retain refused drafts, and queue image bytes only after this agent claims the user turn. Image-only messages receive an explicit description prompt.
