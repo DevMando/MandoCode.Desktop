@@ -8,6 +8,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="..\MandoCode.Desktop\Services\Models\*.cs" Link="src\Models\%(Filename).cs" />
+    <Compile Include="..\MandoCode.Desktop\ViewModels\Models\*.cs" Link="src\Models\%(Filename).cs" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />

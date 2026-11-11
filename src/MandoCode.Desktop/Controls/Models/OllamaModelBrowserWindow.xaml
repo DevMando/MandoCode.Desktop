@@ -1,0 +1,91 @@
+<Window x:Class="MandoCode.Desktop.OllamaModelBrowserWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="using:MandoCode.Desktop" Title="Ollama Models">
+    <ScrollViewer x:Name="Viewport" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" SizeChanged="Viewport_SizeChanged">
+    <Grid x:Name="Root" MinWidth="720" MinHeight="700" Padding="24" RowSpacing="12" Background="{StaticResource MandoBackgroundBrush}">
+        <Grid.Resources><Style TargetType="TextBlock"><Setter Property="Foreground" Value="{StaticResource MandoTextBrush}"/></Style></Grid.Resources>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <StackPanel Spacing="6">
+            <TextBlock Text="Ollama Models" FontSize="26" FontWeight="SemiBold" />
+            <TextBlock x:Name="Server" TextWrapping="Wrap" />
+            <TextBlock x:Name="Errors" TextWrapping="Wrap" MaxHeight="100" />
+        </StackPanel>
+        <Grid Grid.Row="1" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBox x:Name="Search" PlaceholderText="Search models" TextChanged="FilterChanged" AutomationProperties.Name="Search models" />
+            <ComboBox x:Name="Sort" Grid.Column="1" SelectedIndex="0" SelectionChanged="SortChanged" AutomationProperties.Name="Sort models">
+                <ComboBoxItem Content="Newest" />
+                <ComboBoxItem Content="Popular" />
+                <ComboBoxItem Content="Name" />
+            </ComboBox>
+            <CheckBox x:Name="Cloud" Grid.Column="2" Content="Cloud only" Checked="CloudChanged" Unchecked="CloudChanged" />
+            <Button Grid.Column="3" Content="Refresh" Click="RefreshClicked" />
+        </Grid>
+        <Grid Grid.Row="2" ColumnSpacing="20">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <ListView x:Name="Models" SelectionChanged="ModelChanged" AutomationProperties.Name="Models">
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="local:BrowserModelRow">
+                        <StackPanel Spacing="3" Padding="4,8">
+                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding Capabilities}" Opacity="0.7" />
+                            <TextBlock Text="{Binding Status}" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+            <Grid Grid.Column="1" RowSpacing="12">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TextBlock x:Name="Description" TextWrapping="Wrap" />
+                <TextBlock x:Name="TagStatus" Grid.Row="1" TextWrapping="Wrap" />
+                <ListView x:Name="Tags" Grid.Row="2" SelectionChanged="TagChanged" AutomationProperties.Name="Model tags">
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="local:BrowserTagRow">
+                            <StackPanel Spacing="3" Padding="4,8">
+                                <TextBlock Text="{Binding Name}" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding Size}" Opacity="0.7" />
+                                <TextBlock Text="{Binding Status}" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </Grid>
+        </Grid>
+        <StackPanel Grid.Row="3" Spacing="6">
+            <TextBlock Text="Selected tag or exact model:tag" />
+            <TextBox x:Name="Target" TextChanged="TargetChanged" PlaceholderText="e.g. qwen3:8b" AutomationProperties.Name="Model to pull" />
+            <TextBlock Text="Cloud models run remotely. Pulled badges show server availability, not whether a newer version exists." TextWrapping="Wrap" Opacity="0.7" />
+        </StackPanel>
+        <StackPanel Grid.Row="4" Spacing="6">
+            <ProgressBar x:Name="Progress" Visibility="Collapsed" />
+            <TextBlock x:Name="Status" TextWrapping="Wrap" />
+            <TextBlock x:Name="UseStatus" TextWrapping="Wrap" />
+        </StackPanel>
+        <StackPanel Grid.Row="5" Spacing="8">
+            <StackPanel Orientation="Horizontal" Spacing="12">
+                <Button x:Name="Pull" Content="Pull" Click="PullClicked" />
+                <Button x:Name="Use" Content="Use in this agent" Click="UseClicked" />
+                <Button x:Name="Cancel" Content="Cancel pull" Click="CancelClicked" IsEnabled="False" />
+            </StackPanel>
+            <TextBlock Text="Closing this window cancels its requests. Downloads do not switch your agent automatically." Opacity="0.7" TextWrapping="Wrap" />
+        </StackPanel>
+    </Grid>
+</ScrollViewer>
+</Window>
