@@ -8,6 +8,7 @@
   <img alt=".NET 10" src="https://img.shields.io/badge/.NET-10-512BD4">
   <a href="https://ollama.com"><img alt="Platform: Ollama" src="https://img.shields.io/badge/platform-Ollama-000000"></a>
   <a href="https://github.com/DevMando/MandoCode"><img alt="Engine: MandoCode CLI" src="https://img.shields.io/badge/engine-MandoCode%20CLI-informational"></a>
+  <a href="https://buymeacoffee.com/devmando"><img src="https://img.shields.io/badge/Buy_Me_a_Coffee-Support-FFDD00?logo=buymeacoffee&logoColor=black" alt="Support MandoCode on Buy Me a Coffee"></a>
 </p>
 
 ---
@@ -150,10 +151,3 @@ see **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 MIT — Armando Fernandez - DevMando.
 
----
-
-## Support MandoCode
-
-If MandoCode helps your workflow, you can support its development by buying me a coffee.
-
-<a href="https://buymeacoffee.com/devmando"><img src="https://img.shields.io/badge/Buy_Me_a_Coffee-Support-FFDD00?logo=buymeacoffee&logoColor=black" alt="Support MandoCode on Buy Me a Coffee"></a>
