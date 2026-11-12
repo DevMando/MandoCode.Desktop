@@ -149,3 +149,11 @@ see **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 ## License
 
 MIT — Armando Fernandez - DevMando.
+
+---
+
+## Support MandoCode
+
+If MandoCode helps your workflow, you can support its development by buying me a coffee.
+
+<a href="https://buymeacoffee.com/devmando"><img src="https://img.shields.io/badge/Buy_Me_a_Coffee-Support-FFDD00?logo=buymeacoffee&logoColor=black" alt="Support MandoCode on Buy Me a Coffee"></a>
