@@ -150,4 +150,3 @@ see **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 ## License
 
 MIT — Armando Fernandez - DevMando.
-
