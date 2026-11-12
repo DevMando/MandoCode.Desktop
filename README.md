@@ -3,10 +3,12 @@
 
 <p align="center">
   <a href="https://github.com/DevMando/MandoCode.Desktop/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/DevMando/MandoCode.Desktop?label=release"></a>
+  <a href="#install-no-build-needed"><img alt="Available on WinGet" src="https://img.shields.io/badge/WinGet-available-0078D4"></a>
   <a href="#license"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
   <img alt=".NET 10" src="https://img.shields.io/badge/.NET-10-512BD4">
   <a href="https://ollama.com"><img alt="Platform: Ollama" src="https://img.shields.io/badge/platform-Ollama-000000"></a>
   <a href="https://github.com/DevMando/MandoCode"><img alt="Engine: MandoCode CLI" src="https://img.shields.io/badge/engine-MandoCode%20CLI-informational"></a>
+  <a href="https://buymeacoffee.com/devmando"><img src="https://img.shields.io/badge/Buy_Me_a_Coffee-Support-FFDD00?logo=buymeacoffee&logoColor=black" alt="Support MandoCode on Buy Me a Coffee"></a>
 </p>
 
 ---
@@ -98,6 +100,14 @@ Two problems, one app:
   pick a starter model, right in the chat. No config file to hand-edit before you can say hello.
 
 ## Install (no build needed)
+
+Install with WinGet:
+
+```powershell
+winget install --id DevMando.MandoCode.Desktop --exact
+```
+
+Or download the portable ZIP:
 
 Download the latest `MandoCode.Desktop-*-win-x64.zip` from
 [Releases](https://github.com/DevMando/MandoCode.Desktop/releases), extract it anywhere, and run
